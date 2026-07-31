@@ -24,13 +24,10 @@ publish/
 **/[Pp]ackages/*
 !**/[Pp]ackages/build/
 
-## Secrets / local config
-appsettings.json
-appsettings.Development.json
+## Local-only overrides
 appsettings.*.local.json
 *.pfx
 *.key
-secrets.json
 
 ## OS
 Thumbs.db
