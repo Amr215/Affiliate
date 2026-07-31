@@ -40,19 +40,19 @@
                     <input asp-for="Filter.Asin" name="Asin" class="form-control ltr" />
                 </div>
                 <div class="col-sm-6 col-lg-3">
-                    <label asp-for="Filter.ScraperSearchId" class="form-label">عملية البحث</label>
-                    <select name="ScraperSearchId" class="form-select">
+                    <label asp-for="Filter.ScraperUrlId" class="form-label">رابط السكرابر</label>
+                    <select name="ScraperUrlId" class="form-select">
                         <option value="">الكل</option>
                         @foreach (var s in Model.Searches)
                         {
-                            if (f.ScraperSearchId == s.Id)
-                            {
-                                <option value="@s.Id" selected>@s.DisplayLabel</option>
-                            }
-                            else
-                            {
-                                <option value="@s.Id">@s.DisplayLabel</option>
-                            }
+                            if (f.ScraperUrlId == s.Id)
+                                {
+                                    <option value="@s.Id" selected>@s.DisplayLabel</option>
+                                }
+                                else
+                                {
+                                    <option value="@s.Id">@s.DisplayLabel</option>
+                                }
                         }
                     </select>
                 </div>
@@ -292,10 +292,10 @@
                             }
                         </td>
                         <td class="small arabic-text text-nowrap">
-                            @if (p.ScraperSearch != null)
+                            @if (p.ScraperUrl != null)
                             {
-                                <a asp-controller="ScraperSearches" asp-action="Details" asp-route-id="@p.ScraperSearchId">
-                                    @p.ScraperSearch.Name
+                                <a asp-controller="ScraperUrls" asp-action="Details" asp-route-id="@p.ScraperUrlId">
+                                    @p.ScraperUrl.Name
                                 </a>
                             }
                             else
@@ -599,7 +599,7 @@
             ["SortDir"] = filter.SortDir,
             ["Search"] = filter.Search,
             ["Asin"] = filter.Asin,
-            ["ScraperSearchId"] = filter.ScraperSearchId?.ToString(),
+            ["ScraperUrlId"] = filter.ScraperUrlId?.ToString(),
             ["Manufacturer"] = filter.Manufacturer,
             ["Currency"] = filter.Currency,
             ["Status"] = filter.Status,

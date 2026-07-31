@@ -1,0 +1,81 @@
+@model ScraperUrl
+@{
+    ViewData["Title"] = Model.Name;
+}
+
+<div class="page-toolbar">
+    <div>
+        <h1 class="h2 arabic-text mb-2">@Model.Name</h1>
+        @if (Model.IsEnabled)
+        {
+            <span class="badge text-bg-success">مفعّل</span>
+        }
+        else
+        {
+            <span class="badge text-bg-secondary">معطّل</span>
+        }
+    </div>
+    <div class="btn-group-actions d-flex flex-wrap gap-2">
+        <form asp-action="RunNow" asp-route-id="@Model.Id" method="post" class="d-inline">
+            @Html.AntiForgeryToken()
+            <button type="submit" class="btn btn-success"><i class="bi bi-play-fill"></i> تشغيل الآن</button>
+        </form>
+        <a asp-controller="OxylabsLogs" asp-action="Index" asp-route-ScraperUrlId="@Model.Id" class="btn btn-outline-primary">
+            <i class="bi bi-journal-text"></i> سجلات الطلبات
+        </a>
+        <a asp-action="Edit" asp-route-id="@Model.Id" class="btn btn-outline-secondary">تعديل</a>
+        <a asp-action="Index" class="btn btn-outline-secondary">العودة للقائمة</a>
+    </div>
+</div>
+
+@if (TempData["StatusMessage"] is string message)
+{
+    <div class="alert alert-info">@message</div>
+}
+
+<div class="card">
+    <div class="card-body">
+        <dl class="row detail-grid mb-0">
+            <dt class="col-sm-3">الرابط</dt>
+            <dd class="col-sm-9">
+                <a class="ltr text-break" href="@Model.Url" target="_blank" rel="noopener">@Model.Url</a>
+            </dd>
+
+            <dt class="col-sm-3">النطاق</dt>
+            <dd class="col-sm-9 ltr">@Model.Domain</dd>
+
+            <dt class="col-sm-3">صفحة البداية</dt>
+            <dd class="col-sm-9">@Model.StartPage</dd>
+
+            <dt class="col-sm-3">الفاصل</dt>
+            <dd class="col-sm-9 num">@Model.IntervalSeconds ثانية</dd>
+
+            <dt class="col-sm-3">آخر تشغيل (UTC)</dt>
+            <dd class="col-sm-9">
+                @if (Model.LastRunAt.HasValue)
+                {
+                    <span class="num">@Model.LastRunAt.Value.ToString("yyyy-MM-dd HH:mm:ss")</span>
+                }
+                else
+                {
+                    <span class="text-muted">لم يُشغَّل بعد</span>
+                }
+            </dd>
+
+            <dt class="col-sm-3">آخر خطأ</dt>
+            <dd class="col-sm-9">
+                @if (string.IsNullOrEmpty(Model.LastRunError))
+                {
+                    <span class="text-muted">—</span>
+                }
+                else
+                {
+                    <span class="text-danger">@Model.LastRunError</span>
+                }
+            </dd>
+
+            <dt class="col-sm-3">أُنشئ في</dt>
+            <dd class="col-sm-9 num">@Model.CreatedAt.ToString("yyyy-MM-dd HH:mm")</dd>
+        </dl>
+    </div>
+</div>

@@ -13,26 +13,19 @@ namespace Affiliate.Data
 
         public DbSet<Product> Products { get; set; }
         public DbSet<PriceHistory> PriceHistories { get; set; }
-        public DbSet<ScraperSearch> ScraperSearches { get; set; }
+        public DbSet<ScraperUrl> ScraperUrls { get; set; }
         public DbSet<OxylabsRequestLog> OxylabsRequestLogs { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
 
-            modelBuilder.Entity<ScraperSearch>(entity =>
+            modelBuilder.Entity<ScraperUrl>(entity =>
             {
+                entity.ToTable("ScraperUrls");
                 entity.Property(s => s.Name).HasMaxLength(200);
-                entity.Property(s => s.Source).HasMaxLength(64);
+                entity.Property(s => s.Url).HasMaxLength(4000);
                 entity.Property(s => s.Domain).HasMaxLength(16);
-                entity.Property(s => s.Query).HasMaxLength(500);
-                entity.Property(s => s.Locale).HasMaxLength(32);
-                entity.Property(s => s.SortBy).HasMaxLength(128);
-                entity.Property(s => s.GeoLocation).HasMaxLength(128);
-                entity.Property(s => s.CategoryId).HasMaxLength(64);
-                entity.Property(s => s.MerchantId).HasMaxLength(64);
-                entity.Property(s => s.Currency).HasMaxLength(16);
-                entity.Property(s => s.Refinements).HasMaxLength(500);
             });
 
             modelBuilder.Entity<Product>(entity =>
@@ -53,10 +46,10 @@ namespace Affiliate.Data
                 // Speeds ASIN recheck: filter available products, order by oldest LastCheckedAt.
                 entity.HasIndex(p => new { p.IsAvailable, p.LastCheckedAt });
 
-                entity.HasIndex(p => p.ScraperSearchId);
-                entity.HasOne(p => p.ScraperSearch)
+                entity.HasIndex(p => p.ScraperUrlId);
+                entity.HasOne(p => p.ScraperUrl)
                     .WithMany(s => s.Products)
-                    .HasForeignKey(p => p.ScraperSearchId)
+                    .HasForeignKey(p => p.ScraperUrlId)
                     .IsRequired(false)
                     .OnDelete(DeleteBehavior.SetNull);
             });
@@ -64,13 +57,14 @@ namespace Affiliate.Data
             modelBuilder.Entity<OxylabsRequestLog>(entity =>
             {
                 entity.Property(l => l.StatusPhrase).HasMaxLength(64);
-                entity.HasIndex(l => l.ScraperSearchId);
+                entity.HasIndex(l => l.ScraperUrlId);
                 entity.HasIndex(l => l.RequestedAt);
-                entity.HasIndex(l => new { l.ScraperSearchId, l.RequestedAt });
+                entity.HasIndex(l => l.Port);
+                entity.HasIndex(l => new { l.ScraperUrlId, l.RequestedAt });
 
-                entity.HasOne(l => l.ScraperSearch)
+                entity.HasOne(l => l.ScraperUrl)
                     .WithMany(s => s.OxylabsRequestLogs)
-                    .HasForeignKey(l => l.ScraperSearchId)
+                    .HasForeignKey(l => l.ScraperUrlId)
                     .IsRequired(false)
                     .OnDelete(DeleteBehavior.Cascade);
             });

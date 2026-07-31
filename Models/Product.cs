@@ -57,11 +57,11 @@ namespace Affiliate.Models
         public string? ShippingInformation { get; set; }
 
         /// <summary>
-        /// Search that last discovered/updated this product via Oxylabs search.
+        /// URL scrape that last discovered/updated this product.
         /// Null for products only seen through ASIN recheck (or before this field existed).
         /// </summary>
-        public int? ScraperSearchId { get; set; }
-        public ScraperSearch? ScraperSearch { get; set; }
+        public int? ScraperUrlId { get; set; }
+        public ScraperUrl? ScraperUrl { get; set; }
 
         public ICollection<PriceHistory> PriceHistory { get; set; } = new List<PriceHistory>();
     }

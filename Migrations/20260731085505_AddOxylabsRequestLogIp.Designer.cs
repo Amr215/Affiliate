@@ -4,6 +4,7 @@ using Affiliate.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Affiliate.Migrations
 {
     [DbContext(typeof(AffiliateDbContext))]
-    partial class AffiliateDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260731085505_AddOxylabsRequestLogIp")]
+    partial class AddOxylabsRequestLogIp
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -30,10 +33,11 @@ namespace Affiliate.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
 
-                    b.Property<int>("Page")
-                        .HasColumnType("int");
+                    b.Property<string>("Ip")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
 
-                    b.Property<int?>("Port")
+                    b.Property<int>("Page")
                         .HasColumnType("int");
 
                     b.Property<string>("RequestBody")
@@ -57,7 +61,7 @@ namespace Affiliate.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("Port");
+                    b.HasIndex("Ip");
 
                     b.HasIndex("RequestedAt");
 

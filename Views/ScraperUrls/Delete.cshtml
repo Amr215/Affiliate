@@ -1,0 +1,24 @@
+@model ScraperUrl
+@{
+    ViewData["Title"] = "حذف رابط";
+}
+
+<div class="page-toolbar">
+    <h1 class="h2">حذف رابط السكرابر</h1>
+</div>
+
+<div class="alert alert-warning">
+    هل أنت متأكد من حذف <strong class="arabic-text">@Model.Name</strong>؟
+</div>
+
+<dl class="row">
+    <dt class="col-sm-3">الرابط</dt>
+    <dd class="col-sm-9 ltr text-break">@Model.Url</dd>
+</dl>
+
+<form asp-action="Delete" method="post">
+    @Html.AntiForgeryToken()
+    <input type="hidden" asp-for="Id" />
+    <button type="submit" class="btn btn-danger">حذف</button>
+    <a asp-action="Details" asp-route-id="@Model.Id" class="btn btn-outline-secondary">إلغاء</a>
+</form>

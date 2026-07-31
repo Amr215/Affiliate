@@ -18,12 +18,12 @@
     <div class="card-body">
         <div class="row g-3">
             <div class="col-sm-6 col-lg-3">
-                <label class="form-label">عملية البحث</label>
-                <select name="ScraperSearchId" class="form-select">
+                <label class="form-label">رابط السكرابر</label>
+                <select name="ScraperUrlId" class="form-select">
                     <option value="">الكل</option>
                     @foreach (var s in Model.Searches)
                     {
-                        if (f.ScraperSearchId == s.Id)
+                        if (f.ScraperUrlId == s.Id)
                         {
                             <option value="@s.Id" selected>@s.DisplayLabel</option>
                         }
@@ -91,7 +91,8 @@
                 <tr>
                     <th>#</th>
                     <th>وقت الطلب (UTC)</th>
-                    <th>عملية البحث</th>
+                    <th>رابط السكرابر</th>
+                    <th>البورت</th>
                     <th>الصفحة</th>
                     <th>الحالة</th>
                     <th>استجابة محفوظة</th>
@@ -105,18 +106,19 @@
                     <td class="num">@log.Id</td>
                     <td class="text-nowrap num">@log.RequestedAt.ToString("yyyy-MM-dd HH:mm:ss")</td>
                     <td>
-                        @if (log.ScraperSearchId.HasValue)
+                        @if (log.ScraperUrlId.HasValue)
                         {
-                            <a asp-controller="ScraperSearches" asp-action="Details" asp-route-id="@log.ScraperSearchId" class="arabic-text">
+                            <a asp-controller="ScraperUrls" asp-action="Details" asp-route-id="@log.ScraperUrlId" class="arabic-text">
                                 @log.SearchName
                             </a>
-                            <div class="small text-muted ltr">ID @log.ScraperSearchId</div>
+                            <div class="small text-muted ltr">ID @log.ScraperUrlId</div>
                         }
                         else
                         {
                             <span class="arabic-text">@log.SearchName</span>
                         }
                     </td>
+                    <td class="ltr num">@(log.Port?.ToString() ?? "—")</td>
                     <td class="num">@log.Page</td>
                     <td class="num">
                         @if (log.StatusCode == 200)
@@ -188,7 +190,7 @@
         {
             ["Page"] = page.ToString(),
             ["PageSize"] = filter.PageSize.ToString(),
-            ["ScraperSearchId"] = filter.ScraperSearchId?.ToString(),
+            ["ScraperUrlId"] = filter.ScraperUrlId?.ToString(),
             ["StatusCode"] = filter.StatusCode?.ToString(),
             ["ErrorsOnly"] = filter.ErrorsOnly == true ? "true" : null,
             ["From"] = filter.From?.ToString("yyyy-MM-dd"),

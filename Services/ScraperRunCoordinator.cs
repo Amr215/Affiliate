@@ -1,6 +1,6 @@
 namespace Affiliate.Services
 {
-    /// <summary>Ensures only one Oxylabs search runs at a time.</summary>
+    /// <summary>Ensures only one scrape (URL page or ASIN recheck) runs at a time.</summary>
     public interface IScraperRunCoordinator
     {
         /// <summary>Tries to take the lock immediately. Returns false if another scrape holds it.</summary>

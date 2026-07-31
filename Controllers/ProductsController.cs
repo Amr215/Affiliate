@@ -35,7 +35,7 @@ namespace Affiliate.Controllers
             if (filter.Page > totalPages)
                 filter.Page = totalPages;
 
-            var products = await ApplySort(query.Include(p => p.ScraperSearch), filter.SortBy, filter.SortDir)
+            var products = await ApplySort(query.Include(p => p.ScraperUrl), filter.SortBy, filter.SortDir)
                 .Skip((filter.Page - 1) * filter.PageSize)
                 .Take(filter.PageSize)
                 .ToListAsync(cancellationToken);
@@ -65,9 +65,9 @@ namespace Affiliate.Controllers
                     .Distinct()
                     .OrderBy(s => s)
                     .ToListAsync(cancellationToken),
-                Searches = await _context.ScraperSearches.AsNoTracking()
+                Searches = await _context.ScraperUrls.AsNoTracking()
                     .OrderBy(s => s.Name)
-                    .Select(s => new ScraperSearchOption { Id = s.Id, Name = s.Name, Query = s.Query })
+                    .Select(s => new ScraperUrlOption { Id = s.Id, Name = s.Name, Url = s.Url })
                     .ToListAsync(cancellationToken)
             };
 
@@ -266,8 +266,8 @@ namespace Affiliate.Controllers
             if (filter.Asin != null)
                 query = query.Where(p => p.Asin != null && p.Asin.Contains(filter.Asin));
 
-            if (filter.ScraperSearchId.HasValue)
-                query = query.Where(p => p.ScraperSearchId == filter.ScraperSearchId.Value);
+            if (filter.ScraperUrlId.HasValue)
+                query = query.Where(p => p.ScraperUrlId == filter.ScraperUrlId.Value);
 
             if (filter.Manufacturer != null)
                 query = query.Where(p => p.Manufacturer == filter.Manufacturer);

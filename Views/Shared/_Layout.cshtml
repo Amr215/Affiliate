@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+ï»¿<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
     <meta charset="utf-8" />
@@ -21,7 +21,7 @@
                     <span>Affiliate</span>
                 </a>
                 <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#mainNav"
-                        aria-controls="mainNav" aria-expanded="false" aria-label="ÊÈÏíá ÇáÞÇÆãÉ">
+                        aria-controls="mainNav" aria-expanded="false" aria-label="ØªØ¨Ø¯ÙŠÙ„ Ø§Ù„Ù‚Ø§Ø¦Ù…Ø©">
                     <span class="navbar-toggler-icon"></span>
                 </button>
                 <div class="collapse navbar-collapse" id="mainNav">
@@ -30,37 +30,37 @@
                         <ul class="navbar-nav me-auto mb-2 mb-lg-0 gap-lg-1">
                             <li class="nav-item">
                                 <a class="nav-link" asp-area="" asp-controller="Home" asp-action="Index">
-                                    <i class="bi bi-house-door"></i> ÇáÑÆíÓíÉ
+                                    <i class="bi bi-house-door"></i> Ø§Ù„Ø±Ø¦ÙŠØ³ÙŠØ©
                                 </a>
                             </li>
                             <li class="nav-item">
-                                <a class="nav-link" asp-area="" asp-controller="ScraperSearches" asp-action="Index">
-                                    <i class="bi bi-search"></i> ÚãáíÇÊ ÇáÈÍË
+                                <a class="nav-link" asp-area="" asp-controller="ScraperUrls" asp-action="Index">
+                                    <i class="bi bi-search"></i> Ø±ÙˆØ§Ø¨Ø· Ø§Ù„Ø³ÙƒØ±Ø§Ø¨Ø±
                                 </a>
                             </li>
                             <li class="nav-item">
                                 <a class="nav-link" asp-area="" asp-controller="Products" asp-action="Index">
-                                    <i class="bi bi-box-seam"></i> ÇáãäÊÌÇÊ
+                                    <i class="bi bi-box-seam"></i> Ø§Ù„Ù…Ù†ØªØ¬Ø§Øª
                                 </a>
                             </li>
                             <li class="nav-item">
                                 <a class="nav-link" asp-area="" asp-controller="OxylabsLogs" asp-action="Index">
-                                    <i class="bi bi-journal-text"></i> ÓÌáÇÊ Oxylabs
+                                    <i class="bi bi-journal-text"></i> Ø³Ø¬Ù„Ø§Øª Oxylabs
                                 </a>
                             </li>
                             <li class="nav-item">
                                 <a class="nav-link" asp-area="" asp-controller="Telegram" asp-action="Index">
-                                    <i class="bi bi-telegram"></i> ÊíáíÌÑÇã
+                                    <i class="bi bi-telegram"></i> ØªÙŠÙ„ÙŠØ¬Ø±Ø§Ù…
                                 </a>
                             </li>
                             <li class="nav-item">
                                 <a class="nav-link" asp-area="" asp-controller="Users" asp-action="Index">
-                                    <i class="bi bi-people"></i> ÇáãÓÊÎÏãæä
+                                    <i class="bi bi-people"></i> Ø§Ù„Ù…Ø³ØªØ®Ø¯Ù…ÙˆÙ†
                                 </a>
                             </li>
                             <li class="nav-item">
                                 <a class="nav-link" asp-area="" asp-controller="Home" asp-action="Privacy">
-                                    <i class="bi bi-shield-check"></i> ÇáÎÕæÕíÉ
+                                    <i class="bi bi-shield-check"></i> Ø§Ù„Ø®ØµÙˆØµÙŠØ©
                                 </a>
                             </li>
                         </ul>
@@ -72,7 +72,7 @@
                                 <form asp-controller="Account" asp-action="Logout" method="post" class="d-inline">
                                     @Html.AntiForgeryToken()
                                     <button type="submit" class="btn btn-sm btn-outline-light">
-                                        <i class="bi bi-box-arrow-left"></i> ÎÑæÌ
+                                        <i class="bi bi-box-arrow-left"></i> Ø®Ø±ÙˆØ¬
                                     </button>
                                 </form>
                             </li>
@@ -94,7 +94,7 @@
             <span>&copy; @DateTime.UtcNow.Year Affiliate</span>
             @if (User.Identity?.IsAuthenticated == true)
             {
-                <a asp-area="" asp-controller="Home" asp-action="Privacy" class="footer-link">ÓíÇÓÉ ÇáÎÕæÕíÉ</a>
+                <a asp-area="" asp-controller="Home" asp-action="Privacy" class="footer-link">Ø³ÙŠØ§Ø³Ø© Ø§Ù„Ø®ØµÙˆØµÙŠØ©</a>
             }
         </div>
     </footer>

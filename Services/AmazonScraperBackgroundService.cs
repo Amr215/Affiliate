@@ -4,12 +4,12 @@ namespace Affiliate.Services
         IServiceProvider services,
         ILogger<AmazonScraperBackgroundService> logger) : BackgroundService
     {
-        private static readonly TimeSpan PollInterval = TimeSpan.FromMinutes(2);
+        private static readonly TimeSpan PollInterval = TimeSpan.FromMinutes(5);
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             logger.LogInformation(
-                "Amazon scraper scheduler started (poll every {Interval}; intervals from ScraperSearches).",
+                "Amazon scraper scheduler started (poll every {Interval}; intervals from ScraperUrls).",
                 PollInterval);
 
             using var timer = new PeriodicTimer(PollInterval);

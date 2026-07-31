@@ -1,0 +1,43 @@
+@model ScraperUrl
+
+<div asp-validation-summary="ModelOnly" class="text-danger mb-3"></div>
+
+<div class="row g-3">
+    <div class="col-md-6">
+        <label asp-for="Name" class="form-label">الاسم</label>
+        <input asp-for="Name" class="form-control arabic-text" />
+        <span asp-validation-for="Name" class="text-danger"></span>
+    </div>
+    <div class="col-md-3">
+        <label asp-for="Domain" class="form-label">النطاق</label>
+        <input asp-for="Domain" class="form-control ltr" placeholder="eg" />
+        <span asp-validation-for="Domain" class="text-danger"></span>
+        <div class="form-text">يُستنتج من الرابط إن تُرك فارغاً عند الحفظ.</div>
+    </div>
+    <div class="col-md-3">
+        <label asp-for="StartPage" class="form-label">صفحة البداية</label>
+        <input asp-for="StartPage" class="form-control ltr" type="number" min="1" />
+        <span asp-validation-for="StartPage" class="text-danger"></span>
+    </div>
+</div>
+
+<div class="mt-3">
+    <label asp-for="Url" class="form-label">رابط صفحة البحث</label>
+    <textarea asp-for="Url" class="form-control ltr" rows="4" placeholder="https://www.amazon.eg/-/en/s?k=..."></textarea>
+    <span asp-validation-for="Url" class="text-danger"></span>
+    <div class="form-text">الصق رابط نتائج البحث كاملاً (الفلاتر والترتيب داخل الرابط). يُضاف/يُحدَّث باراميتر <code class="ltr">page</code> تلقائياً.</div>
+</div>
+
+<div class="row g-3 mt-1">
+    <div class="col-md-4">
+        <label asp-for="IntervalSeconds" class="form-label">الفاصل (ثانية)</label>
+        <input asp-for="IntervalSeconds" class="form-control ltr" type="number" min="60" />
+        <span asp-validation-for="IntervalSeconds" class="text-danger"></span>
+    </div>
+    <div class="col-md-4 d-flex align-items-end">
+        <div class="form-check mb-2">
+            <input asp-for="IsEnabled" class="form-check-input" />
+            <label asp-for="IsEnabled" class="form-check-label">مفعّل</label>
+        </div>
+    </div>
+</div>

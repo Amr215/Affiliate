@@ -25,27 +25,30 @@
 <div class="card mb-4">
     <div class="card-body">
         <dl class="row detail-grid mb-0">
-            <dt class="col-sm-3">عملية البحث</dt>
+            <dt class="col-sm-3">رابط السكرابر</dt>
             <dd class="col-sm-9">
-                @if (Model.ScraperSearch != null)
+                @if (Model.ScraperUrl != null)
                 {
-                    <a asp-controller="ScraperSearches" asp-action="Details" asp-route-id="@Model.ScraperSearchId" class="arabic-text">
-                        @Model.ScraperSearch.Name
+                    <a asp-controller="ScraperUrls" asp-action="Details" asp-route-id="@Model.ScraperUrlId" class="arabic-text">
+                        @Model.ScraperUrl.Name
                     </a>
-                    <span class="text-muted ltr">(ID @Model.ScraperSearchId)</span>
+                    <span class="text-muted ltr">(ID @Model.ScraperUrlId)</span>
                 }
-                else if (Model.ScraperSearchId == null)
+                else if (Model.ScraperUrlId == null)
                 {
                     <span>ASIN recheck</span>
                 }
                 else
                 {
-                    <span class="ltr">ID @Model.ScraperSearchId</span>
+                    <span class="ltr">ID @Model.ScraperUrlId</span>
                 }
             </dd>
 
             <dt class="col-sm-3">الصفحة</dt>
             <dd class="col-sm-9 num">@Model.Page</dd>
+
+            <dt class="col-sm-3">البورت</dt>
+            <dd class="col-sm-9 ltr num">@(Model.Port?.ToString() ?? "—")</dd>
 
             <dt class="col-sm-3">وقت الطلب (UTC)</dt>
             <dd class="col-sm-9 num">@Model.RequestedAt.ToString("yyyy-MM-dd HH:mm:ss")</dd>

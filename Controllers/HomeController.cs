@@ -16,7 +16,7 @@ namespace Affiliate.Controllers
 
         public IActionResult Index()
         {
-            return RedirectToAction("Index", "ScraperSearches");
+            return RedirectToAction("Index", "ScraperUrls");
         }
 
         public IActionResult Privacy()

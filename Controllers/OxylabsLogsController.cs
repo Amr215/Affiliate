@@ -22,8 +22,8 @@ namespace Affiliate.Controllers
 
             var query = _context.OxylabsRequestLogs.AsNoTracking().AsQueryable();
 
-            if (filter.ScraperSearchId.HasValue)
-                query = query.Where(l => l.ScraperSearchId == filter.ScraperSearchId.Value);
+            if (filter.ScraperUrlId.HasValue)
+                query = query.Where(l => l.ScraperUrlId == filter.ScraperUrlId.Value);
 
             if (filter.StatusCode.HasValue)
                 query = query.Where(l => l.StatusCode == filter.StatusCode.Value);
@@ -50,21 +50,22 @@ namespace Affiliate.Controllers
                 .Select(l => new OxylabsRequestLogListItem
                 {
                     Id = l.Id,
-                    ScraperSearchId = l.ScraperSearchId,
-                    SearchName = l.ScraperSearch != null
-                        ? l.ScraperSearch.Name
-                        : (l.ScraperSearchId == null ? "ASIN recheck" : ("#" + l.ScraperSearchId)),
+                    ScraperUrlId = l.ScraperUrlId,
+                    SearchName = l.ScraperUrl != null
+                        ? l.ScraperUrl.Name
+                        : (l.ScraperUrlId == null ? "ASIN recheck" : ("#" + l.ScraperUrlId)),
                     Page = l.Page,
                     RequestedAt = l.RequestedAt,
                     StatusCode = l.StatusCode,
                     StatusPhrase = l.StatusPhrase,
+                    Port = l.Port,
                     HasResponseBody = l.ResponseBody != null && l.ResponseBody != ""
                 })
                 .ToListAsync(cancellationToken);
 
-            var searches = await _context.ScraperSearches.AsNoTracking()
+            var searches = await _context.ScraperUrls.AsNoTracking()
                 .OrderBy(s => s.Name)
-                .Select(s => new ScraperSearchOption { Id = s.Id, Name = s.Name, Query = s.Query })
+                .Select(s => new ScraperUrlOption { Id = s.Id, Name = s.Name, Url = s.Url })
                 .ToListAsync(cancellationToken);
 
             return View(new OxylabsLogsIndexViewModel
@@ -83,7 +84,7 @@ namespace Affiliate.Controllers
                 return NotFound();
 
             var log = await _context.OxylabsRequestLogs.AsNoTracking()
-                .Include(l => l.ScraperSearch)
+                .Include(l => l.ScraperUrl)
                 .FirstOrDefaultAsync(l => l.Id == id, cancellationToken);
 
             if (log == null)

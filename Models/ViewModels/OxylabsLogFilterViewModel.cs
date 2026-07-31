@@ -4,7 +4,7 @@ namespace Affiliate.ViewModels
 {
     public class OxylabsLogFilterViewModel
     {
-        public int? ScraperSearchId { get; set; }
+        public int? ScraperUrlId { get; set; }
 
         [Display(Name = "Status")]
         public int? StatusCode { get; set; }
@@ -28,28 +28,32 @@ namespace Affiliate.ViewModels
         public IReadOnlyList<OxylabsRequestLogListItem> Logs { get; set; } = [];
         public int TotalCount { get; set; }
         public int TotalPages { get; set; }
-        public IReadOnlyList<ScraperSearchOption> Searches { get; set; } = [];
+        public IReadOnlyList<ScraperUrlOption> Searches { get; set; } = [];
     }
 
     public class OxylabsRequestLogListItem
     {
         public long Id { get; set; }
-        public int? ScraperSearchId { get; set; }
+        public int? ScraperUrlId { get; set; }
         public string SearchName { get; set; } = string.Empty;
         public int Page { get; set; }
         public DateTime RequestedAt { get; set; }
         public int StatusCode { get; set; }
         public string? StatusPhrase { get; set; }
+        public int? Port { get; set; }
         public bool HasResponseBody { get; set; }
     }
 
-    public class ScraperSearchOption
+    public class ScraperUrlOption
     {
         public int Id { get; set; }
         public string Name { get; set; } = string.Empty;
-        public string Query { get; set; } = string.Empty;
+        public string Url { get; set; } = string.Empty;
 
         public string DisplayLabel =>
-            string.IsNullOrWhiteSpace(Query) ? Name : $"{Name} — {Query}";
+            string.IsNullOrWhiteSpace(Url) ? Name : $"{Name} — {Truncate(Url, 60)}";
+
+        private static string Truncate(string value, int max) =>
+            value.Length <= max ? value : value[..max] + "…";
     }
 }

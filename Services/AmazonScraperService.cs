@@ -1,7 +1,5 @@
-using System.Net.Http.Headers;
-using System.Text;
-using System.Text.Json;
-using System.Text.Json.Serialization;
+using System.Collections.Concurrent;
+using System.Diagnostics;
 using Affiliate.Data;
 using Affiliate.Models;
 using Affiliate.Models.Dtos;
@@ -15,66 +13,60 @@ namespace Affiliate.Services
     {
         Task ProcessScheduledSearchesAsync(CancellationToken cancellationToken = default);
 
-        /// <summary>Runs one search immediately. Returns false if not found or another run is in progress.</summary>
-        Task<bool> RunSearchNowAsync(int searchId, CancellationToken cancellationToken = default);
+        /// <summary>Runs one URL scrape immediately. Returns false if not found or another run is in progress.</summary>
+        Task<bool> RunSearchNowAsync(int scraperUrlId, CancellationToken cancellationToken = default);
 
-        /// <summary>Re-checks available products by ASIN batches. Waits if a keyword scrape is in progress.</summary>
+        /// <summary>Re-checks available products in batches of ASINs via one Amazon search URL per batch (ISP).</summary>
         Task ProcessAsinRecheckAsync(CancellationToken cancellationToken = default);
     }
 
     public class AmazonScraperService : IAmazonScraperService
     {
-        private const string OxylabsApiUrl = "https://realtime.oxylabs.io/v1/queries";
-        private const string OxylabsUsername = "AmrAmin_QTiRh";
-        private const string OxylabsPassword = "7cJU=ilkHUq8VEa";
         private const decimal PriceDropAlertThresholdPercent = 10m;
         private const int MaxPagesPerSearch = 50;
-
-        private static readonly HttpClient Http = CreateHttpClient();
-        private static readonly JsonSerializerOptions JsonOptions = new()
-        {
-            PropertyNameCaseInsensitive = true,
-            NumberHandling = JsonNumberHandling.AllowReadingFromString
-        };
 
         private readonly AffiliateDbContext _db;
         private readonly IScraperRunCoordinator _runCoordinator;
         private readonly ITelegramNotifier _telegram;
         private readonly AsinRecheckOptions _asinRecheck;
+        private readonly IIspProxyRoundRobin _ispProxyRoundRobin;
         private readonly ILogger<AmazonScraperService> _logger;
+        private readonly ConcurrentQueue<OxylabsRequestLog> _pendingLogs = new();
 
         public AmazonScraperService(
             AffiliateDbContext dbContext,
             IScraperRunCoordinator runCoordinator,
             ITelegramNotifier telegramNotifier,
             IOptions<AsinRecheckOptions> asinRecheckOptions,
+            IIspProxyRoundRobin ispProxyRoundRobin,
             ILogger<AmazonScraperService> logger)
         {
             _db = dbContext;
             _runCoordinator = runCoordinator;
             _telegram = telegramNotifier;
             _asinRecheck = asinRecheckOptions.Value;
+            _ispProxyRoundRobin = ispProxyRoundRobin;
             _logger = logger;
         }
 
         public async Task ProcessScheduledSearchesAsync(CancellationToken ct = default)
         {
-            _logger.LogDebug("Keyword scheduler waiting for scrape lock (if ASIN recheck is running)");
+            _logger.LogDebug("URL scraper scheduler waiting for scrape lock (if ASIN recheck is running)");
             await _runCoordinator.WaitEnterAsync(ct);
 
             try
             {
                 var now = DateTime.UtcNow;
-                var searches = await _db.ScraperSearches
+                var urls = await _db.ScraperUrls
                     .Where(s => s.IsEnabled)
                     .OrderBy(s => s.LastRunAt ?? DateTime.MinValue)
                     .ToListAsync(ct);
 
-                foreach (var search in searches)
+                foreach (var item in urls)
                 {
                     ct.ThrowIfCancellationRequested();
-                    if (search.IsDue(now))
-                        await ExecuteSearchAsync(search, ct);
+                    if (item.IsDue(now))
+                        await ExecuteUrlScrapeAsync(item, ct);
                 }
             }
             finally
@@ -83,21 +75,21 @@ namespace Affiliate.Services
             }
         }
 
-        public async Task<bool> RunSearchNowAsync(int searchId, CancellationToken ct = default)
+        public async Task<bool> RunSearchNowAsync(int scraperUrlId, CancellationToken ct = default)
         {
             if (!await _runCoordinator.TryEnterAsync(ct))
             {
-                _logger.LogDebug("Run now skipped — a search is already running");
+                _logger.LogDebug("Run now skipped — a scrape is already running");
                 return false;
             }
 
             try
             {
-                var search = await _db.ScraperSearches.FirstOrDefaultAsync(s => s.Id == searchId, ct);
-                if (search is null)
+                var item = await _db.ScraperUrls.FirstOrDefaultAsync(s => s.Id == scraperUrlId, ct);
+                if (item is null)
                     return false;
 
-                await ExecuteSearchAsync(search, ct);
+                await ExecuteUrlScrapeAsync(item, ct);
                 return true;
             }
             finally
@@ -114,14 +106,14 @@ namespace Affiliate.Services
                 return;
             }
 
-            _logger.LogInformation("ASIN recheck waiting for scrape lock (if keyword scrape is running)");
+            _logger.LogInformation("ASIN recheck waiting for scrape lock (if URL scrape is running)");
             await _runCoordinator.WaitEnterAsync(ct);
 
             try
             {
-                var batchSize = Math.Max(1, _asinRecheck.BatchSize);
+                var batchSize = Math.Clamp(_asinRecheck.BatchSize, 2, 48);
                 var asinsPerPoll = Math.Max(batchSize, _asinRecheck.AsinsPerPoll);
-                const string domain = "eg";
+                var domain = string.IsNullOrWhiteSpace(_asinRecheck.Domain) ? "eg" : _asinRecheck.Domain.Trim();
 
                 var asins = await _db.Products
                     .Where(p => p.IsAvailable && p.IsBlocked != true && p.Asin != null && p.Asin != "")
@@ -137,54 +129,96 @@ namespace Affiliate.Services
                     return;
                 }
 
-                _logger.LogInformation(
-                    "ASIN recheck starting — {Count} ASINs in batches of {BatchSize}",
-                    asins.Count, batchSize);
-
-                var updated = 0;
-                var unavailable = 0;
-
-                for (var offset = 0; offset < asins.Count; offset += batchSize)
+                var batches = SplitIntoBatches(asins, batchSize);
+                if (batches.Count == 0)
                 {
-                    ct.ThrowIfCancellationRequested();
-
-                    var batch = asins.Skip(offset).Take(batchSize).ToList();
-                    var batchIndex = offset / batchSize + 1;
-                    var batchCount = (asins.Count + batchSize - 1) / batchSize;
-
-                    try
-                    {
-                        var organic = await FetchAsinBatchAsync(batch, batchIndex, ct);
-                        var returned = new HashSet<string>(
-                            organic
-                                .Where(p => !string.IsNullOrWhiteSpace(p.Asin))
-                                .Select(p => p.Asin!),
-                            StringComparer.OrdinalIgnoreCase);
-
-                        if (organic.Count > 0)
-                            updated += await SaveProductsAsync(organic, domain, ct);
-
-                        var missing = batch.Where(a => !returned.Contains(a)).ToList();
-                        if (missing.Count > 0)
-                            unavailable += await RecordNotAvailableAsync(missing, ct);
-
-                        _logger.LogInformation(
-                            "ASIN recheck batch {Index}/{Total}: requested={Requested}, returned={Returned}, unavailable={Unavailable}",
-                            batchIndex, batchCount, batch.Count, returned.Count, missing.Count);
-                    }
-                    catch (Exception ex) when (ex is not OperationCanceledException)
-                    {
-                        // Persist any queued request logs from the failed call, then continue other batches.
-                        await _db.SaveChangesAsync(ct);
-                        _logger.LogError(ex,
-                            "ASIN recheck batch {Index}/{Total} failed ({Count} ASINs)",
-                            batchIndex, batchCount, batch.Count);
-                    }
+                    _logger.LogInformation("ASIN recheck: not enough ASINs for a batch (need ≥2)");
+                    return;
                 }
 
+                var maxParallel = ResolveParallelism(batches.Count);
+                var startedAt = Stopwatch.GetTimestamp();
+
                 _logger.LogInformation(
-                    "ASIN recheck completed — updated={Updated}, recordedNotAvailable={Unavailable}",
-                    updated, unavailable);
+                    "ASIN recheck starting via ISP — {Count} ASINs in {Batches} search request(s) of up to {BatchSize}, {Parallel} in parallel",
+                    asins.Count, batches.Count, batchSize, maxParallel);
+
+                // Fetch phase: parallel across proxy ports. Nothing here may touch the DbContext.
+                var results = new BatchResult?[batches.Count];
+
+                await Parallel.ForEachAsync(
+                    Enumerable.Range(0, batches.Count),
+                    new ParallelOptions { MaxDegreeOfParallelism = maxParallel, CancellationToken = ct },
+                    async (index, token) =>
+                    {
+                        var batch = batches[index];
+
+                        if (maxParallel > 1)
+                            await Task.Delay(AmazonBrowserProfile.BatchStaggerMs(index % maxParallel), token);
+                        else if (index > 0)
+                            await Task.Delay(AmazonBrowserProfile.BetweenAsinDelayMs(), token);
+
+                        try
+                        {
+                            var organic = await FetchAsinBatchSearchViaIspAsync(batch, domain, index + 1, token);
+                            results[index] = new BatchResult(batch, organic, null);
+                        }
+                        catch (Exception ex) when (ex is not OperationCanceledException)
+                        {
+                            results[index] = new BatchResult(batch, [], ex);
+                        }
+                    });
+
+                // Save phase: sequential (the DbContext is single-threaded) and batched into one
+                // round trip each, so 10 fetches don't become 30 database calls.
+                var failedBatches = 0;
+                var succeeded = new List<BatchResult>(results.Length);
+                var allOrganic = new List<OrganicProduct>();
+
+                foreach (var result in results)
+                {
+                    if (result is null)
+                        continue;
+
+                    if (result.Error is not null)
+                    {
+                        failedBatches++;
+                        _logger.LogError(result.Error,
+                            "ASIN recheck batch failed ({Count} ASINs)", result.Batch.Count);
+                        continue;
+                    }
+
+                    succeeded.Add(result);
+                    allOrganic.AddRange(result.Organic);
+                }
+
+                var returned = new HashSet<string>(
+                    allOrganic
+                        .Where(p => !string.IsNullOrWhiteSpace(p.Asin))
+                        .Select(p => p.Asin!),
+                    StringComparer.OrdinalIgnoreCase);
+
+                // A batch's ASIN counts as missing only if no batch returned it.
+                var missing = succeeded
+                    .SelectMany(r => r.Batch)
+                    .Where(a => !returned.Contains(a))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                var updated = allOrganic.Count > 0
+                    ? await SaveProductsAsync(allOrganic, domain, ct)
+                    : 0;
+
+                var unavailable = missing.Count > 0
+                    ? await RecordNotAvailableAsync(missing, ct)
+                    : 0;
+
+                await SaveAsync(ct);
+
+                var elapsed = Stopwatch.GetElapsedTime(startedAt);
+                _logger.LogInformation(
+                    "ASIN recheck completed in {Seconds:0.0}s — {Asins} ASINs, updated={Updated}, recordedNotAvailable={Unavailable}, failedBatches={Failed}",
+                    elapsed.TotalSeconds, asins.Count, updated, unavailable, failedBatches);
             }
             finally
             {
@@ -192,189 +226,594 @@ namespace Affiliate.Services
             }
         }
 
-        private async Task ExecuteSearchAsync(ScraperSearch search, CancellationToken ct)
+        private sealed record BatchResult(List<string> Batch, List<OrganicProduct> Organic, Exception? Error);
+
+        /// <summary>
+        /// Splits ASINs into request-sized batches. A trailing single ASIN is topped up from the
+        /// previous batch, because Amazon search needs at least two terms to behave like a keyword query.
+        /// </summary>
+        private static List<List<string>> SplitIntoBatches(List<string> asins, int batchSize)
+        {
+            var batches = new List<List<string>>();
+            for (var offset = 0; offset < asins.Count; offset += batchSize)
+                batches.Add(asins.Skip(offset).Take(batchSize).ToList());
+
+            if (batches.Count == 1 && batches[0].Count < 2)
+                return [];
+
+            if (batches.Count > 1 && batches[^1].Count == 1)
+            {
+                var donor = batches[^2];
+                batches[^1].Insert(0, donor[^1]);
+                donor.RemoveAt(donor.Count - 1);
+            }
+
+            return batches;
+        }
+
+        /// <summary>Caps parallelism at the number of proxy IPs actually available right now.</summary>
+        private int ResolveParallelism(int batchCount)
+        {
+            var configured = Math.Max(1, _asinRecheck.MaxParallelBatches);
+            var healthy = Math.Max(1, _ispProxyRoundRobin.HealthyPortCount);
+
+            if (configured > healthy)
+            {
+                _logger.LogWarning(
+                    "ASIN recheck: only {Healthy} of {Configured} proxy IPs available; throughput will be lower this poll",
+                    healthy, configured);
+            }
+
+            return Math.Clamp(Math.Min(configured, healthy), 1, batchCount);
+        }
+
+        private async Task ExecuteUrlScrapeAsync(ScraperUrl scraperUrl, CancellationToken ct)
         {
             _logger.LogInformation(
-                "Running search {SearchId} ({Name}): query={Query}, domain={Domain}",
-                search.Id, search.Name, search.Query, search.Domain);
+                "Running URL scrape {Id} ({Name}): url={Url}, domain={Domain}",
+                scraperUrl.Id, scraperUrl.Name, scraperUrl.Url, scraperUrl.Domain);
 
             try
             {
-                var products = await FetchAllPagesAsync(search, ct);
+                var products = await FetchAllPagesAsync(scraperUrl, ct);
 
                 if (products.Count == 0)
                 {
-                    await MarkSearchRunAsync(search, "No organic products parsed from response", ct);
-                    _logger.LogWarning("Search {SearchId}: no organic products", search.Id);
+                    await MarkRunAsync(scraperUrl, "No organic products parsed from HTML", ct);
+                    _logger.LogWarning("URL scrape {Id}: no organic products", scraperUrl.Id);
                     return;
                 }
 
-                var saved = await SaveProductsAsync(products, search.Domain, ct, search.Id);
-                await MarkSearchRunAsync(search, error: null, ct);
+                var saved = await SaveProductsAsync(products, scraperUrl.Domain, ct, scraperUrl.Id);
+                await MarkRunAsync(scraperUrl, error: null, ct);
                 _logger.LogInformation(
-                    "Search {SearchId} completed — saved/updated {Saved} of {Total} products",
-                    search.Id, saved, products.Count);
+                    "URL scrape {Id} completed — saved/updated {Saved} of {Total} products",
+                    scraperUrl.Id, saved, products.Count);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                // MarkSearchRunAsync also flushes any request logs queued before the failure.
-                await MarkSearchRunAsync(search, ex.Message, ct);
-                _logger.LogError(ex, "Search {SearchId} failed", search.Id);
+                await MarkRunAsync(scraperUrl, ex.Message, ct);
+                _logger.LogError(ex, "URL scrape {Id} failed", scraperUrl.Id);
             }
         }
 
         /// <summary>
-        /// Fetches pages starting at <see cref="ScraperSearch.StartPage"/> up to the last visible
-        /// page (capped at <see cref="MaxPagesPerSearch"/>). A failure on the first page aborts the
-        /// run; a failure on a later page keeps the products already collected.
+        /// Fetches pages starting at <see cref="ScraperUrl.StartPage"/> up to the last visible
+        /// page. On blank/captcha/bad HTML, quarantines that IP and retries the same page on another IP.
         /// </summary>
-        private async Task<List<OrganicProduct>> FetchAllPagesAsync(ScraperSearch search, CancellationToken ct)
+        private async Task<List<OrganicProduct>> FetchAllPagesAsync(ScraperUrl scraperUrl, CancellationToken ct)
         {
             var all = new List<OrganicProduct>();
-            var firstPage = Math.Max(1, search.StartPage);
+            var firstPage = Math.Max(1, scraperUrl.StartPage);
             var lastPage = firstPage;
 
-            for (var page = firstPage; page - firstPage < MaxPagesPerSearch; page++)
+            var endpoint = _ispProxyRoundRobin.Next();
+            var client = _ispProxyRoundRobin.CreateClient(endpoint);
+            string? referer = null;
+            var warmedHost = false;
+            int? proxyPort = endpoint.UseProxy ? endpoint.Port : null;
+
+            try
+            {
+                _logger.LogInformation(
+                    "URL scrape {Id} starting on {Proxy}",
+                    scraperUrl.Id, endpoint.Describe());
+
+                await Task.Delay(AmazonBrowserProfile.BeforeFirstRequestDelayMs(), ct);
+
+                for (var page = firstPage; page - firstPage < MaxPagesPerSearch; page++)
+                {
+                    ct.ThrowIfCancellationRequested();
+
+                    if (page > firstPage)
+                        await Task.Delay(AmazonBrowserProfile.NextPageDelayMs(), ct);
+
+                    var pageOk = false;
+                    var triedKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { endpoint.Key };
+                    var maxAttempts = Math.Max(1, _ispProxyRoundRobin.AvailablePortCount);
+
+                    for (var attempt = 1; attempt <= maxAttempts; attempt++)
+                    {
+                        try
+                        {
+                            if (!warmedHost)
+                            {
+                                await WarmupAmazonHomeAsync(client, scraperUrl, endpoint, ct);
+                                warmedHost = true;
+                            }
+
+                            var (result, pageUrl) = await FetchSearchPageAsync(
+                                client, scraperUrl, page, referer, endpoint, proxyPort, ct);
+
+                            all.AddRange(result.Organic);
+                            lastPage = result.LastVisiblePage ?? lastPage;
+                            referer = pageUrl;
+                            pageOk = true;
+                            _ispProxyRoundRobin.MarkHealthy(endpoint);
+
+                            _logger.LogInformation(
+                                "URL scrape {Id}: page {Page}/{Last} via {Proxy} — {Count} organic",
+                                scraperUrl.Id, page, lastPage, endpoint.Describe(), result.Organic.Count);
+                            break;
+                        }
+                        catch (AmazonFetchRejectedException ex)
+                        {
+                            if (ex.IsTransport)
+                                _ispProxyRoundRobin.MarkTransient(endpoint, ex.Message);
+                            else
+                                _ispProxyRoundRobin.MarkBad(endpoint, ex.Message);
+
+                            QueueLog(scraperUrl.Id, page, DateTime.UtcNow, ex.StatusCode, "Rejected",
+                                $"{endpoint.Describe()} page={page}", Truncate(ex.Message, 2000), proxyPort);
+
+                            if (attempt >= maxAttempts)
+                            {
+                                if (all.Count == 0)
+                                    throw;
+
+                                _logger.LogWarning(
+                                    "URL scrape {Id}: giving up page {Page} after {Attempts} IPs; keeping {Count} products",
+                                    scraperUrl.Id, page, attempt, all.Count);
+                                return all;
+                            }
+
+                            client.Dispose();
+                            endpoint = _ispProxyRoundRobin.Next(triedKeys);
+                            triedKeys.Add(endpoint.Key);
+                            client = _ispProxyRoundRobin.CreateClient(endpoint);
+                            referer = null;
+                            warmedHost = false;
+                            proxyPort = endpoint.UseProxy ? endpoint.Port : null;
+
+                            _logger.LogWarning(
+                                "URL scrape {Id}: page {Page} failed on bad port ({Reason}); switching to {Proxy}",
+                                scraperUrl.Id, page, ex.Message, endpoint.Describe());
+
+                            await Task.Delay(AmazonBrowserProfile.AfterIpSwitchDelayMs(), ct);
+                        }
+                        catch (Exception ex) when (ex is not OperationCanceledException and not AmazonFetchRejectedException)
+                        {
+                            _ispProxyRoundRobin.MarkTransient(endpoint, DescribeTransport(ex));
+                            QueueLog(scraperUrl.Id, page, DateTime.UtcNow, 0, "TransportError",
+                                $"{endpoint.Describe()} page={page}", Truncate(DescribeTransport(ex), 2000), proxyPort);
+
+                            if (attempt >= maxAttempts)
+                            {
+                                if (all.Count == 0)
+                                    throw;
+
+                                _logger.LogWarning(ex,
+                                    "URL scrape {Id}: stopped at page {Page}; keeping {Count} products",
+                                    scraperUrl.Id, page, all.Count);
+                                return all;
+                            }
+
+                            client.Dispose();
+                            endpoint = _ispProxyRoundRobin.Next(triedKeys);
+                            triedKeys.Add(endpoint.Key);
+                            client = _ispProxyRoundRobin.CreateClient(endpoint);
+                            referer = null;
+                            warmedHost = false;
+                            proxyPort = endpoint.UseProxy ? endpoint.Port : null;
+
+                            _logger.LogWarning(ex,
+                                "URL scrape {Id}: transport error on page {Page}; switching to {Proxy}",
+                                scraperUrl.Id, page, endpoint.Describe());
+
+                            await Task.Delay(AmazonBrowserProfile.AfterIpSwitchDelayMs(), ct);
+                        }
+                    }
+
+                    if (!pageOk)
+                        break;
+
+                    if (page >= lastPage)
+                        break;
+                }
+
+                return all;
+            }
+            finally
+            {
+                client.Dispose();
+            }
+        }
+
+        private Task WarmupAmazonHomeAsync(
+            HttpClient client, ScraperUrl scraperUrl, IspProxyEndpoint endpoint, CancellationToken ct)
+        {
+            if (!Uri.TryCreate(scraperUrl.Url, UriKind.Absolute, out var uri))
+                return Task.CompletedTask;
+
+            return WarmupAmazonHomeAsync(
+                client, $"{uri.Scheme}://{uri.Host}/", endpoint, $"URL scrape {scraperUrl.Id}", ct);
+        }
+
+        /// <summary>Fetches the Amazon homepage so the session carries real cookies into the next request.</summary>
+        private async Task WarmupAmazonHomeAsync(
+            HttpClient client, string home, IspProxyEndpoint endpoint, string label, CancellationToken ct)
+        {
+            try
+            {
+                using var request = new HttpRequestMessage(HttpMethod.Get, home);
+                AmazonBrowserProfile.ApplyNavigationHeaders(request, home, referer: null);
+                request.Headers.Remove("Referer");
+                request.Headers.Remove("Sec-Fetch-Site");
+                request.Headers.TryAddWithoutValidation("Sec-Fetch-Site", "none");
+
+                using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+                _ = await response.Content.ReadAsStringAsync(ct);
+                _logger.LogDebug(
+                    "{Label}: warmed up {Home} via {Proxy} ({Status})",
+                    label, home, endpoint.Describe(), (int)response.StatusCode);
+
+                await Task.Delay(Random.Shared.Next(500, 1500), ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogDebug(ex, "{Label}: homepage warmup failed (continuing)", label);
+            }
+        }
+
+        private async Task<(SearchPageParseResult Result, string PageUrl)> FetchSearchPageAsync(
+            HttpClient client,
+            ScraperUrl scraperUrl,
+            int page,
+            string? referer,
+            IspProxyEndpoint endpoint,
+            int? proxyPort,
+            CancellationToken ct)
+        {
+            var pageUrl = BuildPageUrl(scraperUrl.Url, page);
+            var requestedAt = DateTime.UtcNow;
+            var requestLog = $"{endpoint.Describe()} GET {pageUrl}";
+
+            HttpResponseMessage response;
+            try
+            {
+                response = await SendNavigationAsync(
+                    client, pageUrl, referer, $"URL scrape {scraperUrl.Id} page {page}", ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                var reason = DescribeTransport(ex);
+                QueueLog(scraperUrl.Id, page, requestedAt, 0, "TransportError", requestLog, reason, proxyPort);
+                throw new AmazonFetchRejectedException(
+                    $"Transport error on page {page}: {reason}", statusCode: 0, ex, isTransport: true);
+            }
+
+            using (response)
+            {
+                var status = (int)response.StatusCode;
+                var body = await response.Content.ReadAsStringAsync(ct);
+                QueueLog(scraperUrl.Id, page, requestedAt, status, response.ReasonPhrase, requestLog,
+                    status == 200 ? null : Truncate(body, 8000), proxyPort);
+
+                if (status is 403 or 429 or 503 or 502 or 500)
+                    throw new AmazonFetchRejectedException(
+                        $"Blocked/unavailable status {status} on page {page}", status);
+
+                if (status != 200)
+                    throw new AmazonFetchRejectedException(
+                        $"HTTP {status} on page {page}", status);
+
+                if (string.IsNullOrWhiteSpace(body))
+                    throw new AmazonFetchRejectedException($"Empty HTML on page {page}", status);
+
+                if (LooksLikeBotChallenge(body))
+                    throw new AmazonFetchRejectedException(
+                        $"Captcha/bot challenge on page {page}", status);
+
+                if (body.Length < 8_000)
+                    throw new AmazonFetchRejectedException(
+                        $"Suspiciously short HTML ({body.Length} chars) on page {page}", status);
+
+                if (!LooksLikeAmazonSearchHtml(body))
+                    throw new AmazonFetchRejectedException(
+                        $"Unexpected HTML (not a search results page) on page {page}", status);
+
+                var parsed = AmazonSearchHtmlParser.Parse(body);
+
+                if (parsed.Organic.Count == 0 && !LooksLikeZeroResultsPage(body))
+                    throw new AmazonFetchRejectedException(
+                        $"No products parsed and page does not look like zero-results on page {page}", status);
+
+                return (parsed, pageUrl);
+            }
+        }
+
+        private static bool LooksLikeBotChallenge(string html)
+        {
+            if (string.IsNullOrEmpty(html))
+                return true;
+
+            return html.Contains("api-services-support@amazon.com", StringComparison.OrdinalIgnoreCase)
+                || html.Contains("Type the characters you see in this image", StringComparison.OrdinalIgnoreCase)
+                || html.Contains("Enter the characters you see below", StringComparison.OrdinalIgnoreCase)
+                || html.Contains("/errors/validateCaptcha", StringComparison.OrdinalIgnoreCase)
+                || html.Contains("Robot Check", StringComparison.OrdinalIgnoreCase)
+                || html.Contains("Sorry, we just need to make sure you're not a robot", StringComparison.OrdinalIgnoreCase)
+                || html.Contains("opfcaptcha", StringComparison.OrdinalIgnoreCase)
+                || html.Contains("captchacharacters", StringComparison.OrdinalIgnoreCase)
+                || LooksLikeSoftBlockPage(html);
+        }
+
+        /// <summary>Amazon's throttling "Sorry! / عذرًا!" page, served with either 200 or 503.</summary>
+        private static bool LooksLikeSoftBlockPage(string html) =>
+            html.Contains("ref=cs_503", StringComparison.OrdinalIgnoreCase)
+            || html.Contains("cs_503_logo", StringComparison.OrdinalIgnoreCase)
+            || html.Contains("Sorry! Something went wrong", StringComparison.OrdinalIgnoreCase)
+            || html.Contains("communities/people/logo.gif", StringComparison.OrdinalIgnoreCase);
+
+        private static bool LooksLikeAmazonSearchHtml(string html) =>
+            html.Contains("s-search-result", StringComparison.OrdinalIgnoreCase)
+            || html.Contains("data-component-type=\"s-search-result\"", StringComparison.OrdinalIgnoreCase)
+            || html.Contains("cel_widget_id=\"MAIN-SEARCH_RESULTS", StringComparison.OrdinalIgnoreCase)
+            || html.Contains("s-main-slot", StringComparison.OrdinalIgnoreCase)
+            || html.Contains("id=\"search\"", StringComparison.OrdinalIgnoreCase);
+
+        private static bool LooksLikeZeroResultsPage(string html) =>
+            html.Contains("No results for", StringComparison.OrdinalIgnoreCase)
+            || html.Contains("did not match any products", StringComparison.OrdinalIgnoreCase)
+            || html.Contains("0 results for", StringComparison.OrdinalIgnoreCase)
+            || html.Contains("لا توجد نتائج", StringComparison.OrdinalIgnoreCase);
+
+        private sealed class AmazonFetchRejectedException : Exception
+        {
+            public int StatusCode { get; }
+
+            /// <summary>True when no HTTP response arrived (dropped connection/timeout), not an Amazon block.</summary>
+            public bool IsTransport { get; }
+
+            public AmazonFetchRejectedException(
+                string message, int statusCode, Exception? inner = null, bool isTransport = false)
+                : base(message, inner)
+            {
+                StatusCode = statusCode;
+                IsTransport = isTransport;
+            }
+        }
+
+        /// <summary>Sends a navigation request, retrying dropped connections/timeouts on the same IP.</summary>
+        private async Task<HttpResponseMessage> SendNavigationAsync(
+            HttpClient client, string url, string? referer, string label, CancellationToken ct)
+        {
+            var retries = _ispProxyRoundRobin.TransportRetriesPerIp;
+
+            for (var attempt = 0; ; attempt++)
             {
                 ct.ThrowIfCancellationRequested();
 
-                SearchPageResult result;
+                if (attempt > 0)
+                    await Task.Delay(AmazonBrowserProfile.TransportRetryDelayMs(attempt), ct);
+
                 try
                 {
-                    result = await FetchSearchPageAsync(search, page, ct);
+                    using var request = new HttpRequestMessage(HttpMethod.Get, url);
+                    AmazonBrowserProfile.ApplyNavigationHeaders(request, url, referer);
+                    return await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+                }
+                catch (Exception ex) when (attempt < retries && IsRetryableTransport(ex, ct))
+                {
+                    _logger.LogDebug(ex,
+                        "{Label}: connection attempt {Attempt}/{Total} failed ({Reason}); retrying same IP",
+                        label, attempt + 1, retries + 1, DescribeTransport(ex));
+                }
+            }
+        }
+
+        private static bool IsRetryableTransport(Exception ex, CancellationToken ct)
+        {
+            if (ct.IsCancellationRequested)
+                return false;
+
+            // A TaskCanceledException without ct cancellation is the HttpClient timeout.
+            return ex is HttpRequestException
+                or IOException
+                or System.Net.Sockets.SocketException
+                or TaskCanceledException;
+        }
+
+        /// <summary>Unwraps the inner reason — "An error occurred while sending the request." alone says nothing.</summary>
+        private static string DescribeTransport(Exception ex)
+        {
+            if (ex is TaskCanceledException && ex.InnerException is TimeoutException)
+                return "request timed out";
+
+            var parts = new List<string>();
+            for (var current = ex; current is not null; current = current.InnerException)
+                parts.Add(current.Message);
+
+            return string.Join(" -> ", parts.Distinct());
+        }
+
+        /// <summary>
+        /// One ISP request for a batch of ASINs via Amazon search:
+        /// <c>/s?k=ASIN1|ASIN2|...|ASIN48</c>. Round-robins ports on captcha/block.
+        /// </summary>
+        private async Task<List<OrganicProduct>> FetchAsinBatchSearchViaIspAsync(
+            IReadOnlyList<string> asins, string domain, int batchIndex, CancellationToken ct)
+        {
+            if (asins.Count < 2)
+                throw new InvalidOperationException("ASIN batch search requires at least 2 ASINs per request");
+
+            var searchUrl = BuildAsinBatchSearchUrl(domain, asins);
+            var triedKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var maxAttempts = Math.Clamp(
+                _asinRecheck.MaxAttemptsPerBatch, 1, Math.Max(1, _ispProxyRoundRobin.AvailablePortCount));
+            Exception? lastError = null;
+
+            for (var attempt = 1; attempt <= maxAttempts; attempt++)
+            {
+                ct.ThrowIfCancellationRequested();
+
+                var endpoint = _ispProxyRoundRobin.Next(triedKeys);
+                triedKeys.Add(endpoint.Key);
+                var proxyPort = endpoint.UseProxy ? endpoint.Port : (int?)null;
+                using var client = _ispProxyRoundRobin.CreateClient(endpoint);
+
+                if (attempt > 1)
+                    await Task.Delay(AmazonBrowserProfile.AfterIpSwitchDelayMs(), ct);
+
+                try
+                {
+                    var organic = await FetchAsinBatchSearchPageAsync(
+                        client, searchUrl, asins.Count, batchIndex, endpoint, proxyPort, ct);
+
+                    _ispProxyRoundRobin.MarkHealthy(endpoint);
+                    _logger.LogInformation(
+                        "ASIN batch {Index}: OK via {Proxy} — {Returned}/{Requested} organic",
+                        batchIndex, endpoint.Describe(), organic.Count, asins.Count);
+
+                    return organic;
+                }
+                catch (AmazonFetchRejectedException ex)
+                {
+                    lastError = ex;
+
+                    if (ex.IsTransport)
+                        _ispProxyRoundRobin.MarkTransient(endpoint, ex.Message);
+                    else
+                        _ispProxyRoundRobin.MarkBad(endpoint, ex.Message);
+
+                    _logger.LogWarning(
+                        "ASIN batch {Index}: {Kind} on {Proxy} ({Reason}); {Left} ports left",
+                        batchIndex, ex.IsTransport ? "connection failed" : "rejected",
+                        endpoint.Describe(), ex.Message, maxAttempts - attempt);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-                    if (all.Count == 0)
-                        throw;
+                    lastError = ex;
+                    var reason = DescribeTransport(ex);
+                    _ispProxyRoundRobin.MarkTransient(endpoint, reason);
+                    QueueLog(null, batchIndex, DateTime.UtcNow, 0, "TransportError",
+                        $"{endpoint.Describe()} batch={batchIndex} asins={asins.Count}",
+                        Truncate(reason, 2000), proxyPort);
 
                     _logger.LogWarning(ex,
-                        "Search {SearchId}: stopped at page {Page}; keeping {Count} products from earlier pages",
-                        search.Id, page, all.Count);
-                    break;
+                        "ASIN batch {Index}: transport error on {Proxy} ({Reason}); {Left} ports left",
+                        batchIndex, endpoint.Describe(), reason, maxAttempts - attempt);
                 }
-
-                all.AddRange(result.Organic);
-                lastPage = result.LastVisiblePage ?? lastPage;
-
-                _logger.LogInformation(
-                    "Search {SearchId}: page {Page}/{Last} — {Count} organic products",
-                    search.Id, page, lastPage, result.Organic.Count);
-
-                if (page >= lastPage)
-                    break;
             }
 
-            return all;
+            throw new InvalidOperationException(
+                $"ASIN batch {batchIndex} failed on all proxy ports ({asins.Count} ASINs)", lastError);
         }
 
-        /// <summary>Requests a single search page, logs the call, and throws on any failure.</summary>
-        private async Task<SearchPageResult> FetchSearchPageAsync(ScraperSearch search, int page, CancellationToken ct)
+        private async Task<List<OrganicProduct>> FetchAsinBatchSearchPageAsync(
+            HttpClient client,
+            string searchUrl,
+            int requestedCount,
+            int batchIndex,
+            IspProxyEndpoint endpoint,
+            int? proxyPort,
+            CancellationToken ct)
         {
-            var requestJson = JsonSerializer.Serialize(BuildRequestPayload(search, page));
+            var home = $"{new Uri(searchUrl).GetLeftPart(UriPartial.Authority)}/";
+
+            // Amazon serves the "عذرًا!" soft-block page to sessions that jump straight to /s with no
+            // cookies, so land on the homepage first and carry its cookies into the search.
+            await WarmupAmazonHomeAsync(client, home, endpoint, $"ASIN batch {batchIndex}", ct);
+
             var requestedAt = DateTime.UtcNow;
-            using var content = new StringContent(requestJson, Encoding.UTF8, "application/json");
+            var requestLog = $"{endpoint.Describe()} GET {searchUrl}";
 
             HttpResponseMessage response;
             try
             {
-                response = await Http.PostAsync(OxylabsApiUrl, content, ct);
+                response = await SendNavigationAsync(
+                    client, searchUrl, home, $"ASIN batch {batchIndex}", ct);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
-                QueueLog(search.Id, page, requestedAt, 0, "TransportError", requestJson, ex.Message);
-                throw new InvalidOperationException($"Oxylabs request failed on page {page}: {ex.Message}", ex);
+                var reason = DescribeTransport(ex);
+                QueueLog(null, batchIndex, requestedAt, 0, "TransportError", requestLog, reason, proxyPort);
+                throw new AmazonFetchRejectedException(
+                    $"Transport error on ASIN batch {batchIndex}: {reason}",
+                    statusCode: 0, ex, isTransport: true);
             }
 
             using (response)
             {
                 var status = (int)response.StatusCode;
                 var body = await response.Content.ReadAsStringAsync(ct);
-                QueueLog(search.Id, page, requestedAt, status, response.ReasonPhrase, requestJson,
-                    status == 200 ? null : body);
+                QueueLog(null, batchIndex, requestedAt, status, response.ReasonPhrase, requestLog,
+                    status == 200 ? null : Truncate(body, 8000), proxyPort);
+
+                if (status is 403 or 429 or 503 or 502 or 500)
+                    throw new AmazonFetchRejectedException(
+                        $"Blocked/unavailable status {status} on ASIN batch {batchIndex}", status);
 
                 if (status != 200)
-                    throw new InvalidOperationException(
-                        $"Oxylabs API failed on page {page} with status {status} ({response.StatusCode})");
+                    throw new AmazonFetchRejectedException(
+                        $"HTTP {status} on ASIN batch {batchIndex}", status);
 
-                var api = JsonSerializer.Deserialize<OxylabsApiResponse>(body, JsonOptions);
-                if (api?.Results is not { Count: > 0 })
-                    throw new InvalidOperationException($"No results returned from Oxylabs API on page {page}");
+                if (string.IsNullOrWhiteSpace(body))
+                    throw new AmazonFetchRejectedException(
+                        $"Empty HTML on ASIN batch {batchIndex}", status);
 
-                var data = api.Results[0].Content;
-                return new SearchPageResult(data?.Results?.Organic ?? [], data?.LastVisiblePage);
+                if (LooksLikeBotChallenge(body))
+                    throw new AmazonFetchRejectedException(
+                        $"Captcha/bot challenge on ASIN batch {batchIndex}", status);
+
+                if (body.Length < 8_000)
+                    throw new AmazonFetchRejectedException(
+                        $"Suspiciously short HTML ({body.Length} chars) on ASIN batch {batchIndex}", status);
+
+                if (!LooksLikeAmazonSearchHtml(body))
+                    throw new AmazonFetchRejectedException(
+                        $"Unexpected HTML (not a search results page) on ASIN batch {batchIndex}", status);
+
+                var parsed = AmazonSearchHtmlParser.Parse(body);
+
+                if (parsed.Organic.Count == 0 && !LooksLikeZeroResultsPage(body))
+                    throw new AmazonFetchRejectedException(
+                        $"No products parsed on ASIN batch {batchIndex} (requested {requestedCount})", status);
+
+                return parsed.Organic;
             }
         }
 
-        private async Task<List<OrganicProduct>> FetchAsinBatchAsync(
-            IReadOnlyList<string> asins, int batchIndex, CancellationToken ct)
+        /// <summary>Builds <c>https://www.amazon.{domain}/s?k=ASIN1|ASIN2|...</c>.</summary>
+        private static string BuildAsinBatchSearchUrl(string domain, IReadOnlyList<string> asins)
         {
             var query = string.Join("|", asins);
-            var requestJson = JsonSerializer.Serialize(BuildAsinBatchPayload(query));
-            var requestedAt = DateTime.UtcNow;
-            using var content = new StringContent(requestJson, Encoding.UTF8, "application/json");
-
-            HttpResponseMessage response;
-            try
-            {
-                response = await Http.PostAsync(OxylabsApiUrl, content, ct);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                QueueLog(null, batchIndex, requestedAt, 0, "TransportError", requestJson, ex.Message);
-                throw new InvalidOperationException(
-                    $"Oxylabs ASIN batch {batchIndex} failed: {ex.Message}", ex);
-            }
-
-            using (response)
-            {
-                var status = (int)response.StatusCode;
-                var body = await response.Content.ReadAsStringAsync(ct);
-                QueueLog(null, batchIndex, requestedAt, status, response.ReasonPhrase, requestJson,
-                    status == 200 ? null : body);
-
-                if (status != 200)
-                    throw new InvalidOperationException(
-                        $"Oxylabs ASIN batch {batchIndex} failed with status {status} ({response.StatusCode})");
-
-                var api = JsonSerializer.Deserialize<OxylabsApiResponse>(body, JsonOptions);
-                if (api?.Results is not { Count: > 0 })
-                    throw new InvalidOperationException(
-                        $"No results returned from Oxylabs API for ASIN batch {batchIndex}");
-
-                return api.Results[0].Content?.Results?.Organic ?? [];
-            }
+            var encoded = Uri.EscapeDataString(query);
+            return $"https://www.amazon.{domain.Trim()}/s?k={encoded}&ref=nb_sb_noss";
         }
 
-        private static object BuildAsinBatchPayload(string query) => new
+        /// <summary>
+        /// Buffers audit rows instead of touching the DbContext, so parallel batch workers can log safely.
+        /// Drained by <see cref="SaveAsync"/> on the calling thread.
+        /// </summary>
+        private void QueueLog(int? scraperUrlId, int page, DateTime requestedAt, int statusCode,
+            string? statusPhrase, string requestBody, string? responseBody, int? proxyPort = null)
         {
-            source = "amazon_search",
-            domain = "eg",
-            query,
-            locale = "en-AE",
-            start_page = 1,
-            pages = 1,
-            parse = true,
-            // context = new object[]
-            // {
-            //     new { key = "force_headers", value = false },
-            //     new { key = "force_cookies", value = false },
-            //     new { key = "hc_policy", value = true },
-            //     new { key = "merchant_id", value = "A1ZVRGNO5AYLOV" },
-            //     new { key = "safe_search", value = true },
-            //     new { key = "currency", value = "EGP" },
-            //     new { key = "sort_by", value = "featured" },
-            //     new { key = "geo_location", value = "Cairo" }
-            // }
-        };
-
-        private void QueueLog(int? searchId, int page, DateTime requestedAt, int statusCode,
-            string? statusPhrase, string requestBody, string? responseBody)
-        {
-            _db.OxylabsRequestLogs.Add(new OxylabsRequestLog
+            _pendingLogs.Enqueue(new OxylabsRequestLog
             {
-                ScraperSearchId = searchId,
+                ScraperUrlId = scraperUrlId,
                 Page = page,
+                Port = proxyPort,
                 RequestedAt = requestedAt,
                 StatusCode = statusCode,
                 StatusPhrase = Truncate(statusPhrase, 64),
@@ -383,17 +822,22 @@ namespace Affiliate.Services
             });
         }
 
-        private async Task MarkSearchRunAsync(ScraperSearch search, string? error, CancellationToken ct)
+        /// <summary>Flushes buffered request logs, then commits. Must only be called from the owning thread.</summary>
+        private async Task<int> SaveAsync(CancellationToken ct)
         {
-            search.LastRunAt = DateTime.UtcNow;
-            search.LastRunError = Truncate(error, 2000);
-            await _db.SaveChangesAsync(ct);
+            while (_pendingLogs.TryDequeue(out var log))
+                _db.OxylabsRequestLogs.Add(log);
+
+            return await _db.SaveChangesAsync(ct);
         }
 
-        /// <summary>
-        /// Records the first miss date for ASINs that did not return.
-        /// Does not flip <see cref="Product.IsAvailable"/> — that stays manual from the products list.
-        /// </summary>
+        private async Task MarkRunAsync(ScraperUrl scraperUrl, string? error, CancellationToken ct)
+        {
+            scraperUrl.LastRunAt = DateTime.UtcNow;
+            scraperUrl.LastRunError = Truncate(error, 2000);
+            await SaveAsync(ct);
+        }
+
         private async Task<int> RecordNotAvailableAsync(IReadOnlyList<string> asins, CancellationToken ct)
         {
             if (asins.Count == 0)
@@ -410,7 +854,7 @@ namespace Affiliate.Services
                 product.NotAvailableDate ??= checkedAt;
             }
 
-            await _db.SaveChangesAsync(ct);
+            await SaveAsync(ct);
             return products.Count;
         }
 
@@ -418,9 +862,8 @@ namespace Affiliate.Services
             List<OrganicProduct> products,
             string domain,
             CancellationToken ct,
-            int? scraperSearchId = null)
+            int? scraperUrlId = null)
         {
-            // Keep the last occurrence per ASIN, dropping entries without one.
             var byAsin = new Dictionary<string, OrganicProduct>(StringComparer.OrdinalIgnoreCase);
             foreach (var p in products)
             {
@@ -445,13 +888,10 @@ namespace Affiliate.Services
             {
                 var isNew = !existing.TryGetValue(asin, out var product);
 
-                // Blocked products must not be updated or get price history from Oxylabs.
                 if (!isNew && product!.IsBlocked == true)
                     continue;
 
                 var previousPrice = product?.CurrentPrice;
-                // Only write Price History on a real price change (or first sighting). Increases and
-                // drops both get a row; an identical price does not.
                 var priceUnchanged = !isNew && previousPrice == org.Price;
 
                 if (isNew)
@@ -461,8 +901,8 @@ namespace Affiliate.Services
                     existing[asin] = product;
                 }
 
-                if (scraperSearchId.HasValue)
-                    product!.ScraperSearchId = scraperSearchId;
+                if (scraperUrlId.HasValue)
+                    product!.ScraperUrlId = scraperUrlId;
 
                 ApplyOrganicData(product!, org, domain, checkedAt, isNew);
 
@@ -476,47 +916,46 @@ namespace Affiliate.Services
             if (saved == 0 && alerts.Count == 0)
                 return 0;
 
-            await _db.SaveChangesAsync(ct);
+            await SaveAsync(ct);
 
             if (alerts.Count > 0)
             {
                 await AttachPriceHistoryAsync(alerts, ct);
                 if (await DispatchAlertsAsync(alerts, ct))
-                    await _db.SaveChangesAsync(ct);
+                    await SaveAsync(ct);
             }
 
             return saved;
         }
 
-        /// <summary>
-        /// Attaches the full price history (oldest → newest) for each alert, with the date recorded.
-        /// </summary>
         private async Task AttachPriceHistoryAsync(List<ProductDropAlert> alerts, CancellationToken ct)
         {
+            var productIds = alerts.Select(a => a.Product.Id).Distinct().ToList();
+            if (productIds.Count == 0)
+                return;
+
+            var points = await _db.PriceHistories.AsNoTracking()
+                .Where(h => productIds.Contains(h.ProductId) && h.Price != null)
+                .OrderBy(h => h.CheckedAt)
+                .ThenBy(h => h.Id)
+                .Select(h => new { h.ProductId, h.CheckedAt, h.Price })
+                .ToListAsync(ct);
+
+            var byProduct = points
+                .GroupBy(p => p.ProductId)
+                .ToDictionary(
+                    g => g.Key,
+                    g => (IReadOnlyList<PriceHistoryPoint>)g
+                        .Select(p => new PriceHistoryPoint(string.Empty, p.Price, p.CheckedAt))
+                        .ToList());
+
             foreach (var alert in alerts)
             {
-                var points = await _db.PriceHistories.AsNoTracking()
-                    .Where(h => h.ProductId == alert.Product.Id && h.Price != null)
-                    .OrderBy(h => h.CheckedAt)
-                    .ThenBy(h => h.Id)
-                    .Select(h => new { h.CheckedAt, h.Price })
-                    .ToListAsync(ct);
-
-                if (points.Count == 0)
-                    continue;
-
-                alert.History = points
-                    .Select(p => new PriceHistoryPoint(string.Empty, p.Price, p.CheckedAt))
-                    .ToList();
+                if (byProduct.TryGetValue(alert.Product.Id, out var history))
+                    alert.History = history;
             }
         }
 
-        /// <summary>
-        /// Product.DropPercent is vs the first observed price (DropBaselinePrice) for UI.
-        /// Telegram alerts fire only when the new price is ≥10% below the last recorded price.
-        /// Increases and smaller drops are recorded in Price History but do not notify.
-        /// Products seen for the first time never alert.
-        /// </summary>
         private static void ApplyPriceTracking(
             Product product, decimal? newPrice, decimal? previousPrice, bool isNew, List<ProductDropAlert> alerts)
         {
@@ -525,7 +964,6 @@ namespace Affiliate.Services
             if (newPrice is not > 0)
                 return;
 
-            // First known price is permanent baseline for the life of the product (UI DropPercent).
             if (product.DropBaselinePrice is not > 0)
                 product.DropBaselinePrice = previousPrice is > 0 ? previousPrice : newPrice;
 
@@ -536,12 +974,11 @@ namespace Affiliate.Services
             if (isNew)
                 return;
 
-            // Alert only on a drop of ≥ threshold vs the last recorded price (not baseline).
             if (previousPrice is not > 0)
                 return;
 
             if (!TryPercentOff(previousPrice.Value, newPrice.Value, out var dropFromLast))
-                return; // same price, increase, or invalid — history already handled; no notify
+                return;
 
             var drop = RoundPct(dropFromLast);
             if (drop < PriceDropAlertThresholdPercent)
@@ -583,60 +1020,39 @@ namespace Affiliate.Services
         private static decimal RoundPct(decimal percent) =>
             Math.Round(percent, 2, MidpointRounding.AwayFromZero);
 
-        private static object BuildRequestPayload(ScraperSearch search, int startPage)
+        /// <summary>Sets or replaces the <c>page</c> query parameter on an Amazon search URL.</summary>
+        internal static string BuildPageUrl(string baseUrl, int page)
         {
-            var context = new List<object>();
-            AddContext(context, "force_headers", search.ForceHeaders);
-            AddContext(context, "force_cookies", search.ForceCookies);
-            AddContext(context, "hc_policy", search.HcPolicy);
-            AddContext(context, "category_id", search.CategoryId);
-            AddContext(context, "merchant_id", search.MerchantId);
-            AddContext(context, "check_empty_geo", search.CheckEmptyGeo);
-            AddContext(context, "safe_search", search.SafeSearch);
-            AddContext(context, "currency", search.Currency);
-            AddContext(context, "sort_by", search.SortBy);
-            AddContext(context, "refinements", BuildRefinements(search));
-            AddContext(context, "geo_location", search.GeoLocation);
+            if (string.IsNullOrWhiteSpace(baseUrl))
+                throw new ArgumentException("URL is required.", nameof(baseUrl));
 
-            return new
+            if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri))
+                throw new InvalidOperationException($"Invalid scrape URL: {baseUrl}");
+
+            var parts = new List<string>();
+            var pageSet = false;
+            var raw = uri.Query.TrimStart('?');
+            if (!string.IsNullOrEmpty(raw))
             {
-                source = search.Source,
-                domain = search.Domain,
-                query = search.Query,
-                locale = search.Locale,
-                start_page = startPage,
-                pages = 1,
-                parse = search.Parse,
-                context
-            };
-        }
-
-        /// <summary>Amazon p_36 price filter in cents (DB units × 100).</summary>
-        private static List<string>? BuildRefinements(ScraperSearch search)
-        {
-            var items = new List<string>();
-            if (!string.IsNullOrWhiteSpace(search.Refinements))
-                items.Add(search.Refinements.Trim());
-
-            if (search.MinPrice.HasValue || search.MaxPrice.HasValue)
-            {
-                var minCents = (search.MinPrice ?? 0) * 100;
-                var maxPart = search.MaxPrice.HasValue ? (search.MaxPrice.Value * 100).ToString() : "";
-                items.Add($"p_36:{minCents}-{maxPart}");
+                foreach (var segment in raw.Split('&', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    var eq = segment.IndexOf('=');
+                    var key = eq >= 0 ? segment[..eq] : segment;
+                    if (key.Equals("page", StringComparison.OrdinalIgnoreCase))
+                    {
+                        parts.Add($"page={page}");
+                        pageSet = true;
+                    }
+                    else
+                        parts.Add(segment);
+                }
             }
 
-            return items.Count > 0 ? items : null;
-        }
+            if (!pageSet)
+                parts.Add($"page={page}");
 
-        private static void AddContext(List<object> context, string key, object? value)
-        {
-            if (value is null)
-                return;
-            if (value is string s && string.IsNullOrWhiteSpace(s))
-                return;
-            if (value is System.Collections.ICollection { Count: 0 })
-                return;
-            context.Add(new { key, value });
+            var builder = new UriBuilder(uri) { Port = -1, Query = string.Join('&', parts) };
+            return builder.Uri.AbsoluteUri;
         }
 
         private static void ApplyOrganicData(
@@ -702,16 +1118,5 @@ namespace Affiliate.Services
 
         private static string? Truncate(string? value, int maxLength) =>
             value is null || value.Length <= maxLength ? value : value[..maxLength];
-
-        private static HttpClient CreateHttpClient()
-        {
-            var client = new HttpClient { Timeout = TimeSpan.FromMinutes(3) };
-            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
-                "Basic",
-                Convert.ToBase64String(Encoding.ASCII.GetBytes($"{OxylabsUsername}:{OxylabsPassword}")));
-            return client;
-        }
-
-        private sealed record SearchPageResult(List<OrganicProduct> Organic, int? LastVisiblePage);
     }
 }

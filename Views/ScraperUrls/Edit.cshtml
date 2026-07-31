@@ -1,0 +1,27 @@
+@model ScraperUrl
+@{
+    ViewData["Title"] = "تعديل رابط";
+}
+
+<div class="page-toolbar">
+    <h1 class="h2">تعديل: <span class="arabic-text">@Model.Name</span></h1>
+    <a asp-action="Index" class="btn btn-outline-secondary">العودة</a>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        <form asp-action="Edit" method="post">
+            @Html.AntiForgeryToken()
+            <input type="hidden" asp-for="Id" />
+            <partial name="_FormFields" />
+            <div class="mt-4">
+                <button type="submit" class="btn btn-primary">حفظ</button>
+                <a asp-action="Details" asp-route-id="@Model.Id" class="btn btn-outline-secondary">إلغاء</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+@section Scripts {
+    <partial name="_ValidationScriptsPartial" />
+}

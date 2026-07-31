@@ -1,0 +1,174 @@
+@model IEnumerable<ScraperUrl>
+@{
+    ViewData["Title"] = "روابط السكرابر";
+}
+
+<div class="page-toolbar">
+    <div>
+        <h1 class="h2">روابط السكرابر</h1>
+        <p class="text-muted mb-0">
+            تُجلب صفحات أمازون عبر ISP proxy، ثم تُحلَّل المنتجات من HTML. يُنفَّذ كل رابط مفعّل حسب فاصله الزمني.
+        </p>
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+        <a asp-action="Create" class="btn btn-primary"><i class="bi bi-plus-lg"></i> إضافة رابط</a>
+    </div>
+</div>
+
+@if (TempData["StatusMessage"] is string message)
+{
+    <div class="alert alert-info alert-dismissible fade show" role="alert">
+        @message
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="إغلاق"></button>
+    </div>
+}
+
+@Html.AntiForgeryToken()
+
+@if (Model.Any())
+{
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+        <span class="text-muted small" id="bulkSelectedCount">لم يتم تحديد روابط</span>
+        <button type="button" class="btn btn-sm btn-success" id="bulkEnable" disabled>
+            <i class="bi bi-toggle-on"></i> تفعيل
+        </button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="bulkDisable" disabled>
+            <i class="bi bi-toggle-off"></i> تعطيل
+        </button>
+    </div>
+}
+
+<div class="table-panel">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0" id="searchesTable">
+            <thead>
+                <tr>
+                    <th style="width:40px">
+                        @if (Model.Any())
+                        {
+                            <input type="checkbox" class="form-check-input" id="selectAllSearches" title="تحديد الكل" aria-label="تحديد الكل" />
+                        }
+                    </th>
+                    <th>الاسم</th>
+                    <th>النطاق</th>
+                    <th>الفاصل</th>
+                    <th>مفعّل</th>
+                    <th>آخر تشغيل (UTC)</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+            @foreach (var item in Model)
+            {
+                <tr class="search-row @(item.IsEnabled ? "" : "table-secondary")" data-search-id="@item.Id">
+                    <td>
+                        <input type="checkbox" class="form-check-input search-select" value="@item.Id" aria-label="تحديد @item.Name" />
+                    </td>
+                    <td>
+                        <a asp-action="Details" asp-route-id="@item.Id" class="fw-semibold arabic-text">@item.Name</a>
+                    </td>
+                    <td class="ltr">@item.Domain</td>
+                    <td class="num">@item.IntervalSeconds ث</td>
+                    <td class="search-enabled">
+                        @if (item.IsEnabled)
+                        {
+                            <span class="badge text-bg-success"><span class="status-dot on"></span> نعم</span>
+                        }
+                        else
+                        {
+                            <span class="badge text-bg-secondary"><span class="status-dot off"></span> لا</span>
+                        }
+                    </td>
+                    <td>
+                        @if (item.LastRunAt.HasValue)
+                        {
+                            <span class="num">@item.LastRunAt.Value.ToString("yyyy-MM-dd HH:mm")</span>
+                            @if (!string.IsNullOrEmpty(item.LastRunError))
+                            {
+                                <div class="small text-danger text-truncate" style="max-width:12rem" title="@item.LastRunError">@item.LastRunError</div>
+                            }
+                        }
+                        else
+                        {
+                            <span class="text-muted">—</span>
+                        }
+                    </td>
+                    <td class="text-nowrap">
+                        <a asp-action="Edit" asp-route-id="@item.Id" class="btn btn-sm btn-outline-secondary">تعديل</a>
+                        <a asp-action="Delete" asp-route-id="@item.Id" class="btn btn-sm btn-outline-danger">حذف</a>
+                    </td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+@if (!Model.Any())
+{
+    <div class="empty-state mt-3">
+        <p class="mb-2">لا توجد روابط بعد.</p>
+        <a asp-action="Create" class="btn btn-primary">إضافة أول رابط</a>
+    </div>
+}
+
+@section Scripts {
+<script>
+(() => {
+    const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value;
+    const selectAll = document.getElementById('selectAllSearches');
+    const boxes = () => [...document.querySelectorAll('.search-select')];
+    const countEl = document.getElementById('bulkSelectedCount');
+    const enableBtn = document.getElementById('bulkEnable');
+    const disableBtn = document.getElementById('bulkDisable');
+
+    function selectedIds() {
+        return boxes().filter(b => b.checked).map(b => Number(b.value));
+    }
+
+    function refresh() {
+        const ids = selectedIds();
+        const n = ids.length;
+        if (countEl) countEl.textContent = n === 0 ? 'لم يتم تحديد روابط' : `تم تحديد ${n}`;
+        if (enableBtn) enableBtn.disabled = n === 0;
+        if (disableBtn) disableBtn.disabled = n === 0;
+        if (selectAll) {
+            const all = boxes();
+            selectAll.checked = all.length > 0 && all.every(b => b.checked);
+            selectAll.indeterminate = n > 0 && n < all.length;
+        }
+    }
+
+    selectAll?.addEventListener('change', () => {
+        boxes().forEach(b => { b.checked = selectAll.checked; });
+        refresh();
+    });
+    document.getElementById('searchesTable')?.addEventListener('change', e => {
+        if (e.target.classList.contains('search-select')) refresh();
+    });
+
+    async function bulk(isEnabled) {
+        const ids = selectedIds();
+        if (!ids.length || !token) return;
+        const res = await fetch('@Url.Action("BulkUpdateEnabled")', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': token
+            },
+            body: JSON.stringify({ ids, isEnabled })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.success) {
+            alert(data.message || 'فشل التحديث');
+            return;
+        }
+        location.reload();
+    }
+
+    enableBtn?.addEventListener('click', () => bulk(true));
+    disableBtn?.addEventListener('click', () => bulk(false));
+    refresh();
+})();
+</script>
+}

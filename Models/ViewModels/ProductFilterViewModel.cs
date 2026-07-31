@@ -11,8 +11,8 @@ namespace Affiliate.ViewModels
         [Display(Name = "ASIN")]
         public string? Asin { get; set; }
 
-        [Display(Name = "Scraper search")]
-        public int? ScraperSearchId { get; set; }
+        [Display(Name = "Scraper URL")]
+        public int? ScraperUrlId { get; set; }
 
         public string? Manufacturer { get; set; }
         public string? Currency { get; set; }
@@ -88,7 +88,7 @@ namespace Affiliate.ViewModels
         public IReadOnlyList<string> Manufacturers { get; set; } = [];
         public IReadOnlyList<string> Currencies { get; set; } = [];
         public IReadOnlyList<string> Statuses { get; set; } = [];
-        public IReadOnlyList<ScraperSearchOption> Searches { get; set; } = [];
+        public IReadOnlyList<ScraperUrlOption> Searches { get; set; } = [];
     }
 
     public class ProductDetailsViewModel
