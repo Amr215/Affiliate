@@ -1,0 +1,10 @@
+﻿/* Scoped layout tweaks — main theme lives in wwwroot/css/site.css */
+
+a.navbar-brand {
+  white-space: nowrap;
+  word-break: normal;
+}
+
+.footer {
+  /* Legacy class kept for compatibility; footer is styled via .app-footer */
+}

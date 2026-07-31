@@ -1,0 +1,97 @@
+@model OxylabsRequestLog
+@{
+    ViewData["Title"] = $"سجل Oxylabs #{Model.Id}";
+    var isOk = Model.StatusCode == 200;
+}
+
+<div class="page-toolbar">
+    <div>
+        <h1 class="h2 mb-2">سجل طلب #@Model.Id</h1>
+        <div class="d-flex flex-wrap gap-2">
+            @if (isOk)
+            {
+                <span class="badge text-bg-success">@Model.StatusCode @Model.StatusPhrase</span>
+            }
+            else
+            {
+                <span class="badge text-bg-danger">@Model.StatusCode @Model.StatusPhrase</span>
+            }
+            <span class="stat-pill"><i class="bi bi-clock"></i> @Model.RequestedAt.ToString("yyyy-MM-dd HH:mm:ss") UTC</span>
+        </div>
+    </div>
+    <a asp-action="Index" class="btn btn-outline-secondary"><i class="bi bi-arrow-right"></i> العودة للقائمة</a>
+</div>
+
+<div class="card mb-4">
+    <div class="card-body">
+        <dl class="row detail-grid mb-0">
+            <dt class="col-sm-3">عملية البحث</dt>
+            <dd class="col-sm-9">
+                @if (Model.ScraperSearch != null)
+                {
+                    <a asp-controller="ScraperSearches" asp-action="Details" asp-route-id="@Model.ScraperSearchId" class="arabic-text">
+                        @Model.ScraperSearch.Name
+                    </a>
+                    <span class="text-muted ltr">(ID @Model.ScraperSearchId)</span>
+                }
+                else if (Model.ScraperSearchId == null)
+                {
+                    <span>ASIN recheck</span>
+                }
+                else
+                {
+                    <span class="ltr">ID @Model.ScraperSearchId</span>
+                }
+            </dd>
+
+            <dt class="col-sm-3">الصفحة</dt>
+            <dd class="col-sm-9 num">@Model.Page</dd>
+
+            <dt class="col-sm-3">وقت الطلب (UTC)</dt>
+            <dd class="col-sm-9 num">@Model.RequestedAt.ToString("yyyy-MM-dd HH:mm:ss")</dd>
+
+            <dt class="col-sm-3">رمز الحالة</dt>
+            <dd class="col-sm-9 num">
+                @Model.StatusCode
+                @if (!string.IsNullOrEmpty(Model.StatusPhrase))
+                {
+                    <span class="text-muted">— @Model.StatusPhrase</span>
+                }
+            </dd>
+        </dl>
+    </div>
+</div>
+
+<div class="card mb-4">
+    <div class="card-header fw-bold"><i class="bi bi-send"></i> نص الطلب (Request)</div>
+    <div class="card-body">
+        @if (string.IsNullOrEmpty(Model.RequestBody))
+        {
+            <p class="text-muted mb-0">لا يوجد</p>
+        }
+        else
+        {
+            <pre class="log-body mb-0 ltr"><code>@Model.RequestBody</code></pre>
+        }
+    </div>
+</div>
+
+<div class="card mb-4">
+    <div class="card-header fw-bold">
+        <i class="bi bi-reply"></i> نص الاستجابة (Response)
+        @if (isOk)
+        {
+            <span class="text-muted fw-normal small">— يُحفظ فقط عند الحالة ≠ 200</span>
+        }
+    </div>
+    <div class="card-body">
+        @if (string.IsNullOrEmpty(Model.ResponseBody))
+        {
+            <p class="text-muted mb-0">لا يوجد محتوى محفوظ لهذه الاستجابة.</p>
+        }
+        else
+        {
+            <pre class="log-body mb-0 ltr"><code>@Model.ResponseBody</code></pre>
+        }
+    </div>
+</div>

@@ -1,0 +1,626 @@
+@model ProductsIndexViewModel
+@{
+    ViewData["Title"] = "المنتجات";
+    var f = Model.Filter;
+}
+
+<div class="page-toolbar">
+    <div>
+        <h1 class="h2">المنتجات</h1>
+        <p class="text-muted mb-0">
+            <span class="stat-pill"><i class="bi bi-box-seam"></i> @Model.TotalCount نتيجة</span>
+        </p>
+    </div>
+</div>
+
+@if (TempData["StatusMessage"] is string statusMessage)
+{
+    <div class="alert alert-info alert-dismissible fade show" role="alert">
+        @statusMessage
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="إغلاق"></button>
+    </div>
+}
+
+<form method="get" asp-action="Index" class="card filter-card mb-4">
+    <div class="card-header d-flex align-items-center justify-content-between">
+        <span><i class="bi bi-funnel"></i> عوامل التصفية</span>
+        <button class="btn btn-sm btn-outline-secondary d-md-none" type="button" data-bs-toggle="collapse" data-bs-target="#filtersBody" aria-expanded="true">
+            إظهار / إخفاء
+        </button>
+    </div>
+    <div class="collapse show" id="filtersBody">
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-sm-6 col-lg-4">
+                    <label asp-for="Filter.Search" class="form-label">بحث</label>
+                    <input asp-for="Filter.Search" name="Search" class="form-control" placeholder="الاسم، ASIN، الشركة…" />
+                </div>
+                <div class="col-sm-6 col-lg-2">
+                    <label asp-for="Filter.Asin" class="form-label">ASIN</label>
+                    <input asp-for="Filter.Asin" name="Asin" class="form-control ltr" />
+                </div>
+                <div class="col-sm-6 col-lg-3">
+                    <label asp-for="Filter.ScraperSearchId" class="form-label">عملية البحث</label>
+                    <select name="ScraperSearchId" class="form-select">
+                        <option value="">الكل</option>
+                        @foreach (var s in Model.Searches)
+                        {
+                            if (f.ScraperSearchId == s.Id)
+                            {
+                                <option value="@s.Id" selected>@s.DisplayLabel</option>
+                            }
+                            else
+                            {
+                                <option value="@s.Id">@s.DisplayLabel</option>
+                            }
+                        }
+                    </select>
+                </div>
+                <div class="col-sm-6 col-lg-3">
+                    <label asp-for="Filter.Manufacturer" class="form-label">الشركة المصنّعة</label>
+                    <select name="Manufacturer" class="form-select">
+                        <option value="">الكل</option>
+                        @foreach (var m in Model.Manufacturers)
+                        {
+                            if (f.Manufacturer == m)
+                            {
+                                <option value="@m" selected>@m</option>
+                            }
+                            else
+                            {
+                                <option value="@m">@m</option>
+                            }
+                        }
+                    </select>
+                </div>
+                <div class="col-sm-6 col-lg-3">
+                    <label asp-for="Filter.Status" class="form-label">الحالة</label>
+                    <select name="Status" class="form-select">
+                        <option value="">الكل</option>
+                        @foreach (var s in Model.Statuses)
+                        {
+                            if (f.Status == s)
+                            {
+                                <option value="@s" selected>@s</option>
+                            }
+                            else
+                            {
+                                <option value="@s">@s</option>
+                            }
+                        }
+                    </select>
+                </div>
+
+                <div class="col-6 col-md-2">
+                    <label asp-for="Filter.Currency" class="form-label">العملة</label>
+                    <select name="Currency" class="form-select">
+                        <option value="">الكل</option>
+                        @foreach (var c in Model.Currencies)
+                        {
+                            if (f.Currency == c)
+                            {
+                                <option value="@c" selected>@c</option>
+                            }
+                            else
+                            {
+                                <option value="@c">@c</option>
+                            }
+                        }
+                    </select>
+                </div>
+                <div class="col-6 col-md-2">
+                    <label asp-for="Filter.MinPrice" class="form-label">أقل سعر</label>
+                    <input asp-for="Filter.MinPrice" name="MinPrice" class="form-control ltr" type="number" step="1" min="0" />
+                </div>
+                <div class="col-6 col-md-2">
+                    <label asp-for="Filter.MaxPrice" class="form-label">أعلى سعر</label>
+                    <input asp-for="Filter.MaxPrice" name="MaxPrice" class="form-control ltr" type="number" step="1" min="0" />
+                </div>
+                <div class="col-6 col-md-2">
+                    <label asp-for="Filter.MinDropPercent" class="form-label">أقل انخفاض %</label>
+                    <input asp-for="Filter.MinDropPercent" name="MinDropPercent" class="form-control ltr" step="0.1" min="0" max="100" />
+                </div>
+                <div class="col-6 col-md-2">
+                    <label asp-for="Filter.MinRating" class="form-label">أقل تقييم</label>
+                    <input asp-for="Filter.MinRating" name="MinRating" class="form-control ltr" step="0.1" min="0" max="5" />
+                </div>
+                <div class="col-6 col-md-2">
+                    <label asp-for="Filter.MinReviews" class="form-label">أقل مراجعات</label>
+                    <input asp-for="Filter.MinReviews" name="MinReviews" class="form-control ltr" />
+                </div>
+                <div class="col-6 col-md-2">
+                    <label asp-for="Filter.PageSize" class="form-label">حجم الصفحة</label>
+                    <select name="PageSize" class="form-select" asp-for="Filter.PageSize">
+                        <option value="10">10</option>
+                        <option value="25">25</option>
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                        <option value="500">500</option>
+                    </select>
+                </div>
+
+                <div class="col-sm-6 col-lg-3">
+                    <label asp-for="Filter.LastCheckedFrom" class="form-label">آخر فحص من</label>
+                    <input asp-for="Filter.LastCheckedFrom" name="LastCheckedFrom" class="form-control" type="date" />
+                </div>
+                <div class="col-sm-6 col-lg-3">
+                    <label asp-for="Filter.LastCheckedTo" class="form-label">آخر فحص إلى</label>
+                    <input asp-for="Filter.LastCheckedTo" name="LastCheckedTo" class="form-control" type="date" />
+                </div>
+                <div class="col-sm-6 col-lg-3">
+                    <label asp-for="Filter.CreatedFrom" class="form-label">تاريخ الإنشاء من</label>
+                    <input asp-for="Filter.CreatedFrom" name="CreatedFrom" class="form-control" type="date" />
+                </div>
+                <div class="col-sm-6 col-lg-3">
+                    <label asp-for="Filter.CreatedTo" class="form-label">تاريخ الإنشاء إلى</label>
+                    <input asp-for="Filter.CreatedTo" name="CreatedTo" class="form-control" type="date" />
+                </div>
+
+                <div class="col-6 col-md-2">
+                    <label asp-for="Filter.IsAvailable" class="form-label">متوفر</label>
+                    <select name="IsAvailable" class="form-select">
+                        <option value="">الكل</option>
+                        @if (f.IsAvailable == true) { <option value="true" selected>نعم</option> } else { <option value="true">نعم</option> }
+                        @if (f.IsAvailable == false) { <option value="false" selected>لا</option> } else { <option value="false">لا</option> }
+                    </select>
+                </div>
+                <div class="col-6 col-md-2">
+                    <label asp-for="Filter.IsBlocked" class="form-label">محظور</label>
+                    <select name="IsBlocked" class="form-select">
+                        <option value="">الكل</option>
+                        @if (f.IsBlocked == true) { <option value="true" selected>نعم</option> } else { <option value="true">نعم</option> }
+                        @if (f.IsBlocked == false) { <option value="false" selected>لا</option> } else { <option value="false">لا</option> }
+                    </select>
+                </div>
+                <div class="col-6 col-md-2 d-flex align-items-end">
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="checkbox" name="HasNotAvailableDate" value="true"
+                               id="HasNotAvailableDate" @(f.HasNotAvailableDate ? "checked" : null) />
+                        <label class="form-check-label" for="HasNotAvailableDate">لديه تاريخ عدم توفر</label>
+                    </div>
+                </div>
+                <div class="col-6 col-md-2">
+                    <label asp-for="Filter.IsPrime" class="form-label">Prime</label>
+                    <select name="IsPrime" class="form-select">
+                        <option value="">الكل</option>
+                        @if (f.IsPrime == true) { <option value="true" selected>نعم</option> } else { <option value="true">نعم</option> }
+                        @if (f.IsPrime == false) { <option value="false" selected>لا</option> } else { <option value="false">لا</option> }
+                    </select>
+                </div>
+                <div class="col-6 col-md-2">
+                    <label asp-for="Filter.IsSponsored" class="form-label">مموّل</label>
+                    <select name="IsSponsored" class="form-select">
+                        <option value="">الكل</option>
+                        @if (f.IsSponsored == true) { <option value="true" selected>نعم</option> } else { <option value="true">نعم</option> }
+                        @if (f.IsSponsored == false) { <option value="false" selected>لا</option> } else { <option value="false">لا</option> }
+                    </select>
+                </div>
+                <div class="col-6 col-md-2">
+                    <label asp-for="Filter.IsBestSeller" class="form-label">الأكثر مبيعاً</label>
+                    <select name="IsBestSeller" class="form-select">
+                        <option value="">الكل</option>
+                        @if (f.IsBestSeller == true) { <option value="true" selected>نعم</option> } else { <option value="true">نعم</option> }
+                        @if (f.IsBestSeller == false) { <option value="false" selected>لا</option> } else { <option value="false">لا</option> }
+                    </select>
+                </div>
+                <div class="col-6 col-md-2">
+                    <label asp-for="Filter.SortBy" class="form-label">ترتيب حسب</label>
+                    <select name="SortBy" class="form-select" asp-items="ViewBag.SortByOptions"></select>
+                </div>
+                <div class="col-6 col-md-2">
+                    <label asp-for="Filter.SortDir" class="form-label">الاتجاه</label>
+                    <select name="SortDir" class="form-select">
+                        @if (f.SortDir == "desc") { <option value="desc" selected>تنازلي</option> } else { <option value="desc">تنازلي</option> }
+                        @if (f.SortDir == "asc") { <option value="asc" selected>تصاعدي</option> } else { <option value="asc">تصاعدي</option> }
+                    </select>
+                </div>
+            </div>
+
+            <div class="mt-3 d-flex flex-wrap gap-2">
+                <button type="submit" class="btn btn-primary"><i class="bi bi-check2"></i> تطبيق</button>
+                <a asp-action="Index" class="btn btn-outline-secondary">إعادة تعيين</a>
+            </div>
+        </div>
+    </div>
+</form>
+
+<form id="bulkAvailabilityForm">
+    @Html.AntiForgeryToken()
+
+    <div id="bulkStatus" class="alert alert-dismissible fade d-none mb-3" role="alert">
+        <span id="bulkStatusText"></span>
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="إغلاق"></button>
+    </div>
+
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+        <span class="text-muted small" id="bulkSelectedCount">لم يتم تحديد منتجات</span>
+        <button type="button" class="btn btn-sm btn-success" id="bulkMarkAvailable" disabled>
+            <i class="bi bi-check-circle"></i> تعيين كمتوفر
+        </button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="bulkMarkUnavailable" disabled>
+            <i class="bi bi-x-circle"></i> تعيين كغير متوفر
+        </button>
+        <button type="button" class="btn btn-sm btn-outline-danger bulk-mark-blocked" id="bulkMarkBlocked" disabled>
+            <i class="bi bi-slash-circle"></i> حظر
+        </button>
+        <button type="button" class="btn btn-sm btn-outline-warning bulk-unblock" id="bulkUnblock" disabled>
+            <i class="bi bi-unlock"></i> إلغاء الحظر
+        </button>
+    </div>
+
+    <div class="table-panel">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th style="width:40px">
+                            <input type="checkbox" class="form-check-input" id="selectAllProducts" title="تحديد الكل" aria-label="تحديد الكل" />
+                        </th>
+                        <th style="width:100px"></th>
+                        <th>الاسم</th>
+                        <th>عملية البحث</th>
+                        <th>التقييم</th>
+                        <th>السعر</th>
+                        <th>انخفاض %</th>
+                        <th>أدنى / أعلى</th>
+                        <th>الوسوم</th>
+                        <th>آخر فحص (UTC)</th>
+                        <th>غير متوفر منذ (UTC)</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                @foreach (var p in Model.Products)
+                {
+                    <tr class="product-row" data-product-id="@p.Id">
+                        <td>
+                            <input type="checkbox" class="form-check-input product-select" name="Ids" value="@p.Id" aria-label="تحديد المنتج" />
+                        </td>
+                        <td style="width:100px">
+                            @if (!string.IsNullOrEmpty(p.ImageUrl))
+                            {
+                                <img src="@p.ImageUrl" alt="" class="product-thumb" width="88" height="88" loading="lazy" />
+                            }
+                        </td>
+                        <td style="min-width:180px;max-width:320px">
+                            <span class="product-title arabic-text">
+                                @(string.IsNullOrWhiteSpace(p.Name) ? "(بدون عنوان)" : p.Name)
+                            </span>
+                            @if (!string.IsNullOrEmpty(p.Manufacturer))
+                            {
+                                <div class="small text-muted arabic-text">@p.Manufacturer</div>
+                            }
+                        </td>
+                        <td class="small arabic-text text-nowrap">
+                            @if (p.ScraperSearch != null)
+                            {
+                                <a asp-controller="ScraperSearches" asp-action="Details" asp-route-id="@p.ScraperSearchId">
+                                    @p.ScraperSearch.Name
+                                </a>
+                            }
+                            else
+                            {
+                                <span class="text-muted">—</span>
+                            }
+                        </td>
+                        <td class="num">
+                            @if (p.Rating.HasValue)
+                            {
+                                <span><i class="bi bi-star-fill text-warning"></i> @p.Rating.Value.ToString("0.0")</span>
+                                <span class="text-muted small">(@(p.ReviewsCount ?? 0))</span>
+                            }
+                            else
+                            {
+                                <span class="text-muted">—</span>
+                            }
+                        </td>
+                        <td class="num">
+                            @if (p.CurrentPrice.HasValue)
+                            {
+                                <span class="fw-semibold">@p.CurrentPrice @p.Currency</span>
+                            }
+                            else
+                            {
+                                <span class="text-muted">—</span>
+                            }
+                        </td>
+                        <td class="num">
+                            @if (p.DropPercent.HasValue)
+                            {
+                                <span class="badge bg-danger drop-percent">@p.DropPercent.Value.ToString("0.#")%</span>
+                            }
+                            else
+                            {
+                                <span class="text-muted">—</span>
+                            }
+                        </td>
+                        <td class="small num">
+                            @(p.LowestPrice?.ToString() ?? "—") / @(p.HighestPrice?.ToString() ?? "—")
+                        </td>
+                        <td class="product-tags">
+                            @if (p.IsPrime) { <span class="product-tag-label" data-static>Prime</span> }
+                            @if (p.IsSponsored) { <span class="product-tag-label" data-static>مموّل</span> }
+                            @if (p.IsBestSeller) { <span class="product-tag-label" data-static>الأكثر مبيعاً</span> }
+                            @if (p.IsBlocked == true) { <span class="product-tag-label" data-status>محظور</span> }
+                            else if (!p.IsAvailable) { <span class="product-tag-label" data-status>غير متوفر</span> }
+                        </td>
+                        <td class="small text-nowrap num">@p.LastCheckedAt.ToString("yyyy-MM-dd HH:mm")</td>
+                        <td class="small text-nowrap num product-not-available">
+                            @if (p.NotAvailableDate.HasValue)
+                            {
+                                var days = (DateTime.UtcNow - p.NotAvailableDate.Value).TotalDays;
+                                <span class="@(days >= 7 ? "text-danger fw-semibold" : "")">
+                                    @p.NotAvailableDate.Value.ToString("yyyy-MM-dd HH:mm")
+                                </span>
+                                @if (days >= 7)
+                                {
+                                    <div class="text-danger" style="font-size:.75rem">+@((int)days) يوم</div>
+                                }
+                            }
+                            else
+                            {
+                                <span class="text-muted">—</span>
+                            }
+                        </td>
+                        <td class="text-nowrap">
+                            <div class="d-flex flex-wrap gap-1 justify-content-end">
+                                <a asp-action="Details" asp-route-id="@p.Id" class="btn btn-sm btn-outline-primary">السجل</a>
+                                @if (!string.IsNullOrWhiteSpace(p.Asin))
+                                {
+                                    <a href="https://www.amazon.eg/dp/@p.Asin.Trim()?language=ar_AE" target="_blank" rel="noopener" class="btn btn-sm btn-outline-secondary">Amazon</a>
+                                }
+                            </div>
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="d-flex flex-wrap align-items-center gap-2 mt-3">
+        <button type="button" class="btn btn-sm btn-outline-danger bulk-mark-blocked" disabled>
+            <i class="bi bi-slash-circle"></i> حظر
+        </button>
+        <button type="button" class="btn btn-sm btn-outline-warning bulk-unblock" disabled>
+            <i class="bi bi-unlock"></i> إلغاء الحظر
+        </button>
+    </div>
+</form>
+
+@if (Model.Products.Count == 0)
+{
+    <div class="empty-state">
+        <i class="bi bi-inbox"></i>
+        <p class="mb-0">لا توجد منتجات مطابقة لعوامل التصفية.</p>
+    </div>
+}
+
+@if (Model.TotalPages > 1)
+{
+    <nav class="mt-3 d-flex flex-wrap justify-content-center align-items-center gap-2" aria-label="صفحات المنتجات">
+        <ul class="pagination mb-0">
+            @{
+                var prevDisabled = f.Page <= 1 ? "disabled" : null;
+                var nextDisabled = f.Page >= Model.TotalPages ? "disabled" : null;
+                var lastDisabled = f.Page >= Model.TotalPages ? "disabled" : null;
+            }
+            <li class="page-item @prevDisabled">
+                <a class="page-link"
+                   asp-action="Index"
+                   asp-all-route-data="@(ToRoute(f, f.Page - 1))">السابق</a>
+            </li>
+            <li class="page-item disabled">
+                <span class="page-link">صفحة @f.Page من @Model.TotalPages</span>
+            </li>
+            <li class="page-item @nextDisabled">
+                <a class="page-link"
+                   asp-action="Index"
+                   asp-all-route-data="@(ToRoute(f, f.Page + 1))">التالي</a>
+            </li>
+            <li class="page-item @lastDisabled">
+                <a class="page-link"
+                   asp-action="Index"
+                   asp-all-route-data="@(ToRoute(f, Model.TotalPages))">الأخيرة</a>
+            </li>
+        </ul>
+
+        <form method="get" asp-action="Index" class="d-flex align-items-center gap-2" id="gotoPageForm">
+            @foreach (var kv in ToRoute(f, f.Page))
+            {
+                if (!string.Equals(kv.Key, "Page", StringComparison.OrdinalIgnoreCase))
+                {
+                    <input type="hidden" name="@kv.Key" value="@kv.Value" />
+                }
+            }
+            <label for="gotoPageInput" class="form-label mb-0 small text-muted text-nowrap">الذهاب إلى صفحة</label>
+            <input id="gotoPageInput"
+                   type="number"
+                   name="Page"
+                   class="form-control form-control-sm ltr"
+                   style="width:5rem"
+                   min="1"
+                   max="@Model.TotalPages"
+                   value="@f.Page"
+                   required />
+            <button type="submit" class="btn btn-sm btn-outline-primary">اذهب</button>
+        </form>
+    </nav>
+}
+
+@section Scripts {
+<script>
+(() => {
+    const selectAll = document.getElementById('selectAllProducts');
+    const checkboxes = () => [...document.querySelectorAll('.product-select')];
+    const countEl = document.getElementById('bulkSelectedCount');
+    const markAvailable = document.getElementById('bulkMarkAvailable');
+    const markUnavailable = document.getElementById('bulkMarkUnavailable');
+    const markBlockedBtns = [...document.querySelectorAll('.bulk-mark-blocked')];
+    const unblockBtns = [...document.querySelectorAll('.bulk-unblock')];
+    const statusEl = document.getElementById('bulkStatus');
+    const statusText = document.getElementById('bulkStatusText');
+    const token = document.querySelector('#bulkAvailabilityForm input[name="__RequestVerificationToken"]')?.value;
+    const availabilityUrl = '@Url.Action("BulkUpdateAvailability")';
+    const blockedUrl = '@Url.Action("BulkUpdateBlocked")';
+    const bulkButtons = [markAvailable, markUnavailable, ...markBlockedBtns, ...unblockBtns].filter(Boolean);
+
+    function formatUtcDate(value) {
+        const d = new Date(value);
+        const pad = n => String(n).padStart(2, '0');
+        return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+    }
+
+    function showStatus(message, ok) {
+        statusText.textContent = message;
+        statusEl.classList.remove('d-none', 'alert-info', 'alert-success', 'alert-danger', 'show');
+        statusEl.classList.add(ok ? 'alert-success' : 'alert-danger', 'show');
+    }
+
+    function updateProductRow(product) {
+        const row = document.querySelector(`.product-row[data-product-id="${product.id}"]`);
+        if (!row) return;
+
+        const tagsCell = row.querySelector('.product-tags');
+        if (tagsCell) {
+            const keep = [...tagsCell.querySelectorAll('.product-tag-label[data-static]')];
+            tagsCell.replaceChildren(...keep);
+            if (product.isBlocked) {
+                tagsCell.insertAdjacentHTML('beforeend', ' <span class="product-tag-label" data-status>محظور</span>');
+            } else if (!product.isAvailable) {
+                tagsCell.insertAdjacentHTML('beforeend', ' <span class="product-tag-label" data-status>غير متوفر</span>');
+            }
+        }
+
+        const naCell = row.querySelector('.product-not-available');
+        if (naCell) {
+            if (product.notAvailableDate) {
+                const date = new Date(product.notAvailableDate);
+                const fmt = formatUtcDate(product.notAvailableDate);
+                const days = Math.floor((Date.now() - date.getTime()) / 86400000);
+                if (days >= 7) {
+                    naCell.innerHTML = `<span class="text-danger fw-semibold">${fmt}</span><div class="text-danger" style="font-size:.75rem">+${days} يوم</div>`;
+                } else {
+                    naCell.innerHTML = `<span>${fmt}</span>`;
+                }
+            } else {
+                naCell.innerHTML = '<span class="text-muted">—</span>';
+            }
+        }
+    }
+
+    async function bulkAction(url, body, btn) {
+        const ids = checkboxes().filter(c => c.checked).map(c => Number(c.value));
+        if (!ids.length) return;
+
+        bulkButtons.forEach(b => { b.disabled = true; });
+        try {
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'RequestVerificationToken': token
+                },
+                body: JSON.stringify({ ids, ...body })
+            });
+
+            const data = await res.json().catch(() => null);
+            if (!res.ok || !data?.success) {
+                showStatus(data?.message || 'تعذر تنفيذ العملية.', false);
+                return;
+            }
+
+            (data.products || []).forEach(updateProductRow);
+            showStatus(data.message, true);
+        } catch {
+            showStatus('تعذر الاتصال بالخادم.', false);
+        } finally {
+            refresh();
+        }
+    }
+
+    function refresh() {
+        const boxes = checkboxes();
+        const selected = boxes.filter(c => c.checked);
+        const n = selected.length;
+        countEl.textContent = n === 0 ? 'لم يتم تحديد منتجات' : `تم تحديد ${n}`;
+        const none = n === 0;
+        markAvailable.disabled = none;
+        markUnavailable.disabled = none;
+        markBlockedBtns.forEach(b => { b.disabled = none; });
+        unblockBtns.forEach(b => { b.disabled = none; });
+        if (selectAll) {
+            selectAll.checked = boxes.length > 0 && selected.length === boxes.length;
+            selectAll.indeterminate = selected.length > 0 && selected.length < boxes.length;
+        }
+        boxes.forEach(c => {
+            c.closest('.product-row')?.classList.toggle('is-selected', c.checked);
+        });
+    }
+
+    selectAll?.addEventListener('change', () => {
+        checkboxes().forEach(c => { c.checked = selectAll.checked; });
+        refresh();
+    });
+
+    document.getElementById('bulkAvailabilityForm')?.addEventListener('change', e => {
+        if (e.target.classList.contains('product-select')) refresh();
+    });
+
+    document.getElementById('bulkAvailabilityForm')?.addEventListener('click', e => {
+        const row = e.target.closest('.product-row');
+        if (!row) return;
+        if (e.target.closest('a, button, input, label')) return;
+
+        const cb = row.querySelector('.product-select');
+        if (!cb) return;
+        cb.checked = !cb.checked;
+        refresh();
+    });
+
+    markAvailable?.addEventListener('click', () => bulkAction(availabilityUrl, { isAvailable: true }, markAvailable));
+    markUnavailable?.addEventListener('click', () => bulkAction(availabilityUrl, { isAvailable: false }, markUnavailable));
+    markBlockedBtns.forEach(btn => btn.addEventListener('click', () => bulkAction(blockedUrl, { isBlocked: true }, btn)));
+    unblockBtns.forEach(btn => btn.addEventListener('click', () => bulkAction(blockedUrl, { isBlocked: false }, btn)));
+
+    refresh();
+})();
+</script>
+}
+
+@functions {
+    private static Dictionary<string, string?> ToRoute(ProductFilterViewModel filter, int page)
+    {
+        var d = new Dictionary<string, string?>
+        {
+            ["Page"] = page.ToString(),
+            ["PageSize"] = filter.PageSize.ToString(),
+            ["SortBy"] = filter.SortBy,
+            ["SortDir"] = filter.SortDir,
+            ["Search"] = filter.Search,
+            ["Asin"] = filter.Asin,
+            ["ScraperSearchId"] = filter.ScraperSearchId?.ToString(),
+            ["Manufacturer"] = filter.Manufacturer,
+            ["Currency"] = filter.Currency,
+            ["Status"] = filter.Status,
+            ["IsAvailable"] = filter.IsAvailable?.ToString().ToLowerInvariant(),
+            ["IsBlocked"] = filter.IsBlocked?.ToString().ToLowerInvariant(),
+            ["HasNotAvailableDate"] = filter.HasNotAvailableDate ? "true" : null,
+            ["IsPrime"] = filter.IsPrime?.ToString().ToLowerInvariant(),
+            ["IsSponsored"] = filter.IsSponsored?.ToString().ToLowerInvariant(),
+            ["IsBestSeller"] = filter.IsBestSeller?.ToString().ToLowerInvariant(),
+            ["MinPrice"] = filter.MinPrice?.ToString(),
+            ["MaxPrice"] = filter.MaxPrice?.ToString(),
+            ["MinDropPercent"] = filter.MinDropPercent?.ToString(),
+            ["MinRating"] = filter.MinRating?.ToString(),
+            ["MinReviews"] = filter.MinReviews?.ToString(),
+            ["LastCheckedFrom"] = filter.LastCheckedFrom?.ToString("yyyy-MM-dd"),
+            ["LastCheckedTo"] = filter.LastCheckedTo?.ToString("yyyy-MM-dd"),
+            ["CreatedFrom"] = filter.CreatedFrom?.ToString("yyyy-MM-dd"),
+            ["CreatedTo"] = filter.CreatedTo?.ToString("yyyy-MM-dd")
+        };
+
+        return d.Where(kv => !string.IsNullOrEmpty(kv.Value))
+            .ToDictionary(kv => kv.Key, kv => kv.Value);
+    }
+}

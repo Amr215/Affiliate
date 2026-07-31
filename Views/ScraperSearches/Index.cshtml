@@ -1,0 +1,337 @@
+@model IEnumerable<ScraperSearch>
+@{
+    ViewData["Title"] = "عمليات البحث";
+}
+
+<div class="page-toolbar">
+    <div>
+        <h1 class="h2">عمليات البحث</h1>
+        <p class="text-muted mb-0">
+            تُنفَّذ العمليات المفعّلة كل 30 ثانية عندما يحين موعد الفاصل الزمني.
+        </p>
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+        @if (Model.Any())
+        {
+            <button type="button" class="btn btn-outline-primary" id="saveAllPricesBtn">
+                <i class="bi bi-check2-all"></i> حفظ الأسعار
+            </button>
+        }
+        <a asp-action="Create" class="btn btn-primary"><i class="bi bi-plus-lg"></i> إضافة بحث</a>
+    </div>
+</div>
+
+<div id="pricesStatus" class="alert alert-dismissible fade d-none" role="alert">
+    <span id="pricesStatusText"></span>
+    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="إغلاق"></button>
+</div>
+
+@if (TempData["StatusMessage"] is string message)
+{
+    <div class="alert alert-info alert-dismissible fade show" role="alert">
+        @message
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="إغلاق"></button>
+    </div>
+}
+
+@Html.AntiForgeryToken()
+
+@if (Model.Any())
+{
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+        <span class="text-muted small" id="bulkSelectedCount">لم يتم تحديد عمليات بحث</span>
+        <button type="button" class="btn btn-sm btn-success" id="bulkEnable" disabled>
+            <i class="bi bi-toggle-on"></i> تفعيل
+        </button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="bulkDisable" disabled>
+            <i class="bi bi-toggle-off"></i> تعطيل
+        </button>
+    </div>
+}
+
+<div class="table-panel">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0" id="searchesTable">
+            <thead>
+                <tr>
+                    <th style="width:40px">
+                        @if (Model.Any())
+                        {
+                            <input type="checkbox" class="form-check-input" id="selectAllSearches" title="تحديد الكل" aria-label="تحديد الكل" />
+                        }
+                    </th>
+                    <th>الاسم</th>
+                    <th>الاستعلام</th>
+                    <th>النطاق</th>
+                    <th>أدنى / أعلى سعر</th>
+                    <th>الفاصل</th>
+                    <th>مفعّل</th>
+                    <th>آخر تشغيل (UTC)</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+            @foreach (var item in Model)
+            {
+                <tr class="search-row @(item.IsEnabled ? "" : "table-secondary")" data-search-id="@item.Id">
+                    <td>
+                        <input type="checkbox" class="form-check-input search-select" value="@item.Id" aria-label="تحديد @item.Name" />
+                    </td>
+                    <td>
+                        <a asp-action="Details" asp-route-id="@item.Id" class="fw-semibold arabic-text">@item.Name</a>
+                    </td>
+                    <td><code class="ltr">@item.Query</code></td>
+                    <td class="ltr">@item.Domain</td>
+                    <td class="text-nowrap" style="min-width:14rem">
+                        <div class="d-flex flex-wrap align-items-center gap-1 mb-0">
+                            <input type="number"
+                                   class="form-control form-control-sm ltr num price-min@(item.MinPrice is null ? " price-empty" : "")"
+                                   style="width:5.5rem"
+                                   min="0"
+                                   step="1"
+                                   value="@item.MinPrice"
+                                   placeholder="أدنى"
+                                   aria-label="أدنى سعر لـ @item.Name" />
+                            <span class="text-muted">/</span>
+                            <input type="number"
+                                   class="form-control form-control-sm ltr num price-max@(item.MaxPrice is null ? " price-empty" : "")"
+                                   style="width:5.5rem"
+                                   min="0"
+                                   step="1"
+                                   value="@item.MaxPrice"
+                                   placeholder="أعلى"
+                                   aria-label="أعلى سعر لـ @item.Name" />
+                        </div>
+                    </td>
+                    <td class="num">@item.IntervalSeconds ث</td>
+                    <td class="search-enabled">
+                        @if (item.IsEnabled)
+                        {
+                            <span class="badge text-bg-success"><span class="status-dot on"></span> نعم</span>
+                        }
+                        else
+                        {
+                            <span class="badge text-bg-secondary"><span class="status-dot off"></span> لا</span>
+                        }
+                    </td>
+                    <td>
+                        @if (item.LastRunAt.HasValue)
+                        {
+                            <span class="num">@item.LastRunAt.Value.ToString("yyyy-MM-dd HH:mm")</span>
+                            @if (!string.IsNullOrEmpty(item.LastRunError))
+                            {
+                                <span class="badge text-bg-danger ms-1" title="@item.LastRunError">خطأ</span>
+                            }
+                        }
+                        else
+                        {
+                            <span class="text-muted">لم يُنفَّذ</span>
+                        }
+                    </td>
+                    <td class="text-nowrap">
+                        <div class="d-flex flex-wrap gap-1 justify-content-end">
+                            <a asp-action="Edit" asp-route-id="@item.Id" class="btn btn-sm btn-outline-secondary">تعديل</a>
+                            <a asp-action="Delete" asp-route-id="@item.Id" class="btn btn-sm btn-outline-danger">حذف</a>
+                        </div>
+                    </td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+@if (!Model.Any())
+{
+    <div class="empty-state">
+        <i class="bi bi-search"></i>
+        <p class="mb-2">لا توجد عمليات بحث بعد.</p>
+        <a asp-action="Create" class="btn btn-primary">إنشاء أول عملية بحث</a>
+    </div>
+}
+
+@section Scripts {
+<script>
+(() => {
+    const statusEl = document.getElementById('pricesStatus');
+    const statusText = document.getElementById('pricesStatusText');
+    const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value;
+    const pricesUrl = '@Url.Action("UpdatePrices", "ScraperSearches")';
+    const enabledUrl = '@Url.Action("BulkUpdateEnabled", "ScraperSearches")';
+
+    const saveBtn = document.getElementById('saveAllPricesBtn');
+    const selectAll = document.getElementById('selectAllSearches');
+    const countEl = document.getElementById('bulkSelectedCount');
+    const enableBtn = document.getElementById('bulkEnable');
+    const disableBtn = document.getElementById('bulkDisable');
+    const checkboxes = () => [...document.querySelectorAll('.search-select')];
+    const bulkButtons = [enableBtn, disableBtn].filter(Boolean);
+
+    function showStatus(message, ok) {
+        statusText.textContent = message;
+        statusEl.classList.remove('d-none', 'alert-info', 'alert-success', 'alert-danger', 'show');
+        statusEl.classList.add(ok ? 'alert-success' : 'alert-danger', 'show');
+    }
+
+    function parseOptionalInt(value) {
+        const t = (value ?? '').trim();
+        if (t === '') return null;
+        const n = Number(t);
+        return Number.isInteger(n) ? n : NaN;
+    }
+
+    function syncPriceEmpty(input) {
+        if (!input) return;
+        input.classList.toggle('price-empty', !(input.value ?? '').trim());
+    }
+
+    document.querySelectorAll('.price-min, .price-max').forEach(input => {
+        syncPriceEmpty(input);
+        input.addEventListener('input', () => syncPriceEmpty(input));
+        input.addEventListener('change', () => syncPriceEmpty(input));
+    });
+
+    function refreshSelection() {
+        const boxes = checkboxes();
+        const selected = boxes.filter(c => c.checked);
+        const n = selected.length;
+        if (countEl) countEl.textContent = n === 0 ? 'لم يتم تحديد عمليات بحث' : `تم تحديد ${n}`;
+        const none = n === 0;
+        if (enableBtn) enableBtn.disabled = none;
+        if (disableBtn) disableBtn.disabled = none;
+        if (selectAll) {
+            selectAll.checked = boxes.length > 0 && selected.length === boxes.length;
+            selectAll.indeterminate = selected.length > 0 && selected.length < boxes.length;
+        }
+        boxes.forEach(c => {
+            c.closest('.search-row')?.classList.toggle('is-selected', c.checked);
+        });
+    }
+
+    function updateEnabledRow(search) {
+        const row = document.querySelector(`.search-row[data-search-id="${search.id}"]`);
+        if (!row) return;
+
+        row.classList.toggle('table-secondary', !search.isEnabled);
+        const cell = row.querySelector('.search-enabled');
+        if (cell) {
+            cell.innerHTML = search.isEnabled
+                ? '<span class="badge text-bg-success"><span class="status-dot on"></span> نعم</span>'
+                : '<span class="badge text-bg-secondary"><span class="status-dot off"></span> لا</span>';
+        }
+    }
+
+    async function bulkEnabled(isEnabled) {
+        const ids = checkboxes().filter(c => c.checked).map(c => Number(c.value));
+        if (!ids.length) return;
+
+        bulkButtons.forEach(b => { b.disabled = true; });
+        try {
+            const res = await fetch(enabledUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'RequestVerificationToken': token
+                },
+                body: JSON.stringify({ ids, isEnabled })
+            });
+
+            const data = await res.json().catch(() => null);
+            if (!res.ok || !data?.success) {
+                showStatus(data?.message || 'تعذر تنفيذ العملية.', false);
+                return;
+            }
+
+            (data.searches || []).forEach(updateEnabledRow);
+            showStatus(data.message, true);
+        } catch {
+            showStatus('تعذر الاتصال بالخادم.', false);
+        } finally {
+            refreshSelection();
+        }
+    }
+
+    selectAll?.addEventListener('change', () => {
+        checkboxes().forEach(c => { c.checked = selectAll.checked; });
+        refreshSelection();
+    });
+
+    document.getElementById('searchesTable')?.addEventListener('change', e => {
+        if (e.target.classList.contains('search-select')) refreshSelection();
+    });
+
+    document.getElementById('searchesTable')?.addEventListener('click', e => {
+        const row = e.target.closest('.search-row');
+        if (!row) return;
+        if (e.target.closest('a, button, input, label')) return;
+
+        const cb = row.querySelector('.search-select');
+        if (!cb) return;
+        cb.checked = !cb.checked;
+        refreshSelection();
+    });
+
+    enableBtn?.addEventListener('click', () => bulkEnabled(true));
+    disableBtn?.addEventListener('click', () => bulkEnabled(false));
+
+    saveBtn?.addEventListener('click', async () => {
+        const rows = [...document.querySelectorAll('#searchesTable tbody tr[data-search-id]')];
+        const updates = [];
+        const clientErrors = [];
+
+        for (const row of rows) {
+            const id = Number(row.dataset.searchId);
+            const minPrice = parseOptionalInt(row.querySelector('.price-min')?.value);
+            const maxPrice = parseOptionalInt(row.querySelector('.price-max')?.value);
+            const name = row.querySelector('a.arabic-text')?.textContent?.trim() || `#${id}`;
+
+            if (Number.isNaN(minPrice) || Number.isNaN(maxPrice)) {
+                clientErrors.push(`"${name}": أدخل أرقاماً صحيحة.`);
+                continue;
+            }
+            if ((minPrice != null && minPrice < 0) || (maxPrice != null && maxPrice < 0)) {
+                clientErrors.push(`"${name}": الأسعار يجب أن تكون صفر أو أكبر.`);
+                continue;
+            }
+            if (minPrice != null && maxPrice != null && minPrice > maxPrice) {
+                clientErrors.push(`"${name}": أدنى سعر لا يمكن أن يكون أكبر من أعلى سعر.`);
+                continue;
+            }
+
+            updates.push({ id, minPrice, maxPrice });
+        }
+
+        if (clientErrors.length) {
+            showStatus(clientErrors.join(' '), false);
+            return;
+        }
+
+        saveBtn.disabled = true;
+        try {
+            const res = await fetch(pricesUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'RequestVerificationToken': token
+                },
+                body: JSON.stringify(updates)
+            });
+
+            const data = await res.json().catch(() => null);
+            if (!res.ok || !data?.success) {
+                showStatus(data?.message || 'تعذر حفظ الأسعار.', false);
+                return;
+            }
+
+            showStatus(data.message, true);
+        } catch {
+            showStatus('تعذر الاتصال بالخادم.', false);
+        } finally {
+            saveBtn.disabled = false;
+        }
+    });
+
+    refreshSelection();
+})();
+</script>
+}

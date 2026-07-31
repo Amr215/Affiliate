@@ -1,0 +1,108 @@
+@model ScraperSearch
+@{
+    ViewData["Title"] = Model.Name;
+}
+
+<div class="page-toolbar">
+    <div>
+        <h1 class="h2 arabic-text mb-2">@Model.Name</h1>
+        @if (Model.IsEnabled)
+        {
+            <span class="badge text-bg-success">مفعّل</span>
+        }
+        else
+        {
+            <span class="badge text-bg-secondary">معطّل</span>
+        }
+    </div>
+    <div class="btn-group-actions d-flex flex-wrap gap-2">
+        <form asp-action="RunNow" asp-route-id="@Model.Id" method="post" class="d-inline">
+            @Html.AntiForgeryToken()
+            <button type="submit" class="btn btn-success"><i class="bi bi-play-fill"></i> تشغيل الآن</button>
+        </form>
+        <a asp-controller="OxylabsLogs" asp-action="Index" asp-route-ScraperSearchId="@Model.Id" class="btn btn-outline-primary">
+            <i class="bi bi-journal-text"></i> سجلات Oxylabs
+        </a>
+        <a asp-action="Edit" asp-route-id="@Model.Id" class="btn btn-outline-secondary">تعديل</a>
+        <a asp-action="Index" class="btn btn-outline-secondary">العودة للقائمة</a>
+    </div>
+</div>
+
+@if (TempData["StatusMessage"] is string message)
+{
+    <div class="alert alert-info">@message</div>
+}
+
+<div class="card">
+    <div class="card-body">
+        <dl class="row detail-grid mb-0">
+            <dt class="col-sm-3">الاستعلام</dt>
+            <dd class="col-sm-9"><code class="ltr">@Model.Query</code></dd>
+
+            <dt class="col-sm-3">النطاق</dt>
+            <dd class="col-sm-9 ltr">@Model.Domain</dd>
+
+            <dt class="col-sm-3">اللغة المحلية</dt>
+            <dd class="col-sm-9 ltr">@Model.Locale</dd>
+
+            <dt class="col-sm-3">المصدر</dt>
+            <dd class="col-sm-9 ltr">@Model.Source</dd>
+
+            <dt class="col-sm-3">صفحة البداية</dt>
+            <dd class="col-sm-9">
+                @Model.StartPage
+                <span class="text-muted">(ثم عبر <code class="ltr">last_visible_page</code>؛ التحليل: @(Model.Parse ? "نعم" : "لا"))</span>
+            </dd>
+
+            <dt class="col-sm-3">الترتيب</dt>
+            <dd class="col-sm-9 ltr">@(Model.SortBy ?? "—")</dd>
+
+            <dt class="col-sm-3">الموقع الجغرافي</dt>
+            <dd class="col-sm-9 arabic-text">@(Model.GeoLocation ?? "—")</dd>
+
+            <dt class="col-sm-3">العملة</dt>
+            <dd class="col-sm-9 ltr">@(Model.Currency ?? "—")</dd>
+
+            <dt class="col-sm-3">أدنى / أعلى سعر</dt>
+            <dd class="col-sm-9 num">@(Model.MinPrice?.ToString() ?? "—") / @(Model.MaxPrice?.ToString() ?? "—")</dd>
+
+            <dt class="col-sm-3">الفئة / التاجر</dt>
+            <dd class="col-sm-9 ltr">@(Model.CategoryId ?? "—") / @(Model.MerchantId ?? "—")</dd>
+
+            <dt class="col-sm-3">التحسينات</dt>
+            <dd class="col-sm-9 ltr">@(Model.Refinements ?? "—")</dd>
+
+            <dt class="col-sm-3">خيارات السياق</dt>
+            <dd class="col-sm-9 small ltr">
+                force_headers=@Model.ForceHeaders,
+                force_cookies=@Model.ForceCookies,
+                hc_policy=@Model.HcPolicy,
+                safe_search=@Model.SafeSearch,
+                check_empty_geo=@(Model.CheckEmptyGeo?.ToString() ?? "omit")
+            </dd>
+
+            <dt class="col-sm-3">الفاصل الزمني</dt>
+            <dd class="col-sm-9">@Model.IntervalSeconds ثانية</dd>
+
+            <dt class="col-sm-3">آخر تشغيل (UTC)</dt>
+            <dd class="col-sm-9 num">
+                @(Model.LastRunAt?.ToString("yyyy-MM-dd HH:mm:ss") ?? "لم يُنفَّذ")
+            </dd>
+
+            <dt class="col-sm-3">آخر خطأ</dt>
+            <dd class="col-sm-9">
+                @if (string.IsNullOrEmpty(Model.LastRunError))
+                {
+                    <span class="text-muted">لا يوجد</span>
+                }
+                else
+                {
+                    <span class="text-danger">@Model.LastRunError</span>
+                }
+            </dd>
+
+            <dt class="col-sm-3">تاريخ الإنشاء (UTC)</dt>
+            <dd class="col-sm-9 num">@Model.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss")</dd>
+        </dl>
+    </div>
+</div>

@@ -1,0 +1,186 @@
+@model ProductDetailsViewModel
+@{
+    ViewData["Title"] = Model.Product.Name;
+    var p = Model.Product;
+}
+
+<div class="page-toolbar">
+    <div class="d-flex gap-3 align-items-start flex-grow-1">
+        @if (!string.IsNullOrEmpty(p.ImageUrl))
+        {
+            <img src="@p.ImageUrl" alt="" width="96" height="96" class="rounded-3 border bg-white object-fit-contain flex-shrink-0" style="object-fit:contain" />
+        }
+        <div>
+            <h1 class="h3 mb-1 product-title arabic-text">@(string.IsNullOrWhiteSpace(p.Name) ? "(بدون عنوان)" : p.Name)</h1>
+            <div class="text-muted">
+                ASIN: <code class="asin">@p.Asin</code>
+                @if (!string.IsNullOrEmpty(p.Manufacturer))
+                {
+                    <span>· <span class="arabic-text">@p.Manufacturer</span></span>
+                }
+            </div>
+            <div class="mt-2 d-flex flex-wrap gap-1">
+                @if (p.IsPrime) { <span class="badge text-bg-info">Prime</span> }
+                @if (p.IsSponsored) { <span class="badge text-bg-warning">مموّل</span> }
+                @if (p.IsBestSeller) { <span class="badge text-bg-success">الأكثر مبيعاً</span> }
+                @if (p.IsBlocked == true)
+                {
+                    <span class="badge text-bg-danger">محظور</span>
+                }
+                else if (p.IsAvailable)
+                {
+                    <span class="badge text-bg-primary">@(p.Status ?? "متوفر")</span>
+                }
+                else
+                {
+                    <span class="badge text-bg-secondary">غير متوفر</span>
+                }
+            </div>
+        </div>
+    </div>
+    <div class="btn-group-actions d-flex flex-wrap gap-2">
+        <a asp-action="Index" class="btn btn-outline-secondary"><i class="bi bi-arrow-right"></i> العودة للقائمة</a>
+        @if (!string.IsNullOrWhiteSpace(p.Asin))
+        {
+            <a href="https://www.amazon.eg/dp/@p.Asin.Trim()?language=ar_AE" target="_blank" rel="noopener" class="btn btn-outline-primary">فتح على Amazon</a>
+        }
+    </div>
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-md-4">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="text-muted small mb-1">السعر الحالي</div>
+                <div class="price-value">@(p.CurrentPrice?.ToString() ?? "—") @p.Currency</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="text-muted small mb-1">أدنى / أعلى سعر</div>
+                <div class="fw-bold ltr d-inline-block">@(p.LowestPrice?.ToString() ?? "—") / @(p.HighestPrice?.ToString() ?? "—")</div>
+                <div class="small text-muted mt-2">
+                    انخفاض من أعلى سعر في الدورة:
+                    @if (p.DropPercent.HasValue)
+                    {
+                        <span class="badge bg-danger drop-percent">@p.DropPercent.Value.ToString("0.#")%</span>
+                    }
+                    else
+                    {
+                        <span>—</span>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="text-muted small mb-1">التقييم</div>
+                @if (p.Rating.HasValue)
+                {
+                    <div class="fw-bold"><i class="bi bi-star-fill text-warning"></i> @p.Rating.Value.ToString("0.0")</div>
+                    <div class="small text-muted mt-2">@(p.ReviewsCount ?? 0) مراجعة</div>
+                }
+                else
+                {
+                    <div class="text-muted">—</div>
+                }
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card mb-4">
+    <div class="card-body">
+        <h2 class="h5 mb-3">تفاصيل المنتج</h2>
+        <dl class="row detail-grid mb-0">
+            <dt class="col-sm-3">الشحن</dt>
+            <dd class="col-sm-9 arabic-text">@(p.ShippingInformation ?? "—")</dd>
+
+            <dt class="col-sm-3">الموضع</dt>
+            <dd class="col-sm-9 num">@(p.Position?.ToString() ?? "—")</dd>
+
+            <dt class="col-sm-3">آخر فحص (UTC)</dt>
+            <dd class="col-sm-9 num">@p.LastCheckedAt.ToString("yyyy-MM-dd HH:mm:ss")</dd>
+
+            <dt class="col-sm-3">غير متوفر منذ (UTC)</dt>
+            <dd class="col-sm-9 num">
+                @(p.NotAvailableDate?.ToString("yyyy-MM-dd HH:mm:ss") ?? "—")
+            </dd>
+
+            <dt class="col-sm-3">تاريخ الإنشاء (UTC)</dt>
+            <dd class="col-sm-9 num">@p.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss")</dd>
+        </dl>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+            <h2 class="h5 mb-0">سجل الأسعار</h2>
+            <span class="text-muted small">@Model.History.Count سجل</span>
+        </div>
+
+        <form method="get" asp-action="Details" asp-route-id="@p.Id" class="row g-2 align-items-end mb-3">
+            <div class="col-sm-4 col-md-3">
+                <label asp-for="HistoryFrom" class="form-label">من تاريخ</label>
+                <input asp-for="HistoryFrom" name="historyFrom" class="form-control" type="date" />
+            </div>
+            <div class="col-sm-4 col-md-3">
+                <label asp-for="HistoryTo" class="form-label">إلى تاريخ</label>
+                <input asp-for="HistoryTo" name="historyTo" class="form-control" type="date" />
+            </div>
+            <div class="col-sm-4 col-md-auto d-flex flex-wrap gap-2">
+                <button type="submit" class="btn btn-primary">تصفية</button>
+                <a asp-action="Details" asp-route-id="@p.Id" class="btn btn-outline-secondary">مسح</a>
+            </div>
+        </form>
+
+        <div class="table-responsive">
+            <table class="table table-sm table-hover align-middle">
+                <thead>
+                    <tr>
+                        <th>الفحص (UTC)</th>
+                        <th>السعر</th>
+                        <th>السعر الأعلى</th>
+                        <th>الحالة</th>
+                        <th>التقييم</th>
+                        <th>المراجعات</th>
+                        <th>الوسوم</th>
+                        <th>الشحن</th>
+                    </tr>
+                </thead>
+                <tbody>
+                @foreach (var h in Model.History)
+                {
+                    <tr>
+                        <td class="text-nowrap num">@h.CheckedAt.ToString("yyyy-MM-dd HH:mm:ss")</td>
+                        <td class="num">@(h.Price?.ToString() ?? "—")</td>
+                        <td class="num">@(h.PriceUpper?.ToString() ?? "—")</td>
+                        <td class="arabic-text">@(h.Status ?? "—")</td>
+                        <td class="num">@(h.Rating?.ToString("0.0") ?? "—")</td>
+                        <td class="num">@(h.ReviewsCount?.ToString() ?? "—")</td>
+                        <td class="small">
+                            @if (h.IsPrime == true) { <span class="badge text-bg-info">Prime</span> }
+                            @if (h.IsSponsored == true) { <span class="badge text-bg-warning">مموّل</span> }
+                            @if (h.IsBestSeller == true) { <span class="badge text-bg-success">الأكثر مبيعاً</span> }
+                        </td>
+                        <td class="small arabic-text">@(h.ShippingInformation ?? "—")</td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div>
+
+        @if (Model.History.Count == 0)
+        {
+            <div class="empty-state py-4">
+                <i class="bi bi-clock-history"></i>
+                <p class="mb-0">لا يوجد سجل أسعار لهذا المنتج@(Model.HistoryFrom.HasValue || Model.HistoryTo.HasValue ? " في النطاق المحدد" : "").</p>
+            </div>
+        }
+    </div>
+</div>

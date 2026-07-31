@@ -1,0 +1,27 @@
+@model ScraperSearch
+@{
+    ViewData["Title"] = "إضافة عملية بحث";
+}
+
+<div class="page-toolbar">
+    <div>
+        <h1 class="h2">إضافة عملية بحث</h1>
+        <p class="text-muted mb-0">اضبط استعلام Oxylabs والفاصل الزمني للجمع التلقائي.</p>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        <form asp-action="Create" method="post">
+            <partial name="_FormFields" model="Model" />
+            <div class="d-flex flex-wrap gap-2 mt-2">
+                <button type="submit" class="btn btn-primary"><i class="bi bi-check2"></i> إنشاء</button>
+                <a asp-action="Index" class="btn btn-outline-secondary">إلغاء</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+@section Scripts {
+    <partial name="_ValidationScriptsPartial" />
+}

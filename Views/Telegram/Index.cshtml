@@ -1,0 +1,92 @@
+@{
+    ViewData["Title"] = "تيليجرام";
+    var enabled = (bool)ViewBag.Enabled;
+    var hasToken = (bool)ViewBag.HasBotToken;
+    var hasChat = (bool)ViewBag.HasChatId;
+}
+
+<div class="page-toolbar">
+    <div>
+        <h1 class="h2">تنبيهات تيليجرام</h1>
+        <p class="text-muted mb-0">إرسال إشعارات انخفاض السعر إلى محادثة تيليجرام.</p>
+    </div>
+</div>
+
+@if (TempData["StatusMessage"] is string message)
+{
+    var ok = TempData["StatusOk"] as bool? == true;
+    <div class="alert @(ok ? "alert-success" : "alert-warning") alert-dismissible fade show" role="alert">
+        @message
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="إغلاق"></button>
+    </div>
+}
+
+<div class="row g-3 mb-4">
+    <div class="col-md-4">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="text-muted small mb-1">الحالة</div>
+                <div class="fw-bold">
+                    <span class="status-dot @(enabled ? "on" : "off")"></span>
+                    @(enabled ? "مفعّل" : "معطّل")
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="text-muted small mb-1">رمز البوت</div>
+                <div class="fw-bold">@(hasToken ? "مُعدّ" : "غير موجود")</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="text-muted small mb-1">معرّف المحادثة</div>
+                <div class="fw-bold ltr d-inline-block">@(hasChat ? ViewBag.ChatIdPreview : "غير موجود")</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<form asp-action="Test" method="post" class="mb-4">
+    @Html.AntiForgeryToken()
+    <button type="submit" class="btn btn-primary" @(hasToken && hasChat ? null : "disabled")>
+        <i class="bi bi-send"></i> إرسال رسالة تجريبية
+    </button>
+</form>
+
+<div class="card">
+    <div class="card-body">
+        <h2 class="h5 mb-3">خطوات الإعداد</h2>
+        <ol class="mb-0">
+            <li class="mb-2">افتح تيليجرام وتحدث مع <code class="ltr">@("@BotFather")</code> ← <code class="ltr">/newbot</code> ← انسخ رمز البوت.</li>
+            <li class="mb-2">أنشئ مجموعة (أو محادثة خاصة مع البوت)، أضف البوت، وأرسل أي رسالة.</li>
+            <li class="mb-2">
+                احصل على معرّف المحادثة:
+                <ul class="mt-1">
+                    <li>محادثة خاصة: راسل البوت ثم افتح
+                        <code class="ltr">https://api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</code>
+                        واقرأ <code class="ltr">message.chat.id</code>.</li>
+                    <li>مجموعة: أضف البوت، أرسل رسالة، ثم راجع <code class="ltr">getUpdates</code>
+                        (معرّفات المجموعات غالباً سالبة مثل <code class="ltr">-100...</code>).</li>
+                </ul>
+            </li>
+            <li class="mb-2">
+                ضع القيم في <code class="ltr">appsettings.json</code> أو User Secrets:
+                <pre class="bg-light border rounded-3 p-3 mt-2 mb-0 ltr"><code>"Telegram": {
+  "Enabled": true,
+  "BotToken": "123456:ABC-DEF...",
+  "ChatId": "-1001234567890"
+}</code></pre>
+            </li>
+            <li>أعد تشغيل التطبيق ثم اضغط <strong>إرسال رسالة تجريبية</strong>.</li>
+        </ol>
+        <p class="text-muted small mt-3 mb-0">
+            عند اكتشاف انخفاض ≥20% عن أول سعر للمنتج، يُرسل تنبيه. انخفاض آخر بنفس النسبة بعد عودة السعر
+            لا يُرسل مرة أخرى. يُرسل تنبيه جديد فقط إذا زاد الانخفاض عن أول سعر بمقدار ≥1% إضافي (مثلاً 1000→800 ثم 790).
+        </p>
+    </div>
+</div>
