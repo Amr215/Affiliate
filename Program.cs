@@ -85,6 +85,7 @@ builder.Services.AddScoped<IAmazonScraperService, AmazonScraperService>();
 builder.Services.AddHostedService<AmazonScraperBackgroundService>();
 builder.Services.AddHostedService<AsinRecheckBackgroundService>();
 builder.Services.AddHostedService<KeepAliveBackgroundService>();
+builder.Services.AddHostedService<OxylabsRequestLogCleanupService>();
 
 var app = builder.Build();
 
