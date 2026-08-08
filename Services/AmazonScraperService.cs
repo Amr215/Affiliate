@@ -1160,18 +1160,36 @@ namespace Affiliate.Services
                 .Select(h => new { h.ProductId, h.CheckedAt, h.Price })
                 .ToListAsync(ct);
 
+            const int historyEnds = 5;
+
             var byProduct = points
                 .GroupBy(p => p.ProductId)
                 .ToDictionary(
                     g => g.Key,
-                    g => (IReadOnlyList<PriceHistoryPoint>)g
-                        .Select(p => new PriceHistoryPoint(string.Empty, p.Price, p.CheckedAt))
-                        .ToList());
+                    g =>
+                    {
+                        var all = g
+                            .Select(p => new PriceHistoryPoint(string.Empty, p.Price, p.CheckedAt))
+                            .ToList();
+                        var priced = all.Where(p => p.Price.HasValue).Select(p => p.Price!.Value).ToList();
+                        var average = priced.Count > 0 ? priced.Average() : (decimal?)null;
+                        var truncated = all.Count > historyEnds * 2;
+                        IReadOnlyList<PriceHistoryPoint> window = truncated
+                            ? all.Take(historyEnds).Concat(all.TakeLast(historyEnds)).ToList()
+                            : all;
+                        return (History: window, Average: average, Truncated: truncated);
+                    });
 
             foreach (var alert in alerts)
             {
-                if (byProduct.TryGetValue(alert.Product.Id, out var history))
-                    alert.History = history;
+                if (!byProduct.TryGetValue(alert.Product.Id, out var data))
+                    continue;
+
+                alert.History = data.History;
+                alert.AveragePrice = data.Average.HasValue
+                    ? Math.Round(data.Average.Value, 2, MidpointRounding.AwayFromZero)
+                    : null;
+                alert.HistoryTruncated = data.Truncated;
             }
         }
 

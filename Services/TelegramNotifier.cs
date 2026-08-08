@@ -29,8 +29,17 @@ namespace Affiliate.Services
 
         public decimal? CurrentPrice { get; init; }
 
-        /// <summary>Full price history shown in the alert message (oldest → newest).</summary>
+        /// <summary>
+        /// Price history for the alert (oldest → newest). When truncated, only first 5 + last 5
+        /// are included and <see cref="HistoryTruncated"/> is true.
+        /// </summary>
         public IReadOnlyList<PriceHistoryPoint> History { get; set; } = [];
+
+        /// <summary>Average of all recorded prices (not only the truncated History window).</summary>
+        public decimal? AveragePrice { get; set; }
+
+        /// <summary>True when middle history points were omitted from <see cref="History"/>.</summary>
+        public bool HistoryTruncated { get; set; }
     }
 
     /// <summary>A price-history data point rendered inside a drop alert (label optional).</summary>
@@ -211,22 +220,41 @@ namespace Affiliate.Services
             if (alert.BaselinePrice.HasValue)
                 sb.AppendLine($"السعر السابق: {alert.BaselinePrice} {currency}");
 
+            if (alert.AveragePrice.HasValue)
+                sb.AppendLine($"متوسط السعر: <b>{alert.AveragePrice:0.##} {currency}</b>");
+
             if (alert.History.Count > 0)
             {
                 sb.AppendLine();
                 sb.AppendLine("📉 <b>سجل الأسعار (بتوقيت UTC):</b>");
-                foreach (var point in alert.History)
+
+                var history = alert.History;
+                var showEllipsis = alert.HistoryTruncated && history.Count >= 10;
+                var firstCount = showEllipsis ? 5 : history.Count;
+                var lastStart = showEllipsis ? history.Count - 5 : history.Count;
+
+                for (var i = 0; i < firstCount; i++)
+                    AppendHistoryLine(sb, history[i], currency);
+
+                if (showEllipsis)
                 {
-                    var price = point.Price.HasValue ? $"{point.Price} {currency}" : "—";
-                    var date = point.CheckedAt.HasValue ? $"{point.CheckedAt:yyyy-MM-dd HH:mm}" : null;
-                    if (!string.IsNullOrWhiteSpace(point.Label))
-                        sb.AppendLine($"• {point.Label}: {price}" + (date is null ? "" : $" — {date}"));
-                    else
-                        sb.AppendLine(date is null ? $"• {price}" : $"• {price} — {date}");
+                    sb.AppendLine("• …");
+                    for (var i = lastStart; i < history.Count; i++)
+                        AppendHistoryLine(sb, history[i], currency);
                 }
             }
 
             return sb.ToString().TrimEnd();
+        }
+
+        private static void AppendHistoryLine(StringBuilder sb, PriceHistoryPoint point, string currency)
+        {
+            var price = point.Price.HasValue ? $"{point.Price} {currency}" : "—";
+            var date = point.CheckedAt.HasValue ? $"{point.CheckedAt:yyyy-MM-dd HH:mm}" : null;
+            if (!string.IsNullOrWhiteSpace(point.Label))
+                sb.AppendLine($"• {point.Label}: {price}" + (date is null ? "" : $" — {date}"));
+            else
+                sb.AppendLine(date is null ? $"• {price}" : $"• {price} — {date}");
         }
 
         private static string Html(string? value) =>
