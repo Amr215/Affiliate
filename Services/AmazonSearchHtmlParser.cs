@@ -23,16 +23,22 @@ namespace Affiliate.Services
 
             var organic = new List<OrganicProduct>();
             var nodes = doc.DocumentNode.SelectNodes(
-                "//div[@data-component-type='s-search-result' and @data-asin]");
+                "//div[@data-component-type='s-search-result' and @data-asin]")
+                ?? doc.DocumentNode.SelectNodes(
+                    "//div[contains(@class,'s-main-slot')]//div[@data-asin and string-length(@data-asin)=10]");
 
             if (nodes is null)
-                return new SearchPageParseResult(organic, DetectLastPage(doc));
+                return new SearchPageParseResult(organic, DetectLastPage(doc), DetectNextPageHref(doc));
 
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var position = 0;
             foreach (var node in nodes)
             {
                 var asin = node.GetAttributeValue("data-asin", null)?.Trim();
                 if (string.IsNullOrWhiteSpace(asin) || asin.Length != 10)
+                    continue;
+
+                if (!seen.Add(asin))
                     continue;
 
                 // Skip empty placeholder slots
@@ -43,7 +49,7 @@ namespace Affiliate.Services
                 organic.Add(ParseCard(node, asin, position));
             }
 
-            return new SearchPageParseResult(organic, DetectLastPage(doc));
+            return new SearchPageParseResult(organic, DetectLastPage(doc), DetectNextPageHref(doc));
         }
 
         private static OrganicProduct ParseCard(HtmlNode node, string asin, int position)
@@ -216,6 +222,29 @@ namespace Affiliate.Services
             return max;
         }
 
+        /// <summary>
+        /// Relative or absolute href from the enabled Next control. Amazon pagination requires
+        /// tokens from this URL (<c>qid</c>, <c>xpid</c>, …); constructing <c>page=N</c> alone returns page 1 again.
+        /// </summary>
+        private static string? DetectNextPageHref(HtmlDocument doc)
+        {
+            var next = doc.DocumentNode.SelectSingleNode(
+                "//a[contains(@class,'s-pagination-next') and not(contains(@class,'s-pagination-disabled'))]");
+            if (next is null)
+                return null;
+
+            var ariaDisabled = next.GetAttributeValue("aria-disabled", null);
+            if (string.Equals(ariaDisabled, "true", StringComparison.OrdinalIgnoreCase))
+                return null;
+
+            var href = next.GetAttributeValue("href", null);
+            if (string.IsNullOrWhiteSpace(href) || href.StartsWith('#') ||
+                href.StartsWith("javascript:", StringComparison.OrdinalIgnoreCase))
+                return null;
+
+            return HtmlEntity.DeEntitize(href).Trim();
+        }
+
         private static string? GuessManufacturer(string title)
         {
             if (string.IsNullOrWhiteSpace(title))
@@ -225,5 +254,11 @@ namespace Affiliate.Services
         }
     }
 
-    public sealed record SearchPageParseResult(List<OrganicProduct> Organic, int? LastVisiblePage);
+    public sealed record SearchPageParseResult(
+        List<OrganicProduct> Organic,
+        int? LastVisiblePage,
+        string? NextPageHref)
+    {
+        public bool HasNextPage => !string.IsNullOrWhiteSpace(NextPageHref);
+    };
 }

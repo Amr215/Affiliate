@@ -16,7 +16,7 @@ namespace Affiliate.Services
         /// <summary>Runs one URL scrape immediately. Returns false if not found or another run is in progress.</summary>
         Task<bool> RunSearchNowAsync(int scraperUrlId, CancellationToken cancellationToken = default);
 
-        /// <summary>Re-checks available products in batches of ASINs via one Amazon search URL per batch (ISP).</summary>
+        /// <summary>Re-checks available products in ASIN batches via Amazon search (all result pages, ISP).</summary>
         Task ProcessAsinRecheckAsync(CancellationToken cancellationToken = default);
     }
 
@@ -111,7 +111,7 @@ namespace Affiliate.Services
 
             try
             {
-                var batchSize = Math.Clamp(_asinRecheck.BatchSize, 2, 48);
+                var batchSize = Math.Clamp(_asinRecheck.BatchSize, 2, 200);
                 var asinsPerPoll = Math.Max(batchSize, _asinRecheck.AsinsPerPoll);
                 var domain = string.IsNullOrWhiteSpace(_asinRecheck.Domain) ? "eg" : _asinRecheck.Domain.Trim();
 
@@ -160,18 +160,19 @@ namespace Affiliate.Services
 
                         try
                         {
-                            var organic = await FetchAsinBatchSearchViaIspAsync(batch, domain, index + 1, token);
-                            results[index] = new BatchResult(batch, organic, null);
+                            var (organic, complete) = await FetchAsinBatchSearchViaIspAsync(batch, domain, index + 1, token);
+                            results[index] = new BatchResult(batch, organic, null, complete);
                         }
                         catch (Exception ex) when (ex is not OperationCanceledException)
                         {
-                            results[index] = new BatchResult(batch, [], ex);
+                            results[index] = new BatchResult(batch, [], ex, IsComplete: false);
                         }
                     });
 
                 // Save phase: sequential (the DbContext is single-threaded) and batched into one
                 // round trip each, so 10 fetches don't become 30 database calls.
                 var failedBatches = 0;
+                var incompleteBatches = 0;
                 var succeeded = new List<BatchResult>(results.Length);
                 var allOrganic = new List<OrganicProduct>();
 
@@ -188,6 +189,9 @@ namespace Affiliate.Services
                         continue;
                     }
 
+                    if (!result.IsComplete)
+                        incompleteBatches++;
+
                     succeeded.Add(result);
                     allOrganic.AddRange(result.Organic);
                 }
@@ -198,12 +202,28 @@ namespace Affiliate.Services
                         .Select(p => p.Asin!),
                     StringComparer.OrdinalIgnoreCase);
 
-                // A batch's ASIN counts as missing only if no batch returned it.
+                // Missing ASINs are unavailable only after every Next link was followed successfully.
+                // Incomplete pagination must not set NotAvailableDate.
                 var missing = succeeded
+                    .Where(r => r.IsComplete)
                     .SelectMany(r => r.Batch)
                     .Where(a => !returned.Contains(a))
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .ToList();
+
+                var skippedIncomplete = succeeded
+                    .Where(r => !r.IsComplete)
+                    .SelectMany(r => r.Batch)
+                    .Where(a => !returned.Contains(a))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Count();
+
+                if (skippedIncomplete > 0)
+                {
+                    _logger.LogWarning(
+                        "ASIN recheck: leaving {Count} ASINs unchecked — batch pagination incomplete ({Incomplete} batch(es))",
+                        skippedIncomplete, incompleteBatches);
+                }
 
                 var updated = allOrganic.Count > 0
                     ? await SaveProductsAsync(allOrganic, domain, ct)
@@ -217,8 +237,8 @@ namespace Affiliate.Services
 
                 var elapsed = Stopwatch.GetElapsedTime(startedAt);
                 _logger.LogInformation(
-                    "ASIN recheck completed in {Seconds:0.0}s — {Asins} ASINs, updated={Updated}, recordedNotAvailable={Unavailable}, failedBatches={Failed}",
-                    elapsed.TotalSeconds, asins.Count, updated, unavailable, failedBatches);
+                    "ASIN recheck completed in {Seconds:0.0}s — {Asins} ASINs, updated={Updated}, recordedNotAvailable={Unavailable}, failedBatches={Failed}, incompleteBatches={Incomplete}",
+                    elapsed.TotalSeconds, asins.Count, updated, unavailable, failedBatches, incompleteBatches);
             }
             finally
             {
@@ -226,7 +246,11 @@ namespace Affiliate.Services
             }
         }
 
-        private sealed record BatchResult(List<string> Batch, List<OrganicProduct> Organic, Exception? Error);
+        private sealed record BatchResult(
+            List<string> Batch,
+            List<OrganicProduct> Organic,
+            Exception? Error,
+            bool IsComplete);
 
         /// <summary>
         /// Splits ASINs into request-sized batches. A trailing single ASIN is topped up from the
@@ -648,108 +672,278 @@ namespace Affiliate.Services
         }
 
         /// <summary>
-        /// One ISP request for a batch of ASINs via Amazon search:
-        /// <c>/s?k=ASIN1|ASIN2|...|ASIN48</c>. Round-robins ports on captcha/block.
+        /// Fetches every search-results page for a batch of ASINs using Amazon's real URL shape:
+        /// page 1 <c>/s?k=…&amp;ref=nb_sb_noss</c>, then page N
+        /// <c>/-/en/s?k=…&amp;page=N&amp;xpid=…&amp;qid=…&amp;ref=sr_pg_N</c>.
         /// </summary>
-        private async Task<List<OrganicProduct>> FetchAsinBatchSearchViaIspAsync(
+        private async Task<(List<OrganicProduct> Organic, bool IsComplete)> FetchAsinBatchSearchViaIspAsync(
             IReadOnlyList<string> asins, string domain, int batchIndex, CancellationToken ct)
         {
             if (asins.Count < 2)
                 throw new InvalidOperationException("ASIN batch search requires at least 2 ASINs per request");
 
-            var searchUrl = BuildAsinBatchSearchUrl(domain, asins);
-            var triedKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var maxAttempts = Math.Clamp(
-                _asinRecheck.MaxAttemptsPerBatch, 1, Math.Max(1, _ispProxyRoundRobin.AvailablePortCount));
-            Exception? lastError = null;
+            var merchantId = _asinRecheck.MerchantId;
+            var requested = new HashSet<string>(asins, StringComparer.OrdinalIgnoreCase);
+            var all = new List<OrganicProduct>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-            for (var attempt = 1; attempt <= maxAttempts; attempt++)
+            var endpoint = _ispProxyRoundRobin.Next();
+            var client = _ispProxyRoundRobin.CreateClient(endpoint);
+            string? referer = null;
+            var warmedHost = false;
+            int? proxyPort = endpoint.UseProxy ? endpoint.Port : null;
+            string? qid = null;
+            string? xpid = null;
+
+            try
             {
-                ct.ThrowIfCancellationRequested();
-
-                var endpoint = _ispProxyRoundRobin.Next(triedKeys);
-                triedKeys.Add(endpoint.Key);
-                var proxyPort = endpoint.UseProxy ? endpoint.Port : (int?)null;
-                using var client = _ispProxyRoundRobin.CreateClient(endpoint);
-
-                if (attempt > 1)
-                    await Task.Delay(AmazonBrowserProfile.AfterIpSwitchDelayMs(), ct);
-
-                try
+                for (var page = 1; page <= MaxPagesPerSearch; page++)
                 {
-                    var organic = await FetchAsinBatchSearchPageAsync(
-                        client, searchUrl, asins.Count, batchIndex, endpoint, proxyPort, ct);
+                    ct.ThrowIfCancellationRequested();
 
-                    _ispProxyRoundRobin.MarkHealthy(endpoint);
-                    _logger.LogInformation(
-                        "ASIN batch {Index}: OK via {Proxy} — {Returned}/{Requested} organic",
-                        batchIndex, endpoint.Describe(), organic.Count, asins.Count);
+                    if (page > 1)
+                    {
+                        if (string.IsNullOrWhiteSpace(qid))
+                        {
+                            _logger.LogWarning(
+                                "ASIN batch {Index}: missing qid after page 1 — cannot build page {Page}",
+                                batchIndex, page);
+                            return (all, IsComplete: false);
+                        }
 
-                    return organic;
+                        await Task.Delay(AmazonBrowserProfile.NextPageDelayMs(), ct);
+                    }
+
+                    var pageUrl = BuildAsinBatchSearchUrl(domain, asins, merchantId, page, qid, xpid);
+
+                    var pageOk = false;
+                    var pageOrganicCount = 0;
+                    string? nextHref = null;
+                    var lastVisible = page;
+                    var newOnPage = 0;
+                    var triedKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { endpoint.Key };
+                    var maxAttempts = Math.Clamp(
+                        _asinRecheck.MaxAttemptsPerBatch, 1, Math.Max(1, _ispProxyRoundRobin.AvailablePortCount));
+
+                    for (var attempt = 1; attempt <= maxAttempts; attempt++)
+                    {
+                        try
+                        {
+                            if (!warmedHost)
+                            {
+                                var home = $"https://www.amazon.{domain.Trim()}/";
+                                await WarmupAmazonHomeAsync(
+                                    client, home, endpoint, $"ASIN batch {batchIndex}", ct);
+                                warmedHost = true;
+                                referer = home;
+                            }
+
+                            var result = await FetchAsinBatchSearchPageAsync(
+                                client, pageUrl, referer, asins.Count, batchIndex, page,
+                                endpoint, proxyPort, ct);
+
+                            newOnPage = 0;
+                            foreach (var org in result.Organic)
+                            {
+                                if (string.IsNullOrWhiteSpace(org.Asin) || !seen.Add(org.Asin))
+                                    continue;
+                                all.Add(org);
+                                newOnPage++;
+                            }
+
+                            pageOrganicCount = result.Organic.Count;
+                            lastVisible = result.LastVisiblePage ?? lastVisible;
+                            nextHref = result.NextPageHref;
+                            referer = pageUrl;
+                            pageOk = true;
+                            _ispProxyRoundRobin.MarkHealthy(endpoint);
+
+                            if (qid is null &&
+                                TryResolveAmazonHref(pageUrl, nextHref, out var nextAbs) &&
+                                TryGetQueryParam(nextAbs, "qid", out var parsedQid))
+                            {
+                                qid = parsedQid;
+                                TryGetQueryParam(nextAbs, "xpid", out xpid);
+                            }
+
+                            _logger.LogInformation(
+                                "ASIN batch {Index}: Amazon page {Page}/{Last} via {Proxy} — {PageCount} organic, {New} new (total {Total}/{Requested}, hasNext={HasNext}) GET {Url}",
+                                batchIndex, page, lastVisible, endpoint.Describe(),
+                                pageOrganicCount, newOnPage, all.Count, asins.Count, result.HasNextPage,
+                                Truncate(pageUrl, 180));
+                            break;
+                        }
+                        catch (AmazonFetchRejectedException ex)
+                        {
+                            if (ex.IsTransport)
+                                _ispProxyRoundRobin.MarkTransient(endpoint, ex.Message);
+                            else
+                                _ispProxyRoundRobin.MarkBad(endpoint, ex.Message);
+
+                            QueueLog(null, page, DateTime.UtcNow, ex.StatusCode, "Rejected",
+                                $"{endpoint.Describe()} batch={batchIndex} page={page}",
+                                Truncate(ex.Message, 2000), proxyPort);
+
+                            if (attempt >= maxAttempts)
+                            {
+                                if (all.Count == 0)
+                                    throw;
+
+                                _logger.LogWarning(
+                                    "ASIN batch {Index}: giving up page {Page} after {Attempts} IPs; keeping {Count} products (incomplete)",
+                                    batchIndex, page, attempt, all.Count);
+                                return (all, IsComplete: false);
+                            }
+
+                            client.Dispose();
+                            endpoint = _ispProxyRoundRobin.Next(triedKeys);
+                            triedKeys.Add(endpoint.Key);
+                            client = _ispProxyRoundRobin.CreateClient(endpoint);
+                            referer = null;
+                            warmedHost = false;
+                            proxyPort = endpoint.UseProxy ? endpoint.Port : null;
+
+                            _logger.LogWarning(
+                                "ASIN batch {Index}: page {Page} {Kind} on previous proxy ({Reason}); switching to {Proxy}",
+                                batchIndex, page, ex.IsTransport ? "connection failed" : "rejected",
+                                ex.Message, endpoint.Describe());
+
+                            await Task.Delay(AmazonBrowserProfile.AfterIpSwitchDelayMs(), ct);
+                        }
+                        catch (Exception ex) when (ex is not OperationCanceledException and not AmazonFetchRejectedException)
+                        {
+                            var reason = DescribeTransport(ex);
+                            _ispProxyRoundRobin.MarkTransient(endpoint, reason);
+                            QueueLog(null, page, DateTime.UtcNow, 0, "TransportError",
+                                $"{endpoint.Describe()} batch={batchIndex} page={page} asins={asins.Count}",
+                                Truncate(reason, 2000), proxyPort);
+
+                            if (attempt >= maxAttempts)
+                            {
+                                if (all.Count == 0)
+                                    throw;
+
+                                _logger.LogWarning(ex,
+                                    "ASIN batch {Index}: stopped at page {Page}; keeping {Count} products (incomplete)",
+                                    batchIndex, page, all.Count);
+                                return (all, IsComplete: false);
+                            }
+
+                            client.Dispose();
+                            endpoint = _ispProxyRoundRobin.Next(triedKeys);
+                            triedKeys.Add(endpoint.Key);
+                            client = _ispProxyRoundRobin.CreateClient(endpoint);
+                            referer = null;
+                            warmedHost = false;
+                            proxyPort = endpoint.UseProxy ? endpoint.Port : null;
+
+                            _logger.LogWarning(ex,
+                                "ASIN batch {Index}: transport error on page {Page}; switching to {Proxy}",
+                                batchIndex, page, endpoint.Describe());
+
+                            await Task.Delay(AmazonBrowserProfile.AfterIpSwitchDelayMs(), ct);
+                        }
+                    }
+
+                    if (!pageOk)
+                        return (all, IsComplete: false);
+
+                    var matched = all.Count(p => p.Asin is not null && requested.Contains(p.Asin));
+                    if (matched >= asins.Count)
+                        return (all, IsComplete: true);
+
+                    if (pageOrganicCount > 0 && newOnPage == 0)
+                    {
+                        _logger.LogWarning(
+                            "ASIN batch {Index}: page {Page} returned only duplicate ASINs — stopping as incomplete",
+                            batchIndex, page);
+                        return (all, IsComplete: false);
+                    }
+
+                    if (string.IsNullOrWhiteSpace(nextHref))
+                        return (all, IsComplete: true);
                 }
-                catch (AmazonFetchRejectedException ex)
-                {
-                    lastError = ex;
 
-                    if (ex.IsTransport)
-                        _ispProxyRoundRobin.MarkTransient(endpoint, ex.Message);
-                    else
-                        _ispProxyRoundRobin.MarkBad(endpoint, ex.Message);
-
-                    _logger.LogWarning(
-                        "ASIN batch {Index}: {Kind} on {Proxy} ({Reason}); {Left} ports left",
-                        batchIndex, ex.IsTransport ? "connection failed" : "rejected",
-                        endpoint.Describe(), ex.Message, maxAttempts - attempt);
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    lastError = ex;
-                    var reason = DescribeTransport(ex);
-                    _ispProxyRoundRobin.MarkTransient(endpoint, reason);
-                    QueueLog(null, batchIndex, DateTime.UtcNow, 0, "TransportError",
-                        $"{endpoint.Describe()} batch={batchIndex} asins={asins.Count}",
-                        Truncate(reason, 2000), proxyPort);
-
-                    _logger.LogWarning(ex,
-                        "ASIN batch {Index}: transport error on {Proxy} ({Reason}); {Left} ports left",
-                        batchIndex, endpoint.Describe(), reason, maxAttempts - attempt);
-                }
+                return (all, IsComplete: false);
             }
-
-            throw new InvalidOperationException(
-                $"ASIN batch {batchIndex} failed on all proxy ports ({asins.Count} ASINs)", lastError);
+            finally
+            {
+                client.Dispose();
+            }
         }
 
-        private async Task<List<OrganicProduct>> FetchAsinBatchSearchPageAsync(
+        /// <summary>Resolves a relative Amazon pagination href against the current page URL.</summary>
+        private static bool TryResolveAmazonHref(string currentPageUrl, string? href, out string absoluteUrl)
+        {
+            absoluteUrl = string.Empty;
+            if (string.IsNullOrWhiteSpace(href))
+                return false;
+
+            href = href.Trim();
+            if (Uri.TryCreate(href, UriKind.Absolute, out var abs) &&
+                (abs.Scheme == Uri.UriSchemeHttp || abs.Scheme == Uri.UriSchemeHttps))
+            {
+                absoluteUrl = abs.AbsoluteUri;
+                return true;
+            }
+
+            if (!Uri.TryCreate(currentPageUrl, UriKind.Absolute, out var baseUri))
+                return false;
+
+            if (!Uri.TryCreate(baseUri, href, out var resolved))
+                return false;
+
+            absoluteUrl = resolved.AbsoluteUri;
+            return true;
+        }
+
+        private static bool TryGetQueryParam(string url, string key, out string? value)
+        {
+            value = null;
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+                return false;
+
+            foreach (var segment in uri.Query.TrimStart('?')
+                         .Split('&', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var eq = segment.IndexOf('=');
+                var segmentKey = eq >= 0 ? segment[..eq] : segment;
+                if (!segmentKey.Equals(key, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                value = eq >= 0 ? Uri.UnescapeDataString(segment[(eq + 1)..]) : "";
+                return !string.IsNullOrWhiteSpace(value);
+            }
+
+            return false;
+        }
+
+        private async Task<SearchPageParseResult> FetchAsinBatchSearchPageAsync(
             HttpClient client,
-            string searchUrl,
+            string pageUrl,
+            string? referer,
             int requestedCount,
             int batchIndex,
+            int page,
             IspProxyEndpoint endpoint,
             int? proxyPort,
             CancellationToken ct)
         {
-            var home = $"{new Uri(searchUrl).GetLeftPart(UriPartial.Authority)}/";
-
-            // Amazon serves the "عذرًا!" soft-block page to sessions that jump straight to /s with no
-            // cookies, so land on the homepage first and carry its cookies into the search.
-            await WarmupAmazonHomeAsync(client, home, endpoint, $"ASIN batch {batchIndex}", ct);
-
             var requestedAt = DateTime.UtcNow;
-            var requestLog = $"{endpoint.Describe()} GET {searchUrl}";
+            var requestLog = $"{endpoint.Describe()} GET {pageUrl}";
 
             HttpResponseMessage response;
             try
             {
                 response = await SendNavigationAsync(
-                    client, searchUrl, home, $"ASIN batch {batchIndex}", ct);
+                    client, pageUrl, referer, $"ASIN batch {batchIndex} page {page}", ct);
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
                 var reason = DescribeTransport(ex);
-                QueueLog(null, batchIndex, requestedAt, 0, "TransportError", requestLog, reason, proxyPort);
+                QueueLog(null, page, requestedAt, 0, "TransportError", requestLog, reason, proxyPort);
                 throw new AmazonFetchRejectedException(
-                    $"Transport error on ASIN batch {batchIndex}: {reason}",
+                    $"Transport error on ASIN batch {batchIndex} page {page}: {reason}",
                     statusCode: 0, ex, isTransport: true);
             }
 
@@ -757,49 +951,70 @@ namespace Affiliate.Services
             {
                 var status = (int)response.StatusCode;
                 var body = await response.Content.ReadAsStringAsync(ct);
-                QueueLog(null, batchIndex, requestedAt, status, response.ReasonPhrase, requestLog,
+                QueueLog(null, page, requestedAt, status, response.ReasonPhrase, requestLog,
                     status == 200 ? null : Truncate(body, 8000), proxyPort);
 
                 if (status is 403 or 429 or 503 or 502 or 500)
                     throw new AmazonFetchRejectedException(
-                        $"Blocked/unavailable status {status} on ASIN batch {batchIndex}", status);
+                        $"Blocked/unavailable status {status} on ASIN batch {batchIndex} page {page}", status);
 
                 if (status != 200)
                     throw new AmazonFetchRejectedException(
-                        $"HTTP {status} on ASIN batch {batchIndex}", status);
+                        $"HTTP {status} on ASIN batch {batchIndex} page {page}", status);
 
                 if (string.IsNullOrWhiteSpace(body))
                     throw new AmazonFetchRejectedException(
-                        $"Empty HTML on ASIN batch {batchIndex}", status);
+                        $"Empty HTML on ASIN batch {batchIndex} page {page}", status);
 
                 if (LooksLikeBotChallenge(body))
                     throw new AmazonFetchRejectedException(
-                        $"Captcha/bot challenge on ASIN batch {batchIndex}", status);
+                        $"Captcha/bot challenge on ASIN batch {batchIndex} page {page}", status);
 
                 if (body.Length < 8_000)
                     throw new AmazonFetchRejectedException(
-                        $"Suspiciously short HTML ({body.Length} chars) on ASIN batch {batchIndex}", status);
+                        $"Suspiciously short HTML ({body.Length} chars) on ASIN batch {batchIndex} page {page}", status);
 
                 if (!LooksLikeAmazonSearchHtml(body))
                     throw new AmazonFetchRejectedException(
-                        $"Unexpected HTML (not a search results page) on ASIN batch {batchIndex}", status);
+                        $"Unexpected HTML (not a search results page) on ASIN batch {batchIndex} page {page}", status);
 
                 var parsed = AmazonSearchHtmlParser.Parse(body);
 
                 if (parsed.Organic.Count == 0 && !LooksLikeZeroResultsPage(body))
                     throw new AmazonFetchRejectedException(
-                        $"No products parsed on ASIN batch {batchIndex} (requested {requestedCount})", status);
+                        $"No products parsed on ASIN batch {batchIndex} page {page} (requested {requestedCount})", status);
 
-                return parsed.Organic;
+                return parsed;
             }
         }
 
-        /// <summary>Builds <c>https://www.amazon.{domain}/s?k=ASIN1|ASIN2|...</c>.</summary>
-        private static string BuildAsinBatchSearchUrl(string domain, IReadOnlyList<string> asins)
+        /// <summary>
+        /// Builds ASIN batch search URLs in Amazon's browser shape:
+        /// page 1 <c>https://www.amazon.{domain}/s?k=…&amp;ref=nb_sb_noss</c>,
+        /// page N <c>https://www.amazon.{domain}/-/en/s?k=…&amp;page=N&amp;xpid=…&amp;qid=…&amp;ref=sr_pg_N</c>.
+        /// Optional <c>rh=p_6:MERCHANT</c> when <paramref name="merchantId"/> is set.
+        /// </summary>
+        private static string BuildAsinBatchSearchUrl(
+            string domain,
+            IReadOnlyList<string> asins,
+            string? merchantId,
+            int page = 1,
+            string? qid = null,
+            string? xpid = null)
         {
-            var query = string.Join("|", asins);
-            var encoded = Uri.EscapeDataString(query);
-            return $"https://www.amazon.{domain.Trim()}/s?k={encoded}&ref=nb_sb_noss";
+            var encoded = Uri.EscapeDataString(string.Join("|", asins));
+            var d = domain.Trim();
+            var rh = string.IsNullOrWhiteSpace(merchantId)
+                ? ""
+                : $"&rh={Uri.EscapeDataString($"p_6:{merchantId.Trim()}")}";
+
+            if (page <= 1)
+                return $"https://www.amazon.{d}/s?k={encoded}&ref=nb_sb_noss{rh}";
+
+            // Match browser pagination: /-/en/s + page=N + xpid + qid + ref=sr_pg_N
+            var xpidPart = string.IsNullOrWhiteSpace(xpid) ? "" : $"&xpid={Uri.EscapeDataString(xpid)}";
+            var qidPart = string.IsNullOrWhiteSpace(qid) ? "" : $"&qid={Uri.EscapeDataString(qid)}";
+            return $"https://www.amazon.{d}/-/en/s?k={encoded}{rh}&page={page}{xpidPart}{qidPart}&ref=sr_pg_{page}";
         }
 
         /// <summary>
@@ -838,6 +1053,10 @@ namespace Affiliate.Services
             await SaveAsync(ct);
         }
 
+        /// <summary>
+        /// Marks products as not available when they were requested in a fully paginated ASIN
+        /// batch search and never appeared in any page.
+        /// </summary>
         private async Task<int> RecordNotAvailableAsync(IReadOnlyList<string> asins, CancellationToken ct)
         {
             if (asins.Count == 0)

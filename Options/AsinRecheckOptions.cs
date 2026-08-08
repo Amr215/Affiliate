@@ -15,14 +15,14 @@ namespace Affiliate.Options
         /// <summary>Maximum seconds for one full poll cycle (inclusive).</summary>
         public int PollIntervalMaxSeconds { get; set; } = 65;
 
-        /// <summary>ASINs per Amazon search request (pipe-joined in <c>k=</c>). Never 1, capped at 48.</summary>
-        public int BatchSize { get; set; } = 48;
+        /// <summary>ASINs per Amazon search request (pipe-joined in <c>k=</c>). Never 1, capped at 200.</summary>
+        public int BatchSize { get; set; } = 200;
 
         /// <summary>
         /// Max available products to pull per poll (split into BatchSize requests).
         /// Throughput per minute is roughly this value when the cycle is 60 seconds.
         /// </summary>
-        public int AsinsPerPoll { get; set; } = 480;
+        public int AsinsPerPoll { get; set; } = 1000;
 
         /// <summary>
         /// Batches fetched concurrently, one per proxy IP. Capped at the number of healthy ISP ports,
@@ -42,5 +42,11 @@ namespace Affiliate.Options
 
         /// <summary>Amazon TLD used in search URLs (e.g. eg).</summary>
         public string Domain { get; set; } = "eg";
+
+        /// <summary>
+        /// Seller filter for ASIN batch search (<c>rh=p_6:...</c>). Amazon.eg retail is
+        /// <c>A1ZVRGNO5AYLOV</c>. Empty skips the filter.
+        /// </summary>
+        public string MerchantId { get; set; } = "A1ZVRGNO5AYLOV";
     }
 }
