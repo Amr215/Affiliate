@@ -29,23 +29,25 @@ namespace Affiliate.Services
         private readonly IScraperRunCoordinator _runCoordinator;
         private readonly ITelegramNotifier _telegram;
         private readonly AsinRecheckOptions _asinRecheck;
-        private readonly IIspProxyRoundRobin _ispProxyRoundRobin;
+        private readonly IIspProxyService _ispProxy;
         private readonly ILogger<AmazonScraperService> _logger;
         private readonly ConcurrentQueue<OxylabsRequestLog> _pendingLogs = new();
+        /// <summary>Serializes DbContext use — EF contexts are not thread-safe, and ASIN batches fetch in parallel.</summary>
+        private readonly SemaphoreSlim _dbGate = new(1, 1);
 
         public AmazonScraperService(
             AffiliateDbContext dbContext,
             IScraperRunCoordinator runCoordinator,
             ITelegramNotifier telegramNotifier,
             IOptions<AsinRecheckOptions> asinRecheckOptions,
-            IIspProxyRoundRobin ispProxyRoundRobin,
+            IIspProxyService ispProxy,
             ILogger<AmazonScraperService> logger)
         {
             _db = dbContext;
             _runCoordinator = runCoordinator;
             _telegram = telegramNotifier;
             _asinRecheck = asinRecheckOptions.Value;
-            _ispProxyRoundRobin = ispProxyRoundRobin;
+            _ispProxy = ispProxy;
             _logger = logger;
         }
 
@@ -140,11 +142,13 @@ namespace Affiliate.Services
                 var startedAt = Stopwatch.GetTimestamp();
 
                 _logger.LogInformation(
-                    "ASIN recheck starting via ISP — {Count} ASINs in {Batches} search request(s) of up to {BatchSize}, {Parallel} in parallel",
+                    "ASIN recheck starting via ISP — {Count} ASINs in {Batches} search request(s) of up to {BatchSize}, {Parallel} in parallel (save+alert after each page)",
                     asins.Count, batches.Count, batchSize, maxParallel);
 
-                // Fetch phase: parallel across proxy ports. Nothing here may touch the DbContext.
-                var results = new BatchResult?[batches.Count];
+                var failedBatches = 0;
+                var incompleteBatches = 0;
+                var updated = 0;
+                var unavailable = 0;
 
                 await Parallel.ForEachAsync(
                     Enumerable.Range(0, batches.Count),
@@ -160,80 +164,46 @@ namespace Affiliate.Services
 
                         try
                         {
-                            var (organic, complete) = await FetchAsinBatchSearchViaIspAsync(batch, domain, index + 1, token);
-                            results[index] = new BatchResult(batch, organic, null, complete);
+                            var (organic, complete, pageSaved) = await FetchAsinBatchSearchViaIspAsync(
+                                batch, domain, index + 1, token);
+
+                            Interlocked.Add(ref updated, pageSaved);
+
+                            if (!complete)
+                            {
+                                Interlocked.Increment(ref incompleteBatches);
+                                _logger.LogWarning(
+                                    "ASIN recheck batch {Index}: pagination incomplete — leaving missing ASINs unchecked",
+                                    index + 1);
+                                return;
+                            }
+
+                            var returned = new HashSet<string>(
+                                organic
+                                    .Where(p => !string.IsNullOrWhiteSpace(p.Asin))
+                                    .Select(p => p.Asin!),
+                                StringComparer.OrdinalIgnoreCase);
+
+                            var missing = batch
+                                .Where(a => !returned.Contains(a))
+                                .Distinct(StringComparer.OrdinalIgnoreCase)
+                                .ToList();
+
+                            if (missing.Count > 0)
+                            {
+                                var marked = await RecordNotAvailableAsync(missing, token);
+                                Interlocked.Add(ref unavailable, marked);
+                            }
                         }
                         catch (Exception ex) when (ex is not OperationCanceledException)
                         {
-                            results[index] = new BatchResult(batch, [], ex, IsComplete: false);
+                            Interlocked.Increment(ref failedBatches);
+                            _logger.LogError(ex,
+                                "ASIN recheck batch failed ({Count} ASINs)", batch.Count);
                         }
                     });
 
-                // Save phase: sequential (the DbContext is single-threaded) and batched into one
-                // round trip each, so 10 fetches don't become 30 database calls.
-                var failedBatches = 0;
-                var incompleteBatches = 0;
-                var succeeded = new List<BatchResult>(results.Length);
-                var allOrganic = new List<OrganicProduct>();
-
-                foreach (var result in results)
-                {
-                    if (result is null)
-                        continue;
-
-                    if (result.Error is not null)
-                    {
-                        failedBatches++;
-                        _logger.LogError(result.Error,
-                            "ASIN recheck batch failed ({Count} ASINs)", result.Batch.Count);
-                        continue;
-                    }
-
-                    if (!result.IsComplete)
-                        incompleteBatches++;
-
-                    succeeded.Add(result);
-                    allOrganic.AddRange(result.Organic);
-                }
-
-                var returned = new HashSet<string>(
-                    allOrganic
-                        .Where(p => !string.IsNullOrWhiteSpace(p.Asin))
-                        .Select(p => p.Asin!),
-                    StringComparer.OrdinalIgnoreCase);
-
-                // Missing ASINs are unavailable only after every Next link was followed successfully.
-                // Incomplete pagination must not set NotAvailableDate.
-                var missing = succeeded
-                    .Where(r => r.IsComplete)
-                    .SelectMany(r => r.Batch)
-                    .Where(a => !returned.Contains(a))
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .ToList();
-
-                var skippedIncomplete = succeeded
-                    .Where(r => !r.IsComplete)
-                    .SelectMany(r => r.Batch)
-                    .Where(a => !returned.Contains(a))
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .Count();
-
-                if (skippedIncomplete > 0)
-                {
-                    _logger.LogWarning(
-                        "ASIN recheck: leaving {Count} ASINs unchecked — batch pagination incomplete ({Incomplete} batch(es))",
-                        skippedIncomplete, incompleteBatches);
-                }
-
-                var updated = allOrganic.Count > 0
-                    ? await SaveProductsAsync(allOrganic, domain, ct)
-                    : 0;
-
-                var unavailable = missing.Count > 0
-                    ? await RecordNotAvailableAsync(missing, ct)
-                    : 0;
-
-                await SaveAsync(ct);
+                await FlushPendingLogsAsync(ct);
 
                 var elapsed = Stopwatch.GetElapsedTime(startedAt);
                 _logger.LogInformation(
@@ -245,12 +215,6 @@ namespace Affiliate.Services
                 _runCoordinator.Release();
             }
         }
-
-        private sealed record BatchResult(
-            List<string> Batch,
-            List<OrganicProduct> Organic,
-            Exception? Error,
-            bool IsComplete);
 
         /// <summary>
         /// Splits ASINs into request-sized batches. A trailing single ASIN is topped up from the
@@ -275,20 +239,11 @@ namespace Affiliate.Services
             return batches;
         }
 
-        /// <summary>Caps parallelism at the number of proxy IPs actually available right now.</summary>
+        /// <summary>Caps parallelism at configured MaxParallelBatches and batch count.</summary>
         private int ResolveParallelism(int batchCount)
         {
             var configured = Math.Max(1, _asinRecheck.MaxParallelBatches);
-            var healthy = Math.Max(1, _ispProxyRoundRobin.HealthyPortCount);
-
-            if (configured > healthy)
-            {
-                _logger.LogWarning(
-                    "ASIN recheck: only {Healthy} of {Configured} proxy IPs available; throughput will be lower this poll",
-                    healthy, configured);
-            }
-
-            return Math.Clamp(Math.Min(configured, healthy), 1, batchCount);
+            return Math.Clamp(configured, 1, batchCount);
         }
 
         private async Task ExecuteUrlScrapeAsync(ScraperUrl scraperUrl, CancellationToken ct)
@@ -299,20 +254,19 @@ namespace Affiliate.Services
 
             try
             {
-                var products = await FetchAllPagesAsync(scraperUrl, ct);
+                var (found, saved) = await FetchAllPagesAsync(scraperUrl, ct);
 
-                if (products.Count == 0)
+                if (found == 0)
                 {
                     await MarkRunAsync(scraperUrl, "No organic products parsed from HTML", ct);
                     _logger.LogWarning("URL scrape {Id}: no organic products", scraperUrl.Id);
                     return;
                 }
 
-                var saved = await SaveProductsAsync(products, scraperUrl.Domain, ct, scraperUrl.Id);
                 await MarkRunAsync(scraperUrl, error: null, ct);
                 _logger.LogInformation(
                     "URL scrape {Id} completed — saved/updated {Saved} of {Total} products",
-                    scraperUrl.Id, saved, products.Count);
+                    scraperUrl.Id, saved, found);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -322,17 +276,18 @@ namespace Affiliate.Services
         }
 
         /// <summary>
-        /// Fetches pages starting at <see cref="ScraperUrl.StartPage"/> up to the last visible
-        /// page. On blank/captcha/bad HTML, quarantines that IP and retries the same page on another IP.
+        /// Fetches pages starting at <see cref="ScraperUrl.StartPage"/> up to the last visible page.
+        /// Saves products (and sends drop alerts) after every successful page request.
         /// </summary>
-        private async Task<List<OrganicProduct>> FetchAllPagesAsync(ScraperUrl scraperUrl, CancellationToken ct)
+        private async Task<(int Found, int Saved)> FetchAllPagesAsync(ScraperUrl scraperUrl, CancellationToken ct)
         {
-            var all = new List<OrganicProduct>();
+            var found = 0;
+            var saved = 0;
             var firstPage = Math.Max(1, scraperUrl.StartPage);
             var lastPage = firstPage;
 
-            var endpoint = _ispProxyRoundRobin.Next();
-            var client = _ispProxyRoundRobin.CreateClient(endpoint);
+            var endpoint = _ispProxy.GetEndpoint();
+            var client = _ispProxy.CreateClient(endpoint);
             string? referer = null;
             var warmedHost = false;
             int? proxyPort = endpoint.UseProxy ? endpoint.Port : null;
@@ -352,110 +307,64 @@ namespace Affiliate.Services
                     if (page > firstPage)
                         await Task.Delay(AmazonBrowserProfile.NextPageDelayMs(), ct);
 
-                    var pageOk = false;
-                    var triedKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { endpoint.Key };
-                    var maxAttempts = Math.Max(1, _ispProxyRoundRobin.AvailablePortCount);
-
-                    for (var attempt = 1; attempt <= maxAttempts; attempt++)
+                    try
                     {
-                        try
+                        if (!warmedHost)
                         {
-                            if (!warmedHost)
-                            {
-                                await WarmupAmazonHomeAsync(client, scraperUrl, endpoint, ct);
-                                warmedHost = true;
-                            }
-
-                            var (result, pageUrl) = await FetchSearchPageAsync(
-                                client, scraperUrl, page, referer, endpoint, proxyPort, ct);
-
-                            all.AddRange(result.Organic);
-                            lastPage = result.LastVisiblePage ?? lastPage;
-                            referer = pageUrl;
-                            pageOk = true;
-                            _ispProxyRoundRobin.MarkHealthy(endpoint);
-
-                            _logger.LogInformation(
-                                "URL scrape {Id}: page {Page}/{Last} via {Proxy} — {Count} organic",
-                                scraperUrl.Id, page, lastPage, endpoint.Describe(), result.Organic.Count);
-                            break;
+                            await WarmupAmazonHomeAsync(client, scraperUrl, endpoint, ct);
+                            warmedHost = true;
                         }
-                        catch (AmazonFetchRejectedException ex)
+
+                        var (result, pageUrl) = await FetchSearchPageAsync(
+                            client, scraperUrl, page, referer, endpoint, proxyPort, ct);
+
+                        found += result.Organic.Count;
+                        lastPage = result.LastVisiblePage ?? lastPage;
+                        referer = pageUrl;
+
+                        if (result.Organic.Count > 0)
                         {
-                            if (ex.IsTransport)
-                                _ispProxyRoundRobin.MarkTransient(endpoint, ex.Message);
-                            else
-                                _ispProxyRoundRobin.MarkBad(endpoint, ex.Message);
-
-                            QueueLog(scraperUrl.Id, page, DateTime.UtcNow, ex.StatusCode, "Rejected",
-                                $"{endpoint.Describe()} page={page}", Truncate(ex.Message, 2000), proxyPort);
-
-                            if (attempt >= maxAttempts)
-                            {
-                                if (all.Count == 0)
-                                    throw;
-
-                                _logger.LogWarning(
-                                    "URL scrape {Id}: giving up page {Page} after {Attempts} IPs; keeping {Count} products",
-                                    scraperUrl.Id, page, attempt, all.Count);
-                                return all;
-                            }
-
-                            client.Dispose();
-                            endpoint = _ispProxyRoundRobin.Next(triedKeys);
-                            triedKeys.Add(endpoint.Key);
-                            client = _ispProxyRoundRobin.CreateClient(endpoint);
-                            referer = null;
-                            warmedHost = false;
-                            proxyPort = endpoint.UseProxy ? endpoint.Port : null;
-
-                            _logger.LogWarning(
-                                "URL scrape {Id}: page {Page} failed on bad port ({Reason}); switching to {Proxy}",
-                                scraperUrl.Id, page, ex.Message, endpoint.Describe());
-
-                            await Task.Delay(AmazonBrowserProfile.AfterIpSwitchDelayMs(), ct);
+                            var pageSaved = await SaveProductsAsync(
+                                result.Organic, scraperUrl.Domain, ct, scraperUrl.Id);
+                            saved += pageSaved;
                         }
-                        catch (Exception ex) when (ex is not OperationCanceledException and not AmazonFetchRejectedException)
-                        {
-                            _ispProxyRoundRobin.MarkTransient(endpoint, DescribeTransport(ex));
-                            QueueLog(scraperUrl.Id, page, DateTime.UtcNow, 0, "TransportError",
-                                $"{endpoint.Describe()} page={page}", Truncate(DescribeTransport(ex), 2000), proxyPort);
 
-                            if (attempt >= maxAttempts)
-                            {
-                                if (all.Count == 0)
-                                    throw;
-
-                                _logger.LogWarning(ex,
-                                    "URL scrape {Id}: stopped at page {Page}; keeping {Count} products",
-                                    scraperUrl.Id, page, all.Count);
-                                return all;
-                            }
-
-                            client.Dispose();
-                            endpoint = _ispProxyRoundRobin.Next(triedKeys);
-                            triedKeys.Add(endpoint.Key);
-                            client = _ispProxyRoundRobin.CreateClient(endpoint);
-                            referer = null;
-                            warmedHost = false;
-                            proxyPort = endpoint.UseProxy ? endpoint.Port : null;
-
-                            _logger.LogWarning(ex,
-                                "URL scrape {Id}: transport error on page {Page}; switching to {Proxy}",
-                                scraperUrl.Id, page, endpoint.Describe());
-
-                            await Task.Delay(AmazonBrowserProfile.AfterIpSwitchDelayMs(), ct);
-                        }
+                        _logger.LogInformation(
+                            "URL scrape {Id}: page {Page}/{Last} via {Proxy} — {Count} organic, saved={Saved}",
+                            scraperUrl.Id, page, lastPage, endpoint.Describe(), result.Organic.Count, saved);
                     }
+                    catch (AmazonFetchRejectedException ex)
+                    {
+                        QueueLog(scraperUrl.Id, page, DateTime.UtcNow, ex.StatusCode, "Rejected",
+                            $"{endpoint.Describe()} page={page}", Truncate(ex.Message, 2000), proxyPort);
 
-                    if (!pageOk)
-                        break;
+                        if (found == 0)
+                            throw;
+
+                        _logger.LogWarning(
+                            "URL scrape {Id}: giving up page {Page} ({Reason}); keeping {Count} products already saved",
+                            scraperUrl.Id, page, ex.Message, found);
+                        return (found, saved);
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException and not AmazonFetchRejectedException)
+                    {
+                        QueueLog(scraperUrl.Id, page, DateTime.UtcNow, 0, "TransportError",
+                            $"{endpoint.Describe()} page={page}", Truncate(DescribeTransport(ex), 2000), proxyPort);
+
+                        if (found == 0)
+                            throw;
+
+                        _logger.LogWarning(ex,
+                            "URL scrape {Id}: stopped at page {Page}; keeping {Count} products already saved",
+                            scraperUrl.Id, page, found);
+                        return (found, saved);
+                    }
 
                     if (page >= lastPage)
                         break;
                 }
 
-                return all;
+                return (found, saved);
             }
             finally
             {
@@ -622,7 +531,7 @@ namespace Affiliate.Services
         private async Task<HttpResponseMessage> SendNavigationAsync(
             HttpClient client, string url, string? referer, string label, CancellationToken ct)
         {
-            var retries = _ispProxyRoundRobin.TransportRetriesPerIp;
+            var retries = _ispProxy.TransportRetriesPerIp;
 
             for (var attempt = 0; ; attempt++)
             {
@@ -675,8 +584,9 @@ namespace Affiliate.Services
         /// Fetches every search-results page for a batch of ASINs using Amazon's real URL shape:
         /// page 1 <c>/s?k=…&amp;ref=nb_sb_noss</c>, then page N
         /// <c>/-/en/s?k=…&amp;page=N&amp;xpid=…&amp;qid=…&amp;ref=sr_pg_N</c>.
+        /// Saves products (and sends drop alerts) after every successful page request.
         /// </summary>
-        private async Task<(List<OrganicProduct> Organic, bool IsComplete)> FetchAsinBatchSearchViaIspAsync(
+        private async Task<(List<OrganicProduct> Organic, bool IsComplete, int Saved)> FetchAsinBatchSearchViaIspAsync(
             IReadOnlyList<string> asins, string domain, int batchIndex, CancellationToken ct)
         {
             if (asins.Count < 2)
@@ -686,9 +596,10 @@ namespace Affiliate.Services
             var requested = new HashSet<string>(asins, StringComparer.OrdinalIgnoreCase);
             var all = new List<OrganicProduct>();
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var saved = 0;
 
-            var endpoint = _ispProxyRoundRobin.Next();
-            var client = _ispProxyRoundRobin.CreateClient(endpoint);
+            var endpoint = _ispProxy.GetEndpoint();
+            var client = _ispProxy.CreateClient(endpoint);
             string? referer = null;
             var warmedHost = false;
             int? proxyPort = endpoint.UseProxy ? endpoint.Port : null;
@@ -708,7 +619,7 @@ namespace Affiliate.Services
                             _logger.LogWarning(
                                 "ASIN batch {Index}: missing qid after page 1 — cannot build page {Page}",
                                 batchIndex, page);
-                            return (all, IsComplete: false);
+                            return (all, IsComplete: false, saved);
                         }
 
                         await Task.Delay(AmazonBrowserProfile.NextPageDelayMs(), ct);
@@ -721,9 +632,7 @@ namespace Affiliate.Services
                     string? nextHref = null;
                     var lastVisible = page;
                     var newOnPage = 0;
-                    var triedKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { endpoint.Key };
-                    var maxAttempts = Math.Clamp(
-                        _asinRecheck.MaxAttemptsPerBatch, 1, Math.Max(1, _ispProxyRoundRobin.AvailablePortCount));
+                    var maxAttempts = Math.Max(1, _asinRecheck.MaxAttemptsPerBatch);
 
                     for (var attempt = 1; attempt <= maxAttempts; attempt++)
                     {
@@ -756,7 +665,6 @@ namespace Affiliate.Services
                             nextHref = result.NextPageHref;
                             referer = pageUrl;
                             pageOk = true;
-                            _ispProxyRoundRobin.MarkHealthy(endpoint);
 
                             if (qid is null &&
                                 TryResolveAmazonHref(pageUrl, nextHref, out var nextAbs) &&
@@ -766,20 +674,21 @@ namespace Affiliate.Services
                                 TryGetQueryParam(nextAbs, "xpid", out xpid);
                             }
 
+                            if (result.Organic.Count > 0)
+                            {
+                                var pageSaved = await SaveProductsAsync(result.Organic, domain, ct);
+                                saved += pageSaved;
+                            }
+
                             _logger.LogInformation(
-                                "ASIN batch {Index}: Amazon page {Page}/{Last} via {Proxy} — {PageCount} organic, {New} new (total {Total}/{Requested}, hasNext={HasNext}) GET {Url}",
+                                "ASIN batch {Index}: Amazon page {Page}/{Last} via {Proxy} — {PageCount} organic, {New} new (total {Total}/{Requested}, saved={Saved}, hasNext={HasNext}) GET {Url}",
                                 batchIndex, page, lastVisible, endpoint.Describe(),
-                                pageOrganicCount, newOnPage, all.Count, asins.Count, result.HasNextPage,
+                                pageOrganicCount, newOnPage, all.Count, asins.Count, saved, result.HasNextPage,
                                 Truncate(pageUrl, 180));
                             break;
                         }
                         catch (AmazonFetchRejectedException ex)
                         {
-                            if (ex.IsTransport)
-                                _ispProxyRoundRobin.MarkTransient(endpoint, ex.Message);
-                            else
-                                _ispProxyRoundRobin.MarkBad(endpoint, ex.Message);
-
                             QueueLog(null, page, DateTime.UtcNow, ex.StatusCode, "Rejected",
                                 $"{endpoint.Describe()} batch={batchIndex} page={page}",
                                 Truncate(ex.Message, 2000), proxyPort);
@@ -790,30 +699,26 @@ namespace Affiliate.Services
                                     throw;
 
                                 _logger.LogWarning(
-                                    "ASIN batch {Index}: giving up page {Page} after {Attempts} IPs; keeping {Count} products (incomplete)",
+                                    "ASIN batch {Index}: giving up page {Page} after {Attempts} attempts; keeping {Count} products already saved (incomplete)",
                                     batchIndex, page, attempt, all.Count);
-                                return (all, IsComplete: false);
+                                return (all, IsComplete: false, saved);
                             }
 
                             client.Dispose();
-                            endpoint = _ispProxyRoundRobin.Next(triedKeys);
-                            triedKeys.Add(endpoint.Key);
-                            client = _ispProxyRoundRobin.CreateClient(endpoint);
+                            client = _ispProxy.CreateClient(endpoint);
                             referer = null;
                             warmedHost = false;
-                            proxyPort = endpoint.UseProxy ? endpoint.Port : null;
 
                             _logger.LogWarning(
-                                "ASIN batch {Index}: page {Page} {Kind} on previous proxy ({Reason}); switching to {Proxy}",
+                                "ASIN batch {Index}: page {Page} {Kind} ({Reason}); retrying via {Proxy} (attempt {Attempt}/{Max})",
                                 batchIndex, page, ex.IsTransport ? "connection failed" : "rejected",
-                                ex.Message, endpoint.Describe());
+                                ex.Message, endpoint.Describe(), attempt + 1, maxAttempts);
 
                             await Task.Delay(AmazonBrowserProfile.AfterIpSwitchDelayMs(), ct);
                         }
                         catch (Exception ex) when (ex is not OperationCanceledException and not AmazonFetchRejectedException)
                         {
                             var reason = DescribeTransport(ex);
-                            _ispProxyRoundRobin.MarkTransient(endpoint, reason);
                             QueueLog(null, page, DateTime.UtcNow, 0, "TransportError",
                                 $"{endpoint.Describe()} batch={batchIndex} page={page} asins={asins.Count}",
                                 Truncate(reason, 2000), proxyPort);
@@ -824,47 +729,44 @@ namespace Affiliate.Services
                                     throw;
 
                                 _logger.LogWarning(ex,
-                                    "ASIN batch {Index}: stopped at page {Page}; keeping {Count} products (incomplete)",
+                                    "ASIN batch {Index}: stopped at page {Page}; keeping {Count} products already saved (incomplete)",
                                     batchIndex, page, all.Count);
-                                return (all, IsComplete: false);
+                                return (all, IsComplete: false, saved);
                             }
 
                             client.Dispose();
-                            endpoint = _ispProxyRoundRobin.Next(triedKeys);
-                            triedKeys.Add(endpoint.Key);
-                            client = _ispProxyRoundRobin.CreateClient(endpoint);
+                            client = _ispProxy.CreateClient(endpoint);
                             referer = null;
                             warmedHost = false;
-                            proxyPort = endpoint.UseProxy ? endpoint.Port : null;
 
                             _logger.LogWarning(ex,
-                                "ASIN batch {Index}: transport error on page {Page}; switching to {Proxy}",
-                                batchIndex, page, endpoint.Describe());
+                                "ASIN batch {Index}: transport error on page {Page}; retrying via {Proxy} (attempt {Attempt}/{Max})",
+                                batchIndex, page, endpoint.Describe(), attempt + 1, maxAttempts);
 
                             await Task.Delay(AmazonBrowserProfile.AfterIpSwitchDelayMs(), ct);
                         }
                     }
 
                     if (!pageOk)
-                        return (all, IsComplete: false);
+                        return (all, IsComplete: false, saved);
 
                     var matched = all.Count(p => p.Asin is not null && requested.Contains(p.Asin));
                     if (matched >= asins.Count)
-                        return (all, IsComplete: true);
+                        return (all, IsComplete: true, saved);
 
                     if (pageOrganicCount > 0 && newOnPage == 0)
                     {
                         _logger.LogWarning(
                             "ASIN batch {Index}: page {Page} returned only duplicate ASINs — stopping as incomplete",
                             batchIndex, page);
-                        return (all, IsComplete: false);
+                        return (all, IsComplete: false, saved);
                     }
 
                     if (string.IsNullOrWhiteSpace(nextHref))
-                        return (all, IsComplete: true);
+                        return (all, IsComplete: true, saved);
                 }
 
-                return (all, IsComplete: false);
+                return (all, IsComplete: false, saved);
             }
             finally
             {
@@ -1019,7 +921,7 @@ namespace Affiliate.Services
 
         /// <summary>
         /// Buffers audit rows instead of touching the DbContext, so parallel batch workers can log safely.
-        /// Drained by <see cref="SaveAsync"/> on the calling thread.
+        /// Drained by <see cref="SaveChangesCoreAsync"/> under the DB lock.
         /// </summary>
         private void QueueLog(int? scraperUrlId, int page, DateTime requestedAt, int statusCode,
             string? statusPhrase, string requestBody, string? responseBody, int? proxyPort = null)
@@ -1037,8 +939,8 @@ namespace Affiliate.Services
             });
         }
 
-        /// <summary>Flushes buffered request logs, then commits. Must only be called from the owning thread.</summary>
-        private async Task<int> SaveAsync(CancellationToken ct)
+        /// <summary>Flushes buffered request logs, then commits. Caller must hold <see cref="_dbGate"/>.</summary>
+        private async Task<int> SaveChangesCoreAsync(CancellationToken ct)
         {
             while (_pendingLogs.TryDequeue(out var log))
                 _db.OxylabsRequestLogs.Add(log);
@@ -1046,11 +948,44 @@ namespace Affiliate.Services
             return await _db.SaveChangesAsync(ct);
         }
 
+        private async Task FlushPendingLogsAsync(CancellationToken ct)
+        {
+            await _dbGate.WaitAsync(ct);
+            try
+            {
+                await SaveChangesCoreAsync(ct);
+                _db.ChangeTracker.Clear();
+            }
+            finally
+            {
+                _dbGate.Release();
+            }
+        }
+
         private async Task MarkRunAsync(ScraperUrl scraperUrl, string? error, CancellationToken ct)
         {
-            scraperUrl.LastRunAt = DateTime.UtcNow;
-            scraperUrl.LastRunError = Truncate(error, 2000);
-            await SaveAsync(ct);
+            await _dbGate.WaitAsync(ct);
+            try
+            {
+                scraperUrl.LastRunAt = DateTime.UtcNow;
+                scraperUrl.LastRunError = Truncate(error, 2000);
+
+                // Per-page saves clear the change tracker, so the scheduled entity may be detached.
+                var entry = _db.Entry(scraperUrl);
+                if (entry.State == EntityState.Detached)
+                {
+                    _db.ScraperUrls.Attach(scraperUrl);
+                    entry.Property(s => s.LastRunAt).IsModified = true;
+                    entry.Property(s => s.LastRunError).IsModified = true;
+                }
+
+                await SaveChangesCoreAsync(ct);
+                _db.ChangeTracker.Clear();
+            }
+            finally
+            {
+                _dbGate.Release();
+            }
         }
 
         /// <summary>
@@ -1062,19 +997,28 @@ namespace Affiliate.Services
             if (asins.Count == 0)
                 return 0;
 
-            var products = await _db.Products
-                .Where(p => p.Asin != null && asins.Contains(p.Asin) && p.IsBlocked != true)
-                .ToListAsync(ct);
-
-            var checkedAt = DateTime.UtcNow;
-            foreach (var product in products)
+            await _dbGate.WaitAsync(ct);
+            try
             {
-                product.LastCheckedAt = checkedAt;
-                product.NotAvailableDate ??= checkedAt;
-            }
+                var products = await _db.Products
+                    .Where(p => p.Asin != null && asins.Contains(p.Asin) && p.IsBlocked != true)
+                    .ToListAsync(ct);
 
-            await SaveAsync(ct);
-            return products.Count;
+                var checkedAt = DateTime.UtcNow;
+                foreach (var product in products)
+                {
+                    product.LastCheckedAt = checkedAt;
+                    product.NotAvailableDate ??= checkedAt;
+                }
+
+                await SaveChangesCoreAsync(ct);
+                _db.ChangeTracker.Clear();
+                return products.Count;
+            }
+            finally
+            {
+                _dbGate.Release();
+            }
         }
 
         private async Task<int> SaveProductsAsync(
@@ -1095,56 +1039,66 @@ namespace Affiliate.Services
             if (byAsin.Count == 0)
                 return 0;
 
-            var existing = await _db.Products
-                .Where(p => p.Asin != null && byAsin.Keys.Contains(p.Asin))
-                .ToDictionaryAsync(p => p.Asin!, StringComparer.OrdinalIgnoreCase, ct);
-
-            var checkedAt = DateTime.UtcNow;
-            var alerts = new List<ProductDropAlert>();
-
-            var saved = 0;
-            foreach (var (asin, org) in byAsin)
+            await _dbGate.WaitAsync(ct);
+            try
             {
-                var isNew = !existing.TryGetValue(asin, out var product);
+                var asins = byAsin.Keys.ToList();
+                var existing = await _db.Products
+                    .Where(p => p.Asin != null && asins.Contains(p.Asin))
+                    .ToDictionaryAsync(p => p.Asin!, StringComparer.OrdinalIgnoreCase, ct);
 
-                if (!isNew && product!.IsBlocked == true)
-                    continue;
+                var checkedAt = DateTime.UtcNow;
+                var alerts = new List<ProductDropAlert>();
 
-                var previousPrice = product?.CurrentPrice;
-                var priceUnchanged = !isNew && previousPrice == org.Price;
-
-                if (isNew)
+                var saved = 0;
+                foreach (var (asin, org) in byAsin)
                 {
-                    product = new Product { Asin = asin, CreatedAt = checkedAt };
-                    _db.Products.Add(product);
-                    existing[asin] = product;
+                    var isNew = !existing.TryGetValue(asin, out var product);
+
+                    if (!isNew && product!.IsBlocked == true)
+                        continue;
+
+                    var previousPrice = product?.CurrentPrice;
+                    var priceUnchanged = !isNew && previousPrice == org.Price;
+
+                    if (isNew)
+                    {
+                        product = new Product { Asin = asin, CreatedAt = checkedAt };
+                        _db.Products.Add(product);
+                        existing[asin] = product;
+                    }
+
+                    if (scraperUrlId.HasValue)
+                        product!.ScraperUrlId = scraperUrlId;
+
+                    ApplyOrganicData(product!, org, domain, checkedAt, isNew);
+
+                    if (!priceUnchanged)
+                        product!.PriceHistory.Add(CreatePriceHistory(org, checkedAt));
+
+                    ApplyPriceTracking(product!, org.Price, previousPrice, isNew, alerts);
+                    saved++;
                 }
 
-                if (scraperUrlId.HasValue)
-                    product!.ScraperUrlId = scraperUrlId;
+                if (saved == 0 && alerts.Count == 0)
+                    return 0;
 
-                ApplyOrganicData(product!, org, domain, checkedAt, isNew);
+                await SaveChangesCoreAsync(ct);
 
-                if (!priceUnchanged)
-                    product!.PriceHistory.Add(CreatePriceHistory(org, checkedAt));
+                if (alerts.Count > 0)
+                {
+                    await AttachPriceHistoryAsync(alerts, ct);
+                    if (await DispatchAlertsAsync(alerts, ct))
+                        await SaveChangesCoreAsync(ct);
+                }
 
-                ApplyPriceTracking(product!, org.Price, previousPrice, isNew, alerts);
-                saved++;
+                _db.ChangeTracker.Clear();
+                return saved;
             }
-
-            if (saved == 0 && alerts.Count == 0)
-                return 0;
-
-            await SaveAsync(ct);
-
-            if (alerts.Count > 0)
+            finally
             {
-                await AttachPriceHistoryAsync(alerts, ct);
-                if (await DispatchAlertsAsync(alerts, ct))
-                    await SaveAsync(ct);
+                _dbGate.Release();
             }
-
-            return saved;
         }
 
         private async Task AttachPriceHistoryAsync(List<ProductDropAlert> alerts, CancellationToken ct)

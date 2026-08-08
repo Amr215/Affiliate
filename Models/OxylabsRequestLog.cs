@@ -15,7 +15,7 @@ namespace Affiliate.Models
         public int Page { get; set; }
 
         /// <summary>
-        /// ISP sticky proxy port used for the request (e.g. 8001).
+        /// ISP proxy port used for the request (e.g. 8000).
         /// Null for ASIN Oxylabs API calls or direct (no-proxy) fetches.
         /// </summary>
         public int? Port { get; set; }

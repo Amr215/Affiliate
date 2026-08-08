@@ -24,19 +24,15 @@ namespace Affiliate.Options
         /// </summary>
         public int AsinsPerPoll { get; set; } = 1000;
 
-        /// <summary>
-        /// Batches fetched concurrently, one per proxy IP. Capped at the number of healthy ISP ports,
-        /// so this should not exceed <c>IspProxy:Ports</c>.
-        /// </summary>
+        /// <summary>Batches fetched concurrently within one poll.</summary>
         public int MaxParallelBatches { get; set; } = 10;
 
         /// <summary>Shortest gap between cycles when a poll overruns its interval.</summary>
         public int MinimumGapSeconds { get; set; } = 3;
 
         /// <summary>
-        /// Proxy IPs tried per batch before giving up for this poll. Kept low so a site-wide block
-        /// doesn't multiply into one request per port per batch; failed ASINs are retried next poll
-        /// anyway because they keep the oldest LastCheckedAt.
+        /// Attempts per batch page before giving up for this poll. Failed ASINs are retried next
+        /// poll because they keep the oldest LastCheckedAt.
         /// </summary>
         public int MaxAttemptsPerBatch { get; set; } = 3;
 

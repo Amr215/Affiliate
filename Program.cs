@@ -79,7 +79,7 @@ builder.Services.AddHttpClient(KeepAliveBackgroundService.HttpClientName, client
 
 builder.Services.AddSingleton<KeepAliveUrlStore>();
 builder.Services.AddSingleton<IScraperRunCoordinator, ScraperRunCoordinator>();
-builder.Services.AddSingleton<IIspProxyRoundRobin, IspProxyRoundRobin>();
+builder.Services.AddSingleton<IIspProxyService, IspProxyService>();
 builder.Services.AddScoped<ITelegramNotifier, TelegramNotifier>();
 builder.Services.AddScoped<IAmazonScraperService, AmazonScraperService>();
 builder.Services.AddHostedService<AmazonScraperBackgroundService>();
