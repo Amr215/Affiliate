@@ -335,9 +335,7 @@ namespace Affiliate.Services
                     }
                     catch (AmazonFetchRejectedException ex)
                     {
-                        QueueLog(scraperUrl.Id, page, DateTime.UtcNow, ex.StatusCode, "Rejected",
-                            $"{endpoint.Describe()} page={page}", Truncate(ex.Message, 2000), proxyPort);
-
+                        // Already logged once in FetchSearchPageAsync — do not write a second OxylabsRequestLog row.
                         if (found == 0)
                             throw;
 
@@ -437,41 +435,48 @@ namespace Affiliate.Services
 
             using (response)
             {
-                var status = (int)response.StatusCode;
+                var httpStatus = (int)response.StatusCode;
                 var body = await response.Content.ReadAsStringAsync(ct);
-                QueueLog(scraperUrl.Id, page, requestedAt, status, response.ReasonPhrase, requestLog,
-                    status == 200 ? null : Truncate(body, 8000), proxyPort);
 
-                if (status is 403 or 429 or 503 or 502 or 500)
-                    throw new AmazonFetchRejectedException(
-                        $"Blocked/unavailable status {status} on page {page}", status);
+                string? rejectReason = null;
+                var logStatus = httpStatus;
+                if (httpStatus is 403 or 429 or 503 or 502 or 500)
+                    rejectReason = $"Blocked/unavailable status {httpStatus} on page {page}";
+                else if (httpStatus != 200)
+                    rejectReason = $"HTTP {httpStatus} on page {page}";
+                else if (string.IsNullOrWhiteSpace(body))
+                    rejectReason = $"Empty HTML on page {page}";
+                else if (LooksLikeBotChallenge(body))
+                {
+                    // Amazon/Akamai often returns challenges with HTTP 200 — treat as failed block.
+                    logStatus = SoftBlockLoggedStatusCode;
+                    rejectReason = $"Captcha/bot challenge on page {page}";
+                }
+                else if (body.Length < 8_000)
+                    rejectReason = $"Suspiciously short HTML ({body.Length} chars) on page {page}";
+                else if (!LooksLikeAmazonSearchHtml(body))
+                    rejectReason = $"Unexpected HTML (not a search results page) on page {page}";
 
-                if (status != 200)
-                    throw new AmazonFetchRejectedException(
-                        $"HTTP {status} on page {page}", status);
+                SearchPageParseResult? parsed = null;
+                if (rejectReason is null)
+                {
+                    parsed = AmazonSearchHtmlParser.Parse(body);
+                    if (parsed.Organic.Count == 0 && !LooksLikeZeroResultsPage(body))
+                        rejectReason = $"No products parsed and page does not look like zero-results on page {page}";
+                }
 
-                if (string.IsNullOrWhiteSpace(body))
-                    throw new AmazonFetchRejectedException($"Empty HTML on page {page}", status);
+                if (rejectReason is not null)
+                {
+                    // Always persist Amazon's HTML (when present) so it can be inspected/parsed later.
+                    // Reject reason stays in the exception / app logs only — never in ResponseBody.
+                    QueueLog(scraperUrl.Id, page, requestedAt, logStatus, "Rejected", requestLog,
+                        string.IsNullOrEmpty(body) ? null : body, proxyPort);
+                    throw new AmazonFetchRejectedException(rejectReason, logStatus);
+                }
 
-                if (LooksLikeBotChallenge(body))
-                    throw new AmazonFetchRejectedException(
-                        $"Captcha/bot challenge on page {page}", status);
-
-                if (body.Length < 8_000)
-                    throw new AmazonFetchRejectedException(
-                        $"Suspiciously short HTML ({body.Length} chars) on page {page}", status);
-
-                if (!LooksLikeAmazonSearchHtml(body))
-                    throw new AmazonFetchRejectedException(
-                        $"Unexpected HTML (not a search results page) on page {page}", status);
-
-                var parsed = AmazonSearchHtmlParser.Parse(body);
-
-                if (parsed.Organic.Count == 0 && !LooksLikeZeroResultsPage(body))
-                    throw new AmazonFetchRejectedException(
-                        $"No products parsed and page does not look like zero-results on page {page}", status);
-
-                return (parsed, pageUrl);
+                QueueLog(scraperUrl.Id, page, requestedAt, httpStatus, response.ReasonPhrase, requestLog,
+                    null, proxyPort);
+                return (parsed!, pageUrl);
             }
         }
 
@@ -488,8 +493,19 @@ namespace Affiliate.Services
                 || html.Contains("Sorry, we just need to make sure you're not a robot", StringComparison.OrdinalIgnoreCase)
                 || html.Contains("opfcaptcha", StringComparison.OrdinalIgnoreCase)
                 || html.Contains("captchacharacters", StringComparison.OrdinalIgnoreCase)
+                || LooksLikeAkamaiInterstitial(html)
                 || LooksLikeSoftBlockPage(html);
         }
+
+        /// <summary>
+        /// Akamai bot interstitial Amazon often returns with HTTP 200 (meta refresh + bm-verify + /_sec/verify).
+        /// Must be treated as a block, not a successful page.
+        /// </summary>
+        private static bool LooksLikeAkamaiInterstitial(string html) =>
+            html.Contains("bm-verify", StringComparison.OrdinalIgnoreCase)
+            || html.Contains("triggerInterstitialChallenge", StringComparison.OrdinalIgnoreCase)
+            || html.Contains("/_sec/verify", StringComparison.OrdinalIgnoreCase)
+            || html.Contains("provider=interstitial", StringComparison.OrdinalIgnoreCase);
 
         /// <summary>Amazon's throttling "Sorry! / عذرًا!" page, served with either 200 or 503.</summary>
         private static bool LooksLikeSoftBlockPage(string html) =>
@@ -497,6 +513,12 @@ namespace Affiliate.Services
             || html.Contains("cs_503_logo", StringComparison.OrdinalIgnoreCase)
             || html.Contains("Sorry! Something went wrong", StringComparison.OrdinalIgnoreCase)
             || html.Contains("communities/people/logo.gif", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Amazon sometimes serves blocks/challenges with HTTP 200. Log/retry those as 403 so they
+        /// are not treated as successful responses.
+        /// </summary>
+        private const int SoftBlockLoggedStatusCode = 403;
 
         private static bool LooksLikeAmazonSearchHtml(string html) =>
             html.Contains("s-search-result", StringComparison.OrdinalIgnoreCase)
@@ -689,10 +711,7 @@ namespace Affiliate.Services
                         }
                         catch (AmazonFetchRejectedException ex)
                         {
-                            QueueLog(null, page, DateTime.UtcNow, ex.StatusCode, "Rejected",
-                                $"{endpoint.Describe()} batch={batchIndex} page={page}",
-                                Truncate(ex.Message, 2000), proxyPort);
-
+                            // Already logged once in FetchAsinBatchSearchPageAsync — do not write a second OxylabsRequestLog row.
                             if (attempt >= maxAttempts)
                             {
                                 if (all.Count == 0)
@@ -851,42 +870,48 @@ namespace Affiliate.Services
 
             using (response)
             {
-                var status = (int)response.StatusCode;
+                var httpStatus = (int)response.StatusCode;
                 var body = await response.Content.ReadAsStringAsync(ct);
-                QueueLog(null, page, requestedAt, status, response.ReasonPhrase, requestLog,
-                    status == 200 ? null : Truncate(body, 8000), proxyPort);
 
-                if (status is 403 or 429 or 503 or 502 or 500)
-                    throw new AmazonFetchRejectedException(
-                        $"Blocked/unavailable status {status} on ASIN batch {batchIndex} page {page}", status);
+                string? rejectReason = null;
+                var logStatus = httpStatus;
+                if (httpStatus is 403 or 429 or 503 or 502 or 500)
+                    rejectReason = $"Blocked/unavailable status {httpStatus} on ASIN batch {batchIndex} page {page}";
+                else if (httpStatus != 200)
+                    rejectReason = $"HTTP {httpStatus} on ASIN batch {batchIndex} page {page}";
+                else if (string.IsNullOrWhiteSpace(body))
+                    rejectReason = $"Empty HTML on ASIN batch {batchIndex} page {page}";
+                else if (LooksLikeBotChallenge(body))
+                {
+                    // Amazon/Akamai often returns challenges with HTTP 200 — treat as failed block.
+                    logStatus = SoftBlockLoggedStatusCode;
+                    rejectReason = $"Captcha/bot challenge on ASIN batch {batchIndex} page {page}";
+                }
+                else if (body.Length < 8_000)
+                    rejectReason = $"Suspiciously short HTML ({body.Length} chars) on ASIN batch {batchIndex} page {page}";
+                else if (!LooksLikeAmazonSearchHtml(body))
+                    rejectReason = $"Unexpected HTML (not a search results page) on ASIN batch {batchIndex} page {page}";
 
-                if (status != 200)
-                    throw new AmazonFetchRejectedException(
-                        $"HTTP {status} on ASIN batch {batchIndex} page {page}", status);
+                SearchPageParseResult? parsed = null;
+                if (rejectReason is null)
+                {
+                    parsed = AmazonSearchHtmlParser.Parse(body);
+                    if (parsed.Organic.Count == 0 && !LooksLikeZeroResultsPage(body))
+                        rejectReason =
+                            $"No products parsed on ASIN batch {batchIndex} page {page} (requested {requestedCount})";
+                }
 
-                if (string.IsNullOrWhiteSpace(body))
-                    throw new AmazonFetchRejectedException(
-                        $"Empty HTML on ASIN batch {batchIndex} page {page}", status);
+                if (rejectReason is not null)
+                {
+                    // Always persist Amazon's HTML (when present) so it can be inspected/parsed later.
+                    // Reject reason stays in the exception / app logs only — never in ResponseBody.
+                    QueueLog(null, page, requestedAt, logStatus, "Rejected", requestLog,
+                        string.IsNullOrEmpty(body) ? null : body, proxyPort);
+                    throw new AmazonFetchRejectedException(rejectReason, logStatus);
+                }
 
-                if (LooksLikeBotChallenge(body))
-                    throw new AmazonFetchRejectedException(
-                        $"Captcha/bot challenge on ASIN batch {batchIndex} page {page}", status);
-
-                if (body.Length < 8_000)
-                    throw new AmazonFetchRejectedException(
-                        $"Suspiciously short HTML ({body.Length} chars) on ASIN batch {batchIndex} page {page}", status);
-
-                if (!LooksLikeAmazonSearchHtml(body))
-                    throw new AmazonFetchRejectedException(
-                        $"Unexpected HTML (not a search results page) on ASIN batch {batchIndex} page {page}", status);
-
-                var parsed = AmazonSearchHtmlParser.Parse(body);
-
-                if (parsed.Organic.Count == 0 && !LooksLikeZeroResultsPage(body))
-                    throw new AmazonFetchRejectedException(
-                        $"No products parsed on ASIN batch {batchIndex} page {page} (requested {requestedCount})", status);
-
-                return parsed;
+                QueueLog(null, page, requestedAt, httpStatus, response.ReasonPhrase, requestLog, null, proxyPort);
+                return parsed!;
             }
         }
 

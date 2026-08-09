@@ -31,7 +31,8 @@ namespace Affiliate.Services
             var coolDownEvery = TimeSpan.FromMinutes(Math.Max(0, _options.CoolDownEveryMinutes));
             var coolDownMin = Math.Max(1, _options.CoolDownMinSeconds);
             var coolDownMax = Math.Max(coolDownMin, _options.CoolDownMaxSeconds);
-            var lastCoolDownAt = Stopwatch.GetTimestamp();
+            // Counts active scheduler time only — cool-down pauses do not count toward the interval.
+            var activeSinceCoolDown = Stopwatch.StartNew();
 
             _logger.LogInformation(
                 "ASIN recheck scheduler started (cycle every {Min}-{Max}s; Enabled={Enabled}, BatchSize={BatchSize}, AsinsPerPoll={AsinsPerPoll}, MaxParallelBatches={Parallel}, CoolDownEvery={CoolDownEvery}m for {CoolDownMin}-{CoolDownMax}s)",
@@ -41,12 +42,14 @@ namespace Affiliate.Services
             while (!stoppingToken.IsCancellationRequested)
             {
                 if (coolDownEvery > TimeSpan.Zero
-                    && Stopwatch.GetElapsedTime(lastCoolDownAt) >= coolDownEvery)
+                    && activeSinceCoolDown.Elapsed >= coolDownEvery)
                 {
+                    activeSinceCoolDown.Stop();
+
                     var coolDownSeconds = Random.Shared.Next(coolDownMin, coolDownMax + 1);
                     _logger.LogInformation(
-                        "ASIN recheck cool-down: pausing {Seconds}s to reduce proxy blocks",
-                        coolDownSeconds);
+                        "ASIN recheck cool-down: pausing {Seconds}s to reduce proxy blocks (after {Active:0.0}m active)",
+                        coolDownSeconds, activeSinceCoolDown.Elapsed.TotalMinutes);
 
                     try
                     {
@@ -57,7 +60,10 @@ namespace Affiliate.Services
                         break;
                     }
 
-                    lastCoolDownAt = Stopwatch.GetTimestamp();
+                    activeSinceCoolDown.Restart();
+                    _logger.LogInformation(
+                        "ASIN recheck cool-down finished; next pause after {Minutes}m of active work",
+                        coolDownEvery.TotalMinutes);
                 }
 
                 var startedAt = Stopwatch.GetTimestamp();

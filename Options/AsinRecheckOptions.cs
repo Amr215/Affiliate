@@ -31,10 +31,11 @@ namespace Affiliate.Options
         public int MinimumGapSeconds { get; set; } = 3;
 
         /// <summary>
-        /// How often to take a longer cool-down pause (minutes). Used to reduce proxy blocks.
-        /// Set to 0 to disable.
+        /// How often to take a longer cool-down pause (minutes of active work).
+        /// Pause time itself does not count — after a cool-down ends, a full interval of
+        /// active polling runs again. Used to reduce proxy blocks. Set to 0 to disable.
         /// </summary>
-        public int CoolDownEveryMinutes { get; set; } = 10;
+        public int CoolDownEveryMinutes { get; set; } = 6;
 
         /// <summary>Minimum cool-down pause length in seconds (inclusive).</summary>
         public int CoolDownMinSeconds { get; set; } = 40;

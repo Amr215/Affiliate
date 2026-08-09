@@ -29,7 +29,10 @@ namespace Affiliate.Models
         /// <summary>Request payload or URL that was fetched.</summary>
         public string? RequestBody { get; set; }
 
-        /// <summary>Full response body — stored only when <see cref="StatusCode"/> is not 200.</summary>
+        /// <summary>
+        /// Upstream response body when the request failed or was rejected.
+        /// For Amazon HTML responses this is the raw page (not an app error message), so it can be re-parsed later.
+        /// </summary>
         public string? ResponseBody { get; set; }
 
         [StringLength(64)]
