@@ -34,7 +34,7 @@ namespace Affiliate.Options
         /// How often to take a longer cool-down pause (minutes). Used to reduce proxy blocks.
         /// Set to 0 to disable.
         /// </summary>
-        public int CoolDownEveryMinutes { get; set; } = 5;
+        public int CoolDownEveryMinutes { get; set; } = 10;
 
         /// <summary>Minimum cool-down pause length in seconds (inclusive).</summary>
         public int CoolDownMinSeconds { get; set; } = 40;
