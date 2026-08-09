@@ -28,13 +28,38 @@ namespace Affiliate.Services
             var min = Math.Max(1, _options.PollIntervalMinSeconds);
             var max = Math.Max(min, _options.PollIntervalMaxSeconds);
             var minimumGap = TimeSpan.FromSeconds(Math.Max(1, _options.MinimumGapSeconds));
+            var coolDownEvery = TimeSpan.FromMinutes(Math.Max(0, _options.CoolDownEveryMinutes));
+            var coolDownMin = Math.Max(1, _options.CoolDownMinSeconds);
+            var coolDownMax = Math.Max(coolDownMin, _options.CoolDownMaxSeconds);
+            var lastCoolDownAt = Stopwatch.GetTimestamp();
 
             _logger.LogInformation(
-                "ASIN recheck scheduler started (cycle every {Min}-{Max}s; Enabled={Enabled}, BatchSize={BatchSize}, AsinsPerPoll={AsinsPerPoll}, MaxParallelBatches={Parallel})",
-                min, max, _options.Enabled, _options.BatchSize, _options.AsinsPerPoll, _options.MaxParallelBatches);
+                "ASIN recheck scheduler started (cycle every {Min}-{Max}s; Enabled={Enabled}, BatchSize={BatchSize}, AsinsPerPoll={AsinsPerPoll}, MaxParallelBatches={Parallel}, CoolDownEvery={CoolDownEvery}m for {CoolDownMin}-{CoolDownMax}s)",
+                min, max, _options.Enabled, _options.BatchSize, _options.AsinsPerPoll, _options.MaxParallelBatches,
+                coolDownEvery.TotalMinutes, coolDownMin, coolDownMax);
 
             while (!stoppingToken.IsCancellationRequested)
             {
+                if (coolDownEvery > TimeSpan.Zero
+                    && Stopwatch.GetElapsedTime(lastCoolDownAt) >= coolDownEvery)
+                {
+                    var coolDownSeconds = Random.Shared.Next(coolDownMin, coolDownMax + 1);
+                    _logger.LogInformation(
+                        "ASIN recheck cool-down: pausing {Seconds}s to reduce proxy blocks",
+                        coolDownSeconds);
+
+                    try
+                    {
+                        await Task.Delay(TimeSpan.FromSeconds(coolDownSeconds), stoppingToken);
+                    }
+                    catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                    {
+                        break;
+                    }
+
+                    lastCoolDownAt = Stopwatch.GetTimestamp();
+                }
+
                 var startedAt = Stopwatch.GetTimestamp();
                 var target = TimeSpan.FromSeconds(Random.Shared.Next(min, max + 1));
 

@@ -31,6 +31,18 @@ namespace Affiliate.Options
         public int MinimumGapSeconds { get; set; } = 3;
 
         /// <summary>
+        /// How often to take a longer cool-down pause (minutes). Used to reduce proxy blocks.
+        /// Set to 0 to disable.
+        /// </summary>
+        public int CoolDownEveryMinutes { get; set; } = 5;
+
+        /// <summary>Minimum cool-down pause length in seconds (inclusive).</summary>
+        public int CoolDownMinSeconds { get; set; } = 40;
+
+        /// <summary>Maximum cool-down pause length in seconds (inclusive).</summary>
+        public int CoolDownMaxSeconds { get; set; } = 90;
+
+        /// <summary>
         /// Attempts per batch page before giving up for this poll. Failed ASINs are retried next
         /// poll because they keep the oldest LastCheckedAt.
         /// </summary>
