@@ -39,6 +39,10 @@
                 <input name="StatusCode" value="@f.StatusCode" class="form-control ltr" type="number" placeholder="200" />
             </div>
             <div class="col-6 col-lg-2">
+                <label class="form-label">البورت</label>
+                <input name="Port" value="@f.Port" class="form-control ltr" type="number" placeholder="8001" />
+            </div>
+            <div class="col-6 col-lg-2">
                 <label class="form-label">الأخطاء فقط</label>
                 <select name="ErrorsOnly" class="form-select">
                     <option value="">الكل</option>
@@ -192,6 +196,7 @@
             ["PageSize"] = filter.PageSize.ToString(),
             ["ScraperUrlId"] = filter.ScraperUrlId?.ToString(),
             ["StatusCode"] = filter.StatusCode?.ToString(),
+            ["Port"] = filter.Port?.ToString(),
             ["ErrorsOnly"] = filter.ErrorsOnly == true ? "true" : null,
             ["From"] = filter.From?.ToString("yyyy-MM-dd"),
             ["To"] = filter.To?.ToString("yyyy-MM-dd")

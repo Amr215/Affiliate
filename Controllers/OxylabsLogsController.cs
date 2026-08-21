@@ -28,6 +28,9 @@ namespace Affiliate.Controllers
             if (filter.StatusCode.HasValue)
                 query = query.Where(l => l.StatusCode == filter.StatusCode.Value);
 
+            if (filter.Port.HasValue)
+                query = query.Where(l => l.Port == filter.Port.Value);
+
             if (filter.ErrorsOnly == true)
                 query = query.Where(l => l.StatusCode != 200);
 

@@ -9,6 +9,9 @@ namespace Affiliate.ViewModels
         [Display(Name = "Status")]
         public int? StatusCode { get; set; }
 
+        [Display(Name = "Port")]
+        public int? Port { get; set; }
+
         /// <summary>When true, only rows with StatusCode != 200.</summary>
         public bool? ErrorsOnly { get; set; }
 

@@ -2,6 +2,7 @@
 @{
     ViewData["Title"] = $"سجل Oxylabs #{Model.Id}";
     var isOk = Model.StatusCode == 200;
+    var requestedUrl = TryGetRequestedUrl(Model.RequestBody);
 }
 
 <div class="page-toolbar">
@@ -61,12 +62,39 @@
                     <span class="text-muted">— @Model.StatusPhrase</span>
                 }
             </dd>
+
+            @if (!string.IsNullOrEmpty(requestedUrl))
+            {
+                <dt class="col-sm-3">الرابط المطلوب</dt>
+                <dd class="col-sm-9">
+                    <div class="d-flex flex-wrap align-items-start gap-2">
+                        <a href="@requestedUrl" target="_blank" rel="noopener" class="ltr text-break flex-grow-1" id="requestedUrlText">@requestedUrl</a>
+                        <button type="button"
+                                class="btn btn-sm btn-outline-secondary copy-to-clipboard"
+                                data-copy-target="#requestedUrlText"
+                                title="نسخ الرابط">
+                            <i class="bi bi-clipboard"></i> نسخ
+                        </button>
+                    </div>
+                </dd>
+            }
         </dl>
     </div>
 </div>
 
 <div class="card mb-4">
-    <div class="card-header fw-bold"><i class="bi bi-send"></i> نص الطلب (Request)</div>
+    <div class="card-header fw-bold d-flex flex-wrap align-items-center justify-content-between gap-2">
+        <span><i class="bi bi-send"></i> نص الطلب (Request)</span>
+        @if (!string.IsNullOrEmpty(Model.RequestBody))
+        {
+            <button type="button"
+                    class="btn btn-sm btn-outline-secondary copy-to-clipboard"
+                    data-copy-target="#requestBodyText"
+                    title="نسخ نص الطلب">
+                <i class="bi bi-clipboard"></i> نسخ
+            </button>
+        }
+    </div>
     <div class="card-body">
         @if (string.IsNullOrEmpty(Model.RequestBody))
         {
@@ -74,17 +102,28 @@
         }
         else
         {
-            <pre class="log-body mb-0 ltr"><code>@Model.RequestBody</code></pre>
+            <pre class="log-body mb-0 ltr"><code id="requestBodyText">@Model.RequestBody</code></pre>
         }
     </div>
 </div>
 
 <div class="card mb-4">
-    <div class="card-header fw-bold">
-        <i class="bi bi-reply"></i> نص الاستجابة (Response)
-        @if (isOk)
+    <div class="card-header fw-bold d-flex flex-wrap align-items-center justify-content-between gap-2">
+        <span>
+            <i class="bi bi-reply"></i> نص الاستجابة (Response)
+            @if (isOk)
+            {
+                <span class="text-muted fw-normal small">— يُحفظ فقط عند الحالة ≠ 200</span>
+            }
+        </span>
+        @if (!string.IsNullOrEmpty(Model.ResponseBody))
         {
-            <span class="text-muted fw-normal small">— يُحفظ فقط عند الحالة ≠ 200</span>
+            <button type="button"
+                    class="btn btn-sm btn-outline-secondary copy-to-clipboard"
+                    data-copy-target="#responseBodyText"
+                    title="نسخ نص الاستجابة">
+                <i class="bi bi-clipboard"></i> نسخ
+            </button>
         }
     </div>
     <div class="card-body">
@@ -94,7 +133,55 @@
         }
         else
         {
-            <pre class="log-body mb-0 ltr"><code>@Model.ResponseBody</code></pre>
+            <pre class="log-body mb-0 ltr"><code id="responseBodyText">@Model.ResponseBody</code></pre>
         }
     </div>
 </div>
+
+@functions {
+    private static string? TryGetRequestedUrl(string? requestBody)
+    {
+        if (string.IsNullOrWhiteSpace(requestBody))
+            return null;
+
+        const string marker = " GET ";
+        var i = requestBody.LastIndexOf(marker, StringComparison.Ordinal);
+        if (i >= 0)
+        {
+            var url = requestBody[(i + marker.Length)..].Trim();
+            if (url.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+                return url;
+        }
+
+        var http = requestBody.IndexOf("http", StringComparison.OrdinalIgnoreCase);
+        return http >= 0 ? requestBody[http..].Trim() : null;
+    }
+}
+
+@section Scripts {
+<script>
+    document.querySelectorAll('.copy-to-clipboard').forEach(function (btn) {
+        btn.addEventListener('click', async function () {
+            var target = document.querySelector(btn.getAttribute('data-copy-target'));
+            if (!target) return;
+
+            var text = target.textContent || '';
+            var label = btn.innerHTML;
+            try {
+                await navigator.clipboard.writeText(text);
+                btn.innerHTML = '<i class="bi bi-check2"></i> تم النسخ';
+                btn.classList.add('btn-success');
+                btn.classList.remove('btn-outline-secondary');
+                setTimeout(function () {
+                    btn.innerHTML = label;
+                    btn.classList.remove('btn-success');
+                    btn.classList.add('btn-outline-secondary');
+                }, 1500);
+            } catch (e) {
+                btn.innerHTML = '<i class="bi bi-x-lg"></i> فشل';
+                setTimeout(function () { btn.innerHTML = label; }, 1500);
+            }
+        });
+    });
+</script>
+}
