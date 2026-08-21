@@ -41,11 +41,18 @@ namespace Affiliate.Services
             if (!_options.Enabled || string.IsNullOrWhiteSpace(_options.Host))
                 return new IspProxyEndpoint(false, null, 0, null, null);
 
-            var port = _options.Port > 0 ? _options.Port : 8000;
+            var port = PickRandomPort();
             var endpoint = new IspProxyEndpoint(
                 true, _options.Host.Trim(), port, _options.Username, _options.Password);
             _logger.LogInformation("ISP proxy selected {Endpoint}", endpoint.Describe());
             return endpoint;
+        }
+
+        private int PickRandomPort()
+        {
+            var min = _options.PortMin > 0 ? _options.PortMin : 8001;
+            var max = _options.PortMax >= min ? _options.PortMax : min;
+            return Random.Shared.Next(min, max + 1);
         }
 
         public HttpClient CreateClient(IspProxyEndpoint endpoint)

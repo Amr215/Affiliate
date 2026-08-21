@@ -1,6 +1,6 @@
 namespace Affiliate.Options
 {
-    /// <summary>Oxylabs ISP proxy settings. Uses a single port (default 8000).</summary>
+    /// <summary>Oxylabs ISP proxy settings. Picks a random port in [PortMin, PortMax] per request.</summary>
     public class IspProxyOptions
     {
         public const string SectionName = "IspProxy";
@@ -11,8 +11,15 @@ namespace Affiliate.Options
         /// <summary>Proxy host, e.g. isp.oxylabs.io</summary>
         public string? Host { get; set; }
 
-        /// <summary>Proxy port. Port 8000 rotates randomly across Oxylabs IPs.</summary>
-        public int Port { get; set; } = 8000;
+        /// <summary>
+        /// Inclusive lower bound of proxy ports (Oxylabs sticky IPs start at 8001).
+        /// </summary>
+        public int PortMin { get; set; } = 8001;
+
+        /// <summary>
+        /// Inclusive upper bound of proxy ports (e.g. 8010 for ten sticky IPs).
+        /// </summary>
+        public int PortMax { get; set; } = 8010;
 
         /// <summary>Oxylabs proxy user, usually prefixed with <c>user-</c>.</summary>
         public string? Username { get; set; }
