@@ -66,11 +66,13 @@
             @if (!string.IsNullOrEmpty(requestedUrl))
             {
                 <dt class="col-sm-3">الرابط المطلوب</dt>
-                <dd class="col-sm-9">
-                    <div class="d-flex flex-wrap align-items-start gap-2">
-                        <a href="@requestedUrl" target="_blank" rel="noopener" class="ltr text-break flex-grow-1" id="requestedUrlText">@requestedUrl</a>
+                <dd class="col-sm-9 min-w-0">
+                    <div class="requested-url-row">
+                        <div class="requested-url-text">
+                            <a href="@requestedUrl" target="_blank" rel="noopener" class="ltr" id="requestedUrlText">@requestedUrl</a>
+                        </div>
                         <button type="button"
-                                class="btn btn-sm btn-outline-secondary copy-to-clipboard"
+                                class="btn btn-sm btn-outline-secondary copy-to-clipboard flex-shrink-0"
                                 data-copy-target="#requestedUrlText"
                                 title="نسخ الرابط">
                             <i class="bi bi-clipboard"></i> نسخ

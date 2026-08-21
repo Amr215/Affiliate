@@ -1,0 +1,118 @@
+@model IspProxyPortsIndexViewModel
+@{
+    ViewData["Title"] = "منافذ البروكسي";
+}
+
+<div class="page-toolbar">
+    <div>
+        <h1 class="h2">منافذ البروكسي ISP</h1>
+        <p class="text-muted mb-0">
+            <span class="stat-pill"><i class="bi bi-check-circle"></i> @Model.AvailableCount متاح</span>
+            <span class="stat-pill"><i class="bi bi-slash-circle"></i> @Model.BlockedCount محظور</span>
+        </p>
+    </div>
+    <div>
+        <a class="btn btn-outline-secondary" asp-action="Index">
+            <i class="bi bi-arrow-clockwise"></i> تحديث
+        </a>
+    </div>
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-sm-6 col-lg-3">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="text-muted small mb-1">الحالة</div>
+                <div class="fw-bold">
+                    <span class="status-dot @(Model.Enabled ? "on" : "off")"></span>
+                    @(Model.Enabled ? "مفعّل" : "معطّل")
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="text-muted small mb-1">المضيف</div>
+                <div class="fw-bold ltr">@(string.IsNullOrWhiteSpace(Model.Host) ? "—" : Model.Host)</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="text-muted small mb-1">نطاق المنافذ</div>
+                <div class="fw-bold ltr">@Model.PortMin – @Model.PortMax</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="text-muted small mb-1">سياسة الحظر</div>
+                <div class="fw-bold">@Model.ConsecutiveFailuresBeforeBlock فشل → @Model.BlockDurationSeconds ث</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-hdd-network"></i> حالة المنافذ</span>
+        <span class="text-muted small">يُحدَّث عند إعادة تحميل الصفحة</span>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-hover mb-0 align-middle">
+            <thead>
+                <tr>
+                    <th class="ltr">المنفذ</th>
+                    <th>الحالة</th>
+                    <th>إخفاقات متتالية</th>
+                    <th>متبقي من الحظر</th>
+                    <th class="ltr">ينتهي الحظر (UTC)</th>
+                </tr>
+            </thead>
+            <tbody>
+            @if (Model.Ports.Count == 0)
+            {
+                <tr>
+                    <td colspan="5" class="text-center text-muted py-4">لا توجد منافذ مُعدّة</td>
+                </tr>
+            }
+            else
+            {
+                foreach (var port in Model.Ports)
+                {
+                    <tr class="@(port.IsBlocked ? "table-danger" : null)">
+                        <td class="fw-semibold ltr">@port.Port</td>
+                        <td>
+                            @if (port.IsBlocked)
+                            {
+                                <span class="badge text-bg-danger"><i class="bi bi-slash-circle"></i> محظور</span>
+                            }
+                            else
+                            {
+                                <span class="badge text-bg-success"><i class="bi bi-check-circle"></i> متاح</span>
+                            }
+                        </td>
+                        <td class="ltr">@port.ConsecutiveFailures</td>
+                        <td class="ltr">
+                            @if (port.IsBlocked && port.RemainingBlockSeconds is int secs)
+                            {
+                                <span>@secs ث</span>
+                            }
+                            else
+                            {
+                                <span class="text-muted">—</span>
+                            }
+                        </td>
+                        <td class="ltr small">
+                            @(port.BlockedUntilUtc?.ToString("yyyy-MM-dd HH:mm:ss") ?? "—")
+                        </td>
+                    </tr>
+                }
+            }
+            </tbody>
+        </table>
+    </div>
+</div>

@@ -318,6 +318,8 @@ namespace Affiliate.Services
                         var (result, pageUrl) = await FetchSearchPageAsync(
                             client, scraperUrl, page, referer, endpoint, proxyPort, ct);
 
+                        _ispProxy.ReportSuccess(endpoint);
+
                         found += result.Organic.Count;
                         lastPage = result.LastVisiblePage ?? lastPage;
                         referer = pageUrl;
@@ -335,6 +337,7 @@ namespace Affiliate.Services
                     }
                     catch (AmazonFetchRejectedException ex)
                     {
+                        _ispProxy.ReportFailure(endpoint);
                         // Already logged once in FetchSearchPageAsync — do not write a second OxylabsRequestLog row.
                         if (found == 0)
                             throw;
@@ -346,6 +349,7 @@ namespace Affiliate.Services
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException and not AmazonFetchRejectedException)
                     {
+                        _ispProxy.ReportFailure(endpoint);
                         QueueLog(scraperUrl.Id, page, DateTime.UtcNow, 0, "TransportError",
                             $"{endpoint.Describe()} page={page}", Truncate(DescribeTransport(ex), 2000), proxyPort);
 
@@ -702,6 +706,8 @@ namespace Affiliate.Services
                                 saved += pageSaved;
                             }
 
+                            _ispProxy.ReportSuccess(endpoint);
+
                             _logger.LogInformation(
                                 "ASIN batch {Index}: Amazon page {Page}/{Last} via {Proxy} — {PageCount} organic, {New} new (total {Total}/{Requested}, saved={Saved}, hasNext={HasNext}) GET {Url}",
                                 batchIndex, page, lastVisible, endpoint.Describe(),
@@ -711,6 +717,7 @@ namespace Affiliate.Services
                         }
                         catch (AmazonFetchRejectedException ex)
                         {
+                            _ispProxy.ReportFailure(endpoint);
                             // Already logged once in FetchAsinBatchSearchPageAsync — do not write a second OxylabsRequestLog row.
                             if (attempt >= maxAttempts)
                             {
@@ -724,7 +731,9 @@ namespace Affiliate.Services
                             }
 
                             client.Dispose();
+                            endpoint = _ispProxy.GetEndpoint();
                             client = _ispProxy.CreateClient(endpoint);
+                            proxyPort = endpoint.UseProxy ? endpoint.Port : null;
                             referer = null;
                             warmedHost = false;
 
@@ -737,6 +746,7 @@ namespace Affiliate.Services
                         }
                         catch (Exception ex) when (ex is not OperationCanceledException and not AmazonFetchRejectedException)
                         {
+                            _ispProxy.ReportFailure(endpoint);
                             var reason = DescribeTransport(ex);
                             QueueLog(null, page, DateTime.UtcNow, 0, "TransportError",
                                 $"{endpoint.Describe()} batch={batchIndex} page={page} asins={asins.Count}",
@@ -754,7 +764,9 @@ namespace Affiliate.Services
                             }
 
                             client.Dispose();
+                            endpoint = _ispProxy.GetEndpoint();
                             client = _ispProxy.CreateClient(endpoint);
+                            proxyPort = endpoint.UseProxy ? endpoint.Port : null;
                             referer = null;
                             warmedHost = false;
 
