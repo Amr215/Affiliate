@@ -1,0 +1,145 @@
+@model PortStatisticsViewModel
+@{
+    ViewData["Title"] = "إحصائيات المنافذ";
+    var f = Model.Filter;
+}
+
+<div class="page-toolbar">
+    <div>
+        <h1 class="h2">إحصائيات المنافذ</h1>
+        <p class="text-muted mb-0">
+            <span class="stat-pill"><i class="bi bi-list-ol"></i> @Model.TotalRequests طلب</span>
+            <span class="stat-pill"><i class="bi bi-check-circle"></i> @Model.TotalSuccess نجاح</span>
+            <span class="stat-pill"><i class="bi bi-x-circle"></i> @Model.TotalFailed فشل</span>
+            <span class="stat-pill"><i class="bi bi-percent"></i> @Model.OverallSuccessRate.ToString("0.0")% نجاح</span>
+        </p>
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+        <a class="btn btn-outline-secondary" asp-action="Index">
+            <i class="bi bi-hdd-network"></i> حالة المنافذ
+        </a>
+        <a class="btn btn-outline-secondary" asp-action="Statistics" asp-route-From="@f.From?.ToString("yyyy-MM-dd")" asp-route-To="@f.To?.ToString("yyyy-MM-dd")">
+            <i class="bi bi-arrow-clockwise"></i> تحديث
+        </a>
+    </div>
+</div>
+
+<form method="get" asp-action="Statistics" class="card filter-card mb-4">
+    <div class="card-header"><i class="bi bi-funnel"></i> عوامل التصفية</div>
+    <div class="card-body">
+        <div class="row g-3 align-items-end">
+            <div class="col-sm-6 col-lg-3">
+                <label class="form-label">من تاريخ</label>
+                <input name="From" value="@(f.From?.ToString("yyyy-MM-dd"))" class="form-control" type="date" />
+            </div>
+            <div class="col-sm-6 col-lg-3">
+                <label class="form-label">إلى تاريخ</label>
+                <input name="To" value="@(f.To?.ToString("yyyy-MM-dd"))" class="form-control" type="date" />
+            </div>
+            <div class="col-sm-12 col-lg-6 d-flex flex-wrap gap-2">
+                <button type="submit" class="btn btn-primary"><i class="bi bi-check2"></i> تطبيق</button>
+                <a asp-action="Statistics" class="btn btn-outline-secondary">إعادة تعيين</a>
+            </div>
+        </div>
+    </div>
+</form>
+
+<div class="row g-3 mb-4">
+    <div class="col-sm-6 col-lg-3">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="text-muted small mb-1">إجمالي الطلبات</div>
+                <div class="fw-bold ltr">@Model.TotalRequests</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="text-muted small mb-1">ناجح (200)</div>
+                <div class="fw-bold text-success ltr">@Model.TotalSuccess</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="text-muted small mb-1">فاشل (≠ 200)</div>
+                <div class="fw-bold text-danger ltr">@Model.TotalFailed</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="text-muted small mb-1">نسبة النجاح</div>
+                <div class="fw-bold ltr">@Model.OverallSuccessRate.ToString("0.00")%</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-bar-chart"></i> إحصائيات لكل منفذ</span>
+        <span class="text-muted small">النجاح = رمز الحالة 200</span>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-hover mb-0 align-middle">
+            <thead>
+                <tr>
+                    <th class="ltr">المنفذ</th>
+                    <th class="ltr">إجمالي الطلبات</th>
+                    <th class="ltr">نجاح</th>
+                    <th class="ltr">فشل</th>
+                    <th class="ltr">نسبة النجاح</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+            @if (Model.Ports.Count == 0)
+            {
+                <tr>
+                    <td colspan="6" class="text-center text-muted py-4">لا توجد سجلات مطابقة</td>
+                </tr>
+            }
+            else
+            {
+                foreach (var row in Model.Ports)
+                {
+                    var rateClass = row.SuccessRate >= 90 ? "text-success"
+                        : row.SuccessRate >= 70 ? "text-warning"
+                        : "text-danger";
+                    <tr>
+                        <td class="fw-semibold ltr">
+                            @if (row.Port.HasValue)
+                            {
+                                @row.Port
+                            }
+                            else
+                            {
+                                <span class="text-muted">بدون بروكسي</span>
+                            }
+                        </td>
+                        <td class="ltr num">@row.TotalRequests</td>
+                        <td class="ltr num text-success">@row.SuccessCount</td>
+                        <td class="ltr num text-danger">@row.FailedCount</td>
+                        <td class="ltr num fw-semibold @rateClass">@row.SuccessRate.ToString("0.00")%</td>
+                        <td class="text-nowrap">
+                            @if (row.Port.HasValue)
+                            {
+                                <a asp-controller="OxylabsLogs" asp-action="Index" asp-route-Port="@row.Port"
+                                   class="btn btn-sm btn-outline-primary">السجلات</a>
+                            }
+                            else
+                            {
+                                <span class="text-muted">—</span>
+                            }
+                        </td>
+                    </tr>
+                }
+            }
+            </tbody>
+        </table>
+    </div>
+</div>
