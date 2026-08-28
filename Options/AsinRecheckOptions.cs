@@ -57,5 +57,39 @@ namespace Affiliate.Options
         /// <c>A1ZVRGNO5AYLOV</c>. Empty skips the filter.
         /// </summary>
         public string MerchantId { get; set; } = "A1ZVRGNO5AYLOV";
+
+        /// <summary>Google Translate route used by proxy ports that Amazon is currently blocking.</summary>
+        public AsinRecheckTranslateOptions Translate { get; set; } = new();
+    }
+
+    /// <summary>
+    /// Routes blocked proxy ports through Google's translate proxy
+    /// (<c>www-amazon-eg.translate.goog</c>) instead of leaving them idle for the block window.
+    /// Applies to ASIN recheck only.
+    /// </summary>
+    public class AsinRecheckTranslateOptions
+    {
+        public bool Enabled { get; set; } = true;
+
+        /// <summary>
+        /// <c>_x_tr_sl</c>. The Amazon page is requested in English already, so this stays
+        /// <c>auto</c> and translation is effectively a no-op.
+        /// </summary>
+        public string SourceLanguage { get; set; } = "auto";
+
+        /// <summary>
+        /// <c>_x_tr_tl</c>. Must stay <c>en</c> — the parser reads English prices, ratings
+        /// ("out of 5") and currency codes, so an Arabic page cannot be parsed.
+        /// </summary>
+        public string TargetLanguage { get; set; } = "en";
+
+        /// <summary>Google UI language (<c>_x_tr_hl</c>).</summary>
+        public string InterfaceLanguage { get; set; } = "en";
+
+        /// <summary>
+        /// Amazon's own language cookie/param (<c>language=en_AE</c>) so Amazon serves English
+        /// before Google ever sees the page. Empty skips it.
+        /// </summary>
+        public string AmazonLanguage { get; set; } = "en_AE";
     }
 }

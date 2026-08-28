@@ -4,12 +4,22 @@ using Microsoft.Extensions.Options;
 
 namespace Affiliate.Services
 {
-    public sealed record IspProxyEndpoint(bool UseProxy, string? Host, int Port, string? Username, string? Password)
+    public sealed record IspProxyEndpoint(
+        bool UseProxy,
+        string? Host,
+        int Port,
+        string? Username,
+        string? Password,
+        bool RouteThroughTranslate = false)
     {
         public string Key => UseProxy ? $"{Host}:{Port}" : "direct";
 
         public string Describe() =>
-            UseProxy ? $"{Host}:{Port}" : "direct (no proxy)";
+            UseProxy
+                ? RouteThroughTranslate
+                    ? $"{Host}:{Port} {GoogleTranslateProxy.LogMarker}"
+                    : $"{Host}:{Port}"
+                : "direct (no proxy)";
     }
 
     public sealed record IspProxyPortStatus(
@@ -21,13 +31,22 @@ namespace Affiliate.Services
 
     public interface IIspProxyService
     {
-        /// <summary>Configured proxy endpoint (or direct when disabled). Skips temporarily blocked ports.</summary>
-        IspProxyEndpoint GetEndpoint();
+        /// <summary>
+        /// Configured proxy endpoint (or direct when disabled). Temporarily blocked ports are skipped
+        /// unless <paramref name="allowBlocked"/> is set, in which case they can still be handed out
+        /// with <see cref="IspProxyEndpoint.RouteThroughTranslate"/> so the caller reaches Amazon
+        /// through Google Translate rather than leaving the IP idle.
+        /// </summary>
+        IspProxyEndpoint GetEndpoint(bool allowBlocked = false);
 
         /// <summary>Snapshot of every configured port and its block / failure state.</summary>
         IReadOnlyList<IspProxyPortStatus> GetPortStatuses();
 
-        /// <summary>Resets consecutive failure count for the proxy used in a successful operation.</summary>
+        /// <summary>
+        /// Resets consecutive failure count for the proxy used in a successful operation.
+        /// Successes on the translate route are ignored: they say nothing about whether Amazon
+        /// still blocks the IP directly, so neither the counter nor the block window is touched.
+        /// </summary>
         void ReportSuccess(IspProxyEndpoint endpoint);
 
         /// <summary>
@@ -57,14 +76,14 @@ namespace Affiliate.Services
 
         public int TransportRetriesPerIp => Math.Max(0, _options.TransportRetriesPerIp);
 
-        public IspProxyEndpoint GetEndpoint()
+        public IspProxyEndpoint GetEndpoint(bool allowBlocked = false)
         {
             if (!_options.Enabled || string.IsNullOrWhiteSpace(_options.Host))
                 return new IspProxyEndpoint(false, null, 0, null, null);
 
-            var port = PickRandomAvailablePort();
+            var (port, isBlocked) = allowBlocked ? PickAnyPort() : (PickRandomAvailablePort(), false);
             var endpoint = new IspProxyEndpoint(
-                true, _options.Host.Trim(), port, _options.Username, _options.Password);
+                true, _options.Host.Trim(), port, _options.Username, _options.Password, isBlocked);
             _logger.LogInformation("ISP proxy selected {Endpoint}", endpoint.Describe());
             return endpoint;
         }
@@ -106,6 +125,14 @@ namespace Affiliate.Services
             if (!endpoint.UseProxy)
                 return;
 
+            if (endpoint.RouteThroughTranslate)
+            {
+                _logger.LogDebug(
+                    "ISP proxy {Port} succeeded through Google Translate; failure counter left unchanged",
+                    endpoint.Port);
+                return;
+            }
+
             lock (_gate)
             {
                 var state = GetOrCreate(endpoint.Port);
@@ -143,6 +170,18 @@ namespace Affiliate.Services
                 if (state.ConsecutiveFailures < threshold)
                     return;
 
+                // Already blocked: it keeps serving traffic through the translate route, so just
+                // restart its window instead of touching the other ports.
+                if (!IsAvailable(state, now))
+                {
+                    state.BlockedUntil = now.AddSeconds(blockSeconds);
+                    state.ConsecutiveFailures = 0;
+                    _logger.LogWarning(
+                        "ISP proxy {Port} kept failing while blocked; block window restarted for {Seconds}s",
+                        endpoint.Port, blockSeconds);
+                    return;
+                }
+
                 var unblockedCount = CountUnblocked(now);
                 // This port is still counted as unblocked until we block it.
                 if (unblockedCount <= 1)
@@ -159,6 +198,26 @@ namespace Affiliate.Services
                 _logger.LogWarning(
                     "ISP proxy {Port} blocked for {Seconds}s after {Threshold} consecutive failures ({Remaining} still available)",
                     endpoint.Port, blockSeconds, threshold, unblockedCount - 1);
+            }
+        }
+
+        /// <summary>
+        /// Picks from the whole port range, telling the caller whether the port is currently blocked
+        /// so it can be used through the translate route instead of sitting idle.
+        /// </summary>
+        private (int Port, bool IsBlocked) PickAnyPort()
+        {
+            var min = _options.PortMin > 0 ? _options.PortMin : 8001;
+            var max = _options.PortMax >= min ? _options.PortMax : min;
+
+            lock (_gate)
+            {
+                var now = DateTimeOffset.UtcNow;
+                ExpireBlocks(now);
+
+                var port = Random.Shared.Next(min, max + 1);
+                var isBlocked = _ports.TryGetValue(port, out var state) && !IsAvailable(state, now);
+                return (port, isBlocked);
             }
         }
 

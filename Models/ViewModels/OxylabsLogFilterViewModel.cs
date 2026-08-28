@@ -15,6 +15,10 @@ namespace Affiliate.ViewModels
         /// <summary>When true, only rows with StatusCode != 200.</summary>
         public bool? ErrorsOnly { get; set; }
 
+        /// <summary>True = Google Translate route only, false = direct only, null = both.</summary>
+        [Display(Name = "Route")]
+        public bool? ViaTranslate { get; set; }
+
         [DataType(DataType.Date)]
         public DateTime? From { get; set; }
 
@@ -32,6 +36,15 @@ namespace Affiliate.ViewModels
         public int TotalCount { get; set; }
         public int TotalPages { get; set; }
         public IReadOnlyList<ScraperUrlOption> Searches { get; set; } = [];
+
+        /// <summary>Successful (HTTP 200) requests fetched straight from Amazon, across the whole filter.</summary>
+        public int SuccessDirectCount { get; set; }
+
+        /// <summary>Successful (HTTP 200) requests fetched through Google Translate, across the whole filter.</summary>
+        public int SuccessTranslateCount { get; set; }
+
+        /// <summary>Successful requests among the rows currently displayed.</summary>
+        public int SuccessOnPageCount => Logs.Count(l => l.StatusCode == 200);
     }
 
     public class OxylabsRequestLogListItem
@@ -45,6 +58,12 @@ namespace Affiliate.ViewModels
         public string? StatusPhrase { get; set; }
         public int? Port { get; set; }
         public bool HasResponseBody { get; set; }
+
+        /// <summary>
+        /// Derived from the logged request URL — no stored column. True when the page was fetched
+        /// through Google Translate because the port was blocked.
+        /// </summary>
+        public bool ViaGoogleTranslate { get; set; }
     }
 
     public class ScraperUrlOption

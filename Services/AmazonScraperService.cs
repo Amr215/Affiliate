@@ -149,8 +149,8 @@ namespace Affiliate.Services
                 var startedAt = Stopwatch.GetTimestamp();
 
                 _logger.LogInformation(
-                    "ASIN recheck starting via ISP — {Count} ASINs in {Batches} search request(s) of up to {BatchSize}, {Parallel} in parallel (save+alert after each page)",
-                    asins.Count, batches.Count, batchSize, maxParallel);
+                    "ASIN recheck starting via ISP — {Count} ASINs in {Batches} search request(s) of up to {BatchSize}, {Parallel} in parallel, translateFallback={Translate} (save+alert after each page)",
+                    asins.Count, batches.Count, batchSize, maxParallel, TranslateRoute is not null);
 
                 var failedBatches = 0;
                 var incompleteBatches = 0;
@@ -538,6 +538,22 @@ namespace Affiliate.Services
             || html.Contains("s-main-slot", StringComparison.OrdinalIgnoreCase)
             || html.Contains("id=\"search\"", StringComparison.OrdinalIgnoreCase);
 
+        /// <summary>Google's own refusal pages (rate limit, unavailable translation, 404) served by translate.goog.</summary>
+        private static bool LooksLikeGoogleBlockPage(string html) =>
+            html.Contains("Our systems have detected unusual traffic", StringComparison.OrdinalIgnoreCase)
+            || html.Contains("id=\"af-error-container\"", StringComparison.OrdinalIgnoreCase)
+            || html.Contains("id=\"recaptcha\"", StringComparison.OrdinalIgnoreCase)
+            || html.Contains("This page can't be translated", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Result cards rendered in Arabic. The parser reads "out of 5" ratings and EGP/$ currency
+        /// markers, so anything Arabic parses into empty prices instead of failing loudly.
+        /// </summary>
+        private static bool LooksLikeArabicResultsPage(string html) =>
+            html.Contains("إضافة إلى عربة التسوق", StringComparison.Ordinal)
+            || html.Contains("من 5 نجوم", StringComparison.Ordinal)
+            || html.Contains("السعر، صفحة المنتج", StringComparison.Ordinal);
+
         private static bool LooksLikeZeroResultsPage(string html) =>
             html.Contains("No results for", StringComparison.OrdinalIgnoreCase)
             || html.Contains("did not match any products", StringComparison.OrdinalIgnoreCase)
@@ -626,12 +642,14 @@ namespace Affiliate.Services
                 throw new InvalidOperationException("ASIN batch search requires at least 2 ASINs per request");
 
             var merchantId = _asinRecheck.MerchantId;
+            var translateRoute = TranslateRoute;
             var requested = new HashSet<string>(asins, StringComparer.OrdinalIgnoreCase);
             var all = new List<OrganicProduct>();
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var saved = 0;
 
-            var endpoint = _ispProxy.GetEndpoint();
+            // Blocked ports are handed out too — they go through Google Translate instead of idling.
+            var endpoint = _ispProxy.GetEndpoint(allowBlocked: translateRoute is not null);
             var client = _ispProxy.CreateClient(endpoint);
             string? referer = null;
             var warmedHost = false;
@@ -658,8 +676,6 @@ namespace Affiliate.Services
                         await Task.Delay(AmazonBrowserProfile.NextPageDelayMs(), ct);
                     }
 
-                    var pageUrl = BuildAsinBatchSearchUrl(domain, asins, merchantId, page, qid, xpid);
-
                     var pageOk = false;
                     var pageOrganicCount = 0;
                     string? nextHref = null;
@@ -669,11 +685,18 @@ namespace Affiliate.Services
 
                     for (var attempt = 1; attempt <= maxAttempts; attempt++)
                     {
+                        var viaTranslate = translateRoute is not null && endpoint.RouteThroughTranslate;
+                        var pageUrl = BuildAsinBatchSearchUrl(
+                            domain, asins, merchantId, page, qid, xpid,
+                            viaTranslate ? translateRoute : null);
+
                         try
                         {
                             if (!warmedHost)
                             {
-                                var home = $"https://www.amazon.{domain.Trim()}/";
+                                var home = viaTranslate
+                                    ? GoogleTranslateProxy.HomeUrl(domain, translateRoute!)
+                                    : $"https://www.amazon.{domain.Trim()}/";
                                 await WarmupAmazonHomeAsync(
                                     client, home, endpoint, $"ASIN batch {batchIndex}", ct);
                                 warmedHost = true;
@@ -682,7 +705,13 @@ namespace Affiliate.Services
 
                             var result = await FetchAsinBatchSearchPageAsync(
                                 client, pageUrl, referer, asins.Count, batchIndex, page,
-                                endpoint, proxyPort, ct);
+                                endpoint, proxyPort, viaTranslate, ct);
+
+                            if (viaTranslate)
+                            {
+                                foreach (var org in result.Organic)
+                                    org.Url = GoogleTranslateProxy.ToAmazonUrl(org.Url) ?? org.Url;
+                            }
 
                             newOnPage = 0;
                             foreach (var org in result.Organic)
@@ -738,7 +767,7 @@ namespace Affiliate.Services
                             }
 
                             client.Dispose();
-                            endpoint = _ispProxy.GetEndpoint();
+                            endpoint = _ispProxy.GetEndpoint(allowBlocked: translateRoute is not null);
                             client = _ispProxy.CreateClient(endpoint);
                             proxyPort = endpoint.UseProxy ? endpoint.Port : null;
                             referer = null;
@@ -771,7 +800,7 @@ namespace Affiliate.Services
                             }
 
                             client.Dispose();
-                            endpoint = _ispProxy.GetEndpoint();
+                            endpoint = _ispProxy.GetEndpoint(allowBlocked: translateRoute is not null);
                             client = _ispProxy.CreateClient(endpoint);
                             proxyPort = endpoint.UseProxy ? endpoint.Port : null;
                             referer = null;
@@ -867,6 +896,7 @@ namespace Affiliate.Services
             int page,
             IspProxyEndpoint endpoint,
             int? proxyPort,
+            bool viaTranslate,
             CancellationToken ct)
         {
             var requestedAt = DateTime.UtcNow;
@@ -906,10 +936,21 @@ namespace Affiliate.Services
                     logStatus = SoftBlockLoggedStatusCode;
                     rejectReason = $"Captcha/bot challenge on ASIN batch {batchIndex} page {page}";
                 }
+                else if (viaTranslate && LooksLikeGoogleBlockPage(body))
+                {
+                    logStatus = SoftBlockLoggedStatusCode;
+                    rejectReason = $"Google Translate block/error page on ASIN batch {batchIndex} page {page}";
+                }
                 else if (body.Length < 8_000)
                     rejectReason = $"Suspiciously short HTML ({body.Length} chars) on ASIN batch {batchIndex} page {page}";
                 else if (!LooksLikeAmazonSearchHtml(body))
                     rejectReason = $"Unexpected HTML (not a search results page) on ASIN batch {batchIndex} page {page}";
+                else if (viaTranslate && LooksLikeArabicResultsPage(body))
+                {
+                    // Prices, ratings and currency are only parseable in English — an Arabic page
+                    // would silently save nulls, so it counts as a failed fetch.
+                    rejectReason = $"Translated page came back in Arabic on ASIN batch {batchIndex} page {page}";
+                }
 
                 SearchPageParseResult? parsed = null;
                 if (rejectReason is null)
@@ -939,6 +980,8 @@ namespace Affiliate.Services
         /// page 1 <c>https://www.amazon.{domain}/s?k=…&amp;ref=nb_sb_noss</c>,
         /// page N <c>https://www.amazon.{domain}/-/en/s?k=…&amp;page=N&amp;xpid=…&amp;qid=…&amp;ref=sr_pg_N</c>.
         /// Optional <c>rh=p_6:MERCHANT</c> when <paramref name="merchantId"/> is set.
+        /// When <paramref name="translate"/> is supplied the same request is aimed at Google's
+        /// translate host, always on the English path so the parser still sees English text.
         /// </summary>
         private static string BuildAsinBatchSearchUrl(
             string domain,
@@ -946,7 +989,8 @@ namespace Affiliate.Services
             string? merchantId,
             int page = 1,
             string? qid = null,
-            string? xpid = null)
+            string? xpid = null,
+            AsinRecheckTranslateOptions? translate = null)
         {
             var encoded = Uri.EscapeDataString(string.Join("|", asins));
             var d = domain.Trim();
@@ -954,14 +998,36 @@ namespace Affiliate.Services
                 ? ""
                 : $"&rh={Uri.EscapeDataString($"p_6:{merchantId.Trim()}")}";
 
-            if (page <= 1)
-                return $"https://www.amazon.{d}/s?k={encoded}&ref=nb_sb_noss{rh}";
+            var host = $"www.amazon.{d}";
+            var language = translate is not null && !string.IsNullOrWhiteSpace(translate.AmazonLanguage)
+                ? $"&language={Uri.EscapeDataString(translate.AmazonLanguage.Trim())}"
+                : "";
 
-            // Match browser pagination: /-/en/s + page=N + xpid + qid + ref=sr_pg_N
-            var xpidPart = string.IsNullOrWhiteSpace(xpid) ? "" : $"&xpid={Uri.EscapeDataString(xpid)}";
-            var qidPart = string.IsNullOrWhiteSpace(qid) ? "" : $"&qid={Uri.EscapeDataString(qid)}";
-            return $"https://www.amazon.{d}/-/en/s?k={encoded}{rh}&page={page}{xpidPart}{qidPart}&ref=sr_pg_{page}";
+            string pathAndQuery;
+            if (page <= 1)
+            {
+                // The translate route always takes /-/en/ so Amazon answers in English before Google sees it.
+                var prefix = translate is null ? "/s" : "/-/en/s";
+                pathAndQuery = $"{prefix}?k={encoded}&ref=nb_sb_noss{rh}{language}";
+            }
+            else
+            {
+                // Match browser pagination: /-/en/s + page=N + xpid + qid + ref=sr_pg_N
+                var xpidPart = string.IsNullOrWhiteSpace(xpid) ? "" : $"&xpid={Uri.EscapeDataString(xpid)}";
+                var qidPart = string.IsNullOrWhiteSpace(qid) ? "" : $"&qid={Uri.EscapeDataString(qid)}";
+                pathAndQuery =
+                    $"/-/en/s?k={encoded}{rh}{language}&page={page}{xpidPart}{qidPart}&ref=sr_pg_{page}";
+            }
+
+            if (translate is null)
+                return $"https://{host}{pathAndQuery}";
+
+            return $"{GoogleTranslateProxy.Origin(host)}{pathAndQuery}&{GoogleTranslateProxy.QueryParams(translate)}";
         }
+
+        /// <summary>Translate options when the route is enabled, otherwise null.</summary>
+        private AsinRecheckTranslateOptions? TranslateRoute =>
+            _asinRecheck.Translate is { Enabled: true } options ? options : null;
 
         /// <summary>
         /// Buffers audit rows instead of touching the DbContext, so parallel batch workers can log safely.

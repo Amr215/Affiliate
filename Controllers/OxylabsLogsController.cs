@@ -1,4 +1,5 @@
 using Affiliate.Data;
+using Affiliate.Services;
 using Affiliate.ViewModels;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -40,30 +41,45 @@ namespace Affiliate.Controllers
             if (filter.To.HasValue)
                 query = query.Where(l => l.RequestedAt < filter.To.Value.Date.AddDays(1));
 
-            var totalCount = await query.CountAsync(cancellationToken);
+            // Projecting before the route filter keeps the "was this fetched through Google
+            // Translate" rule in one place — it is derived from the logged request, not stored.
+            var rows = query.Select(l => new OxylabsRequestLogListItem
+            {
+                Id = l.Id,
+                ScraperUrlId = l.ScraperUrlId,
+                SearchName = l.ScraperUrl != null
+                    ? l.ScraperUrl.Name
+                    : (l.ScraperUrlId == null ? "ASIN recheck" : ("#" + l.ScraperUrlId)),
+                Page = l.Page,
+                RequestedAt = l.RequestedAt,
+                StatusCode = l.StatusCode,
+                StatusPhrase = l.StatusPhrase,
+                Port = l.Port,
+                HasResponseBody = l.ResponseBody != null && l.ResponseBody != "",
+                ViaGoogleTranslate = l.RequestBody != null
+                                     && (l.RequestBody.Contains(GoogleTranslateProxy.LogMarker)
+                                         || l.RequestBody.Contains(GoogleTranslateProxy.HostSuffix))
+            });
+
+            if (filter.ViaTranslate is bool viaTranslate)
+                rows = rows.Where(l => l.ViaGoogleTranslate == viaTranslate);
+
+            var totalCount = await rows.CountAsync(cancellationToken);
             var totalPages = Math.Max(1, (int)Math.Ceiling(totalCount / (double)filter.PageSize));
             if (filter.Page > totalPages)
                 filter.Page = totalPages;
 
-            var logs = await query
+            // Counted over the whole filtered set, not just the visible page.
+            var successTranslate = await rows
+                .CountAsync(l => l.StatusCode == 200 && l.ViaGoogleTranslate, cancellationToken);
+            var successTotal = await rows
+                .CountAsync(l => l.StatusCode == 200, cancellationToken);
+
+            var logs = await rows
                 .OrderByDescending(l => l.RequestedAt)
                 .ThenByDescending(l => l.Id)
                 .Skip((filter.Page - 1) * filter.PageSize)
                 .Take(filter.PageSize)
-                .Select(l => new OxylabsRequestLogListItem
-                {
-                    Id = l.Id,
-                    ScraperUrlId = l.ScraperUrlId,
-                    SearchName = l.ScraperUrl != null
-                        ? l.ScraperUrl.Name
-                        : (l.ScraperUrlId == null ? "ASIN recheck" : ("#" + l.ScraperUrlId)),
-                    Page = l.Page,
-                    RequestedAt = l.RequestedAt,
-                    StatusCode = l.StatusCode,
-                    StatusPhrase = l.StatusPhrase,
-                    Port = l.Port,
-                    HasResponseBody = l.ResponseBody != null && l.ResponseBody != ""
-                })
                 .ToListAsync(cancellationToken);
 
             var searches = await _context.ScraperUrls.AsNoTracking()
@@ -77,6 +93,8 @@ namespace Affiliate.Controllers
                 Logs = logs,
                 TotalCount = totalCount,
                 TotalPages = totalPages,
+                SuccessDirectCount = successTotal - successTranslate,
+                SuccessTranslateCount = successTranslate,
                 Searches = searches
             });
         }
