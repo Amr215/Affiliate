@@ -52,6 +52,8 @@ namespace Affiliate.Services
         /// <summary>
         /// Records a failed operation. After enough consecutive failures the port is blocked briefly;
         /// if it was the last unblocked port, all ports are unblocked instead.
+        /// Failures on the translate route are ignored for the same reason successes are: they
+        /// describe Google's mood, not whether Amazon still blocks the IP.
         /// </summary>
         void ReportFailure(IspProxyEndpoint endpoint);
 
@@ -152,6 +154,14 @@ namespace Affiliate.Services
             if (!endpoint.UseProxy)
                 return;
 
+            if (endpoint.RouteThroughTranslate)
+            {
+                _logger.LogDebug(
+                    "ISP proxy {Port} failed through Google Translate; port state left unchanged",
+                    endpoint.Port);
+                return;
+            }
+
             var threshold = Math.Max(1, _options.ConsecutiveFailuresBeforeBlock);
             var blockSeconds = Math.Max(1, _options.BlockDurationSeconds);
 
@@ -169,18 +179,6 @@ namespace Affiliate.Services
 
                 if (state.ConsecutiveFailures < threshold)
                     return;
-
-                // Already blocked: it keeps serving traffic through the translate route, so just
-                // restart its window instead of touching the other ports.
-                if (!IsAvailable(state, now))
-                {
-                    state.BlockedUntil = now.AddSeconds(blockSeconds);
-                    state.ConsecutiveFailures = 0;
-                    _logger.LogWarning(
-                        "ISP proxy {Port} kept failing while blocked; block window restarted for {Seconds}s",
-                        endpoint.Port, blockSeconds);
-                    return;
-                }
 
                 var unblockedCount = CountUnblocked(now);
                 // This port is still counted as unblocked until we block it.
