@@ -81,26 +81,27 @@ namespace Affiliate.Services
                 return false;
             }
 
-            // Always publish to the main "all drops" group.
-            var sentMain = await SendMessageAsync(_options.ChatId.Trim(), text, cancellationToken);
-
-            // Also publish to the matching drop-percentage tier group (when configured).
+            // Publish only to the matching drop-percentage tier group.
             var tierChatId = ResolveTierChatId(alert.DropPercent);
-            if (!string.IsNullOrWhiteSpace(tierChatId))
+            if (string.IsNullOrWhiteSpace(tierChatId))
             {
-                var sentTier = await SendMessageAsync(tierChatId.Trim(), text, cancellationToken);
-                if (!sentTier)
-                    _logger.LogWarning(
-                        "Telegram tier alert failed for {Asin} ({Percent}% → chat {ChatId})",
-                        alert.Product.Asin, alert.DropPercent, tierChatId);
+                _logger.LogInformation(
+                    "No Telegram chat configured for drop tier — alert not sent: {Asin} {Percent}%",
+                    alert.Product.Asin, alert.DropPercent);
+                return false;
             }
 
-            if (sentMain)
+            var sent = await SendMessageAsync(tierChatId.Trim(), text, cancellationToken);
+            if (sent)
                 _logger.LogInformation(
-                    "Telegram drop alert sent for {Asin} ({Percent}%)",
-                    alert.Product.Asin, alert.DropPercent);
+                    "Telegram drop alert sent for {Asin} ({Percent}% → chat {ChatId})",
+                    alert.Product.Asin, alert.DropPercent, tierChatId);
+            else
+                _logger.LogWarning(
+                    "Telegram drop alert failed for {Asin} ({Percent}% → chat {ChatId})",
+                    alert.Product.Asin, alert.DropPercent, tierChatId);
 
-            return sentMain;
+            return sent;
         }
 
         public async Task<(bool Success, string Detail)> SendTestMessageAsync(CancellationToken cancellationToken = default)
@@ -112,7 +113,7 @@ namespace Affiliate.Services
                 $"✅ <b>Affiliate</b> Telegram is connected.\n" +
                 $"Time (UTC): {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}";
 
-            var sent = await SendMessageAsync(_options.ChatId.Trim(), text, cancellationToken);
+            var sent = await SendMessageAsync(_options.PrimaryChatId!.Trim(), text, cancellationToken);
             return sent
                 ? (true, "Test message sent successfully.")
                 : (false, "Telegram API rejected the request. Check logs and BotToken/ChatId.");
@@ -126,9 +127,9 @@ namespace Affiliate.Services
                 return false;
             }
 
-            if (string.IsNullOrWhiteSpace(_options.ChatId))
+            if (string.IsNullOrWhiteSpace(_options.PrimaryChatId))
             {
-                detail = "Telegram:ChatId is empty";
+                detail = "No Telegram tier chat id is configured";
                 return false;
             }
 
@@ -138,7 +139,7 @@ namespace Affiliate.Services
 
         /// <summary>
         /// Maps drop % to a tier chat. Boundaries use inclusive lower / exclusive upper
-        /// except the top band: [1,20), [20,40), [40,60), [60,80), [80,100].
+        /// except the top band: [3,10), [10,20), [20,40), [40,60), [60,80), [80,100].
         /// </summary>
         private string? ResolveTierChatId(decimal dropPercent)
         {
@@ -150,8 +151,10 @@ namespace Affiliate.Services
                 return NullIfBlank(_options.ChatId40To60);
             if (dropPercent >= 20m)
                 return NullIfBlank(_options.ChatId20To40);
-            if (dropPercent >= 1m)
-                return NullIfBlank(_options.ChatId1To20);
+            if (dropPercent >= 10m)
+                return NullIfBlank(_options.ChatId10To20);
+            if (dropPercent >= 3m)
+                return NullIfBlank(_options.ChatId3To10);
 
             return null;
         }

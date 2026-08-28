@@ -22,7 +22,14 @@ namespace Affiliate.Services
 
     public class AmazonScraperService : IAmazonScraperService
     {
-        private const decimal PriceDropAlertThresholdPercent = 10m;
+        private const decimal PriceDropAlertThresholdPercent = 3m;
+
+        /// <summary>Below this drop %, an alert also requires the new price to beat the average price.</summary>
+        private const decimal AveragePriceGateBelowPercent = 10m;
+
+        /// <summary>How far below the average price the new price must sit to pass the gate.</summary>
+        private const decimal MinimumBelowAveragePercent = 3m;
+
         private const int MaxPagesPerSearch = 50;
 
         private readonly AffiliateDbContext _db;
@@ -1221,11 +1228,36 @@ namespace Affiliate.Services
             });
         }
 
+        /// <summary>
+        /// Drops of 10% or more always alert. Smaller drops alert only when the new price is also
+        /// at least 3% below the product's average recorded price, so noise around a high baseline is skipped.
+        /// Requires <see cref="AttachPriceHistoryAsync"/> to have run first.
+        /// </summary>
+        private static bool QualifiesForAlert(ProductDropAlert alert)
+        {
+            if (alert.DropPercent >= AveragePriceGateBelowPercent)
+                return true;
+
+            return alert.AveragePrice is > 0
+                && alert.CurrentPrice is > 0
+                && TryPercentOff(alert.AveragePrice.Value, alert.CurrentPrice.Value, out var belowAverage)
+                && RoundPct(belowAverage) >= MinimumBelowAveragePercent;
+        }
+
         private async Task<bool> DispatchAlertsAsync(List<ProductDropAlert> alerts, CancellationToken ct)
         {
             var sentAny = false;
             foreach (var alert in alerts)
             {
+                if (!QualifiesForAlert(alert))
+                {
+                    _logger.LogDebug(
+                        "Drop alert skipped for {Asin} ({Percent}%) — price {Price} is not at least {Gate}% below the average {Average}",
+                        alert.Product.Asin, alert.DropPercent, alert.CurrentPrice,
+                        MinimumBelowAveragePercent, alert.AveragePrice);
+                    continue;
+                }
+
                 if (!await _telegram.NotifyDropAsync(alert, ct))
                     continue;
 

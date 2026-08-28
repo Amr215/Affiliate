@@ -22,8 +22,8 @@ namespace Affiliate.Controllers
         {
             ViewBag.Enabled = _options.Enabled;
             ViewBag.HasBotToken = !string.IsNullOrWhiteSpace(_options.BotToken);
-            ViewBag.HasChatId = !string.IsNullOrWhiteSpace(_options.ChatId);
-            ViewBag.ChatIdPreview = Mask(_options.ChatId);
+            ViewBag.HasChatId = !string.IsNullOrWhiteSpace(_options.PrimaryChatId);
+            ViewBag.ChatIdPreview = Mask(_options.PrimaryChatId);
             return View();
         }
 
