@@ -51,7 +51,8 @@ namespace Affiliate.Services
 
         /// <summary>
         /// Records a failed operation. After enough consecutive failures the port is blocked briefly;
-        /// if it was the last unblocked port, all ports are unblocked instead.
+        /// if it was the last unblocked port, that port is still blocked and half of the other
+        /// blocked ports (shortest remaining block time) are freed instead of unblocking everything.
         /// Failures on the translate route are ignored for the same reason successes are: they
         /// describe Google's mood, not whether Amazon still blocks the IP.
         /// </summary>
@@ -182,17 +183,18 @@ namespace Affiliate.Services
 
                 var unblockedCount = CountUnblocked(now);
                 // This port is still counted as unblocked until we block it.
+                state.BlockedUntil = now.AddSeconds(blockSeconds);
+                state.ConsecutiveFailures = 0;
+
                 if (unblockedCount <= 1)
                 {
-                    UnblockAllUnlocked();
+                    var freed = UnblockShortestHalfUnlocked(now, excludePort: endpoint.Port);
                     _logger.LogWarning(
-                        "ISP proxy {Port} hit {Threshold} consecutive failures as the last unblocked proxy; unblocked all ports",
-                        endpoint.Port, threshold);
+                        "ISP proxy {Port} hit {Threshold} consecutive failures as the last unblocked proxy; blocked it for {Seconds}s and freed {Freed} blocked port(s) with the shortest remaining time",
+                        endpoint.Port, threshold, blockSeconds, freed);
                     return;
                 }
 
-                state.BlockedUntil = now.AddSeconds(blockSeconds);
-                state.ConsecutiveFailures = 0;
                 _logger.LogWarning(
                     "ISP proxy {Port} blocked for {Seconds}s after {Threshold} consecutive failures ({Remaining} still available)",
                     endpoint.Port, blockSeconds, threshold, unblockedCount - 1);
@@ -296,6 +298,48 @@ namespace Affiliate.Services
                 state.BlockedUntil = null;
                 state.ConsecutiveFailures = 0;
             }
+        }
+
+        /// <summary>
+        /// Frees ceil(n/2) of currently blocked ports (excluding <paramref name="excludePort"/>),
+        /// preferring those whose block expires soonest. Even n → n/2; odd n → (n+1)/2.
+        /// </summary>
+        private int UnblockShortestHalfUnlocked(DateTimeOffset now, int excludePort)
+        {
+            var min = _options.PortMin > 0 ? _options.PortMin : 8001;
+            var max = _options.PortMax >= min ? _options.PortMax : min;
+
+            var blocked = new List<(int Port, DateTimeOffset Until)>();
+            for (var port = min; port <= max; port++)
+            {
+                if (port == excludePort)
+                    continue;
+
+                if (_ports.TryGetValue(port, out var state)
+                    && state.BlockedUntil is { } until
+                    && until > now)
+                {
+                    blocked.Add((port, until));
+                }
+            }
+
+            if (blocked.Count == 0)
+                return 0;
+
+            // Integer half that rounds up for odd counts: 1→1, 2→1, 3→2, 4→2, 5→3.
+            var freeCount = (blocked.Count + 1) / 2;
+
+            foreach (var (port, _) in blocked
+                         .OrderBy(b => b.Until)
+                         .ThenBy(b => b.Port)
+                         .Take(freeCount))
+            {
+                var state = _ports[port];
+                state.BlockedUntil = null;
+                state.ConsecutiveFailures = 0;
+            }
+
+            return freeCount;
         }
 
         private static bool IsAvailable(PortState state, DateTimeOffset now) =>

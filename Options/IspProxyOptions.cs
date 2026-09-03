@@ -41,6 +41,6 @@ namespace Affiliate.Options
         public int ConsecutiveFailuresBeforeBlock { get; set; } = 3;
 
         /// <summary>How long a blocked proxy port stays unavailable (seconds).</summary>
-        public int BlockDurationSeconds { get; set; } = 50;
+        public int BlockDurationSeconds { get; set; } = 80;
     }
 }
