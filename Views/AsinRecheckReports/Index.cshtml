@@ -1,0 +1,146 @@
+@model AsinRecheckPollReportViewModel
+@{
+    ViewData["Title"] = "تقرير إعادة فحص ASIN";
+}
+
+<div class="page-toolbar">
+    <div>
+        <h1 class="h2">تقرير إعادة فحص ASIN</h1>
+        <p class="text-muted mb-0">
+            آخر @((int)Model.Window.TotalMinutes) دقائق —
+            صفحات أمازون + دفعات البحث
+            <span class="stat-pill"><i class="bi bi-list-ol"></i> @Model.PollCount دورة</span>
+            <span class="stat-pill"><i class="bi bi-check-circle"></i> @Model.TotalSuccessPages صفحة ناجحة</span>
+            <span class="stat-pill"><i class="bi bi-x-circle"></i> @Model.TotalFailedPages صفحة فاشلة</span>
+            <span class="stat-pill"><i class="bi bi-percent"></i> @Model.PageSuccessRate.ToString("0.0")% صفحات</span>
+        </p>
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+        <a class="btn btn-outline-secondary" asp-action="Index">
+            <i class="bi bi-arrow-clockwise"></i> تحديث
+        </a>
+    </div>
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-sm-6 col-lg-3">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="text-muted small mb-1">صفحات ناجحة</div>
+                <div class="fw-bold text-success ltr">@Model.TotalSuccessPages</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="text-muted small mb-1">صفحات فاشلة (محاولات)</div>
+                <div class="fw-bold text-danger ltr">@Model.TotalFailedPages</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="text-muted small mb-1">نجاح صفحة 1</div>
+                <div class="fw-bold text-success ltr">@Model.TotalPage1Success</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="text-muted small mb-1">نجاح صفحة 2</div>
+                <div class="fw-bold text-success ltr">@Model.TotalPage2Success</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-sm-6 col-lg-3">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="text-muted small mb-1">عدد الدورات</div>
+                <div class="fw-bold ltr">@Model.PollCount</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="text-muted small mb-1">دفعات ناجحة</div>
+                <div class="fw-bold text-success ltr">@Model.TotalSuccessBatches</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="text-muted small mb-1">دفعات فاشلة / ناقصة</div>
+                <div class="fw-bold text-danger ltr">@Model.TotalFailedBatches</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="text-muted small mb-1">متوسط مدة الدورة</div>
+                <div class="fw-bold ltr">@Model.AvgDurationSeconds.ToString("0.0") ث</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-clock-history"></i> دورات آخر @((int)Model.Window.TotalMinutes) دقائق</span>
+        <span class="text-muted small">الذاكرة فقط — تُفقد عند إعادة تشغيل التطبيق</span>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-hover mb-0 align-middle">
+            <thead>
+                <tr>
+                    <th class="ltr">انتهت (UTC)</th>
+                    <th class="ltr">المدة</th>
+                    <th class="ltr">ASINs</th>
+                    <th class="ltr">صفحات ناجحة</th>
+                    <th class="ltr">صفحات فاشلة</th>
+                    <th class="ltr">ص1</th>
+                    <th class="ltr">ص2</th>
+                    <th class="ltr">دفعات</th>
+                    <th class="ltr">دفعة نجاح</th>
+                    <th class="ltr">دفعة فشل</th>
+                    <th class="ltr">دفعة ناقص</th>
+                </tr>
+            </thead>
+            <tbody>
+            @if (Model.Polls.Count == 0)
+            {
+                <tr>
+                    <td colspan="11" class="text-center text-muted py-4">لا توجد دورات في هذه النافذة بعد</td>
+                </tr>
+            }
+            else
+            {
+                foreach (var poll in Model.Polls)
+                {
+                    <tr>
+                        <td class="ltr num">@poll.CompletedAtUtc.ToString("HH:mm:ss")</td>
+                        <td class="ltr num">@poll.DurationSeconds.ToString("0.0") ث</td>
+                        <td class="ltr num">@poll.AsinsRequested</td>
+                        <td class="ltr num text-success">@poll.SuccessPageRequests</td>
+                        <td class="ltr num text-danger">@poll.FailedPageRequests</td>
+                        <td class="ltr num text-success">@poll.Page1Success</td>
+                        <td class="ltr num text-success">@poll.Page2Success</td>
+                        <td class="ltr num">@poll.BatchCount</td>
+                        <td class="ltr num text-success">@poll.SuccessBatches</td>
+                        <td class="ltr num text-danger">@poll.FailedBatches</td>
+                        <td class="ltr num text-warning">@poll.IncompleteBatches</td>
+                    </tr>
+                }
+            }
+            </tbody>
+        </table>
+    </div>
+</div>

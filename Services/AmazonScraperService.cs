@@ -37,6 +37,7 @@ namespace Affiliate.Services
         private readonly ITelegramNotifier _telegram;
         private readonly AsinRecheckOptions _asinRecheck;
         private readonly IIspProxyService _ispProxy;
+        private readonly IAsinRecheckPollCache _pollCache;
         private readonly ILogger<AmazonScraperService> _logger;
         private readonly ConcurrentQueue<OxylabsRequestLog> _pendingLogs = new();
         /// <summary>Serializes DbContext use — EF contexts are not thread-safe, and ASIN batches fetch in parallel.</summary>
@@ -48,6 +49,7 @@ namespace Affiliate.Services
             ITelegramNotifier telegramNotifier,
             IOptions<AsinRecheckOptions> asinRecheckOptions,
             IIspProxyService ispProxy,
+            IAsinRecheckPollCache pollCache,
             ILogger<AmazonScraperService> logger)
         {
             _db = dbContext;
@@ -55,6 +57,7 @@ namespace Affiliate.Services
             _telegram = telegramNotifier;
             _asinRecheck = asinRecheckOptions.Value;
             _ispProxy = ispProxy;
+            _pollCache = pollCache;
             _logger = logger;
         }
 
@@ -146,6 +149,7 @@ namespace Affiliate.Services
                 }
 
                 var maxParallel = ResolveParallelism(batches.Count);
+                var startedAtUtc = DateTime.UtcNow;
                 var startedAt = Stopwatch.GetTimestamp();
 
                 _logger.LogInformation(
@@ -156,6 +160,7 @@ namespace Affiliate.Services
                 var incompleteBatches = 0;
                 var updated = 0;
                 var unavailable = 0;
+                var pageCounters = new AsinRecheckPageRequestCounters();
 
                 await Parallel.ForEachAsync(
                     Enumerable.Range(0, batches.Count),
@@ -172,7 +177,7 @@ namespace Affiliate.Services
                         try
                         {
                             var (organic, complete, pageSaved) = await FetchAsinBatchSearchViaIspAsync(
-                                batch, domain, index + 1, token);
+                                batch, domain, index + 1, pageCounters, token);
 
                             Interlocked.Add(ref updated, pageSaved);
 
@@ -213,6 +218,25 @@ namespace Affiliate.Services
                 await FlushPendingLogsAsync(ct);
 
                 var elapsed = Stopwatch.GetElapsedTime(startedAt);
+                var completedAtUtc = DateTime.UtcNow;
+                var successBatches = Math.Max(0, batches.Count - failedBatches - incompleteBatches);
+
+                _pollCache.Record(new AsinRecheckPollSnapshot
+                {
+                    StartedAtUtc = startedAtUtc,
+                    CompletedAtUtc = completedAtUtc,
+                    DurationSeconds = elapsed.TotalSeconds,
+                    AsinsRequested = asins.Count,
+                    BatchCount = batches.Count,
+                    SuccessBatches = successBatches,
+                    FailedBatches = failedBatches,
+                    IncompleteBatches = incompleteBatches,
+                    SuccessPageRequests = pageCounters.Success,
+                    FailedPageRequests = pageCounters.Failed,
+                    Page1Success = pageCounters.Page1Success,
+                    Page2Success = pageCounters.Page2Success
+                });
+
                 _logger.LogInformation(
                     "ASIN recheck completed in {Seconds:0.0}s — {Asins} ASINs, updated={Updated}, recordedNotAvailable={Unavailable}, failedBatches={Failed}, incompleteBatches={Incomplete}",
                     elapsed.TotalSeconds, asins.Count, updated, unavailable, failedBatches, incompleteBatches);
@@ -636,7 +660,11 @@ namespace Affiliate.Services
         /// Saves products (and sends drop alerts) after every successful page request.
         /// </summary>
         private async Task<(List<OrganicProduct> Organic, bool IsComplete, int Saved)> FetchAsinBatchSearchViaIspAsync(
-            IReadOnlyList<string> asins, string domain, int batchIndex, CancellationToken ct)
+            IReadOnlyList<string> asins,
+            string domain,
+            int batchIndex,
+            AsinRecheckPageRequestCounters pageCounters,
+            CancellationToken ct)
         {
             if (asins.Count < 2)
                 throw new InvalidOperationException("ASIN batch search requires at least 2 ASINs per request");
@@ -727,6 +755,7 @@ namespace Affiliate.Services
                             nextHref = result.NextPageHref;
                             referer = pageUrl;
                             pageOk = true;
+                            pageCounters.RecordSuccess(page);
 
                             if (qid is null &&
                                 TryResolveAmazonHref(pageUrl, nextHref, out var nextAbs) &&
@@ -753,6 +782,7 @@ namespace Affiliate.Services
                         }
                         catch (AmazonFetchRejectedException ex)
                         {
+                            pageCounters.RecordFailure();
                             _ispProxy.ReportFailure(endpoint);
                             // Already logged once in FetchAsinBatchSearchPageAsync — do not write a second OxylabsRequestLog row.
                             if (attempt >= maxAttempts)
@@ -782,6 +812,7 @@ namespace Affiliate.Services
                         }
                         catch (Exception ex) when (ex is not OperationCanceledException and not AmazonFetchRejectedException)
                         {
+                            pageCounters.RecordFailure();
                             _ispProxy.ReportFailure(endpoint);
                             var reason = DescribeTransport(ex);
                             QueueLog(null, page, DateTime.UtcNow, 0, "TransportError",

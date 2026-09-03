@@ -78,6 +78,7 @@ builder.Services.AddHttpClient(KeepAliveBackgroundService.HttpClientName, client
 });
 
 builder.Services.AddSingleton<KeepAliveUrlStore>();
+builder.Services.AddSingleton<IAsinRecheckPollCache, AsinRecheckPollCache>();
 builder.Services.AddSingleton<IScraperRunCoordinator, ScraperRunCoordinator>();
 builder.Services.AddSingleton<IIspProxyService, IspProxyService>();
 builder.Services.AddScoped<ITelegramNotifier, TelegramNotifier>();
