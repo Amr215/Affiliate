@@ -38,7 +38,7 @@ namespace Affiliate.Options
         /// <summary>
         /// Consecutive failures (with no success in between) before a proxy port is temporarily blocked.
         /// </summary>
-        public int ConsecutiveFailuresBeforeBlock { get; set; } = 3;
+        public int ConsecutiveFailuresBeforeBlock { get; set; } = 2;
 
         /// <summary>How long a blocked proxy port stays unavailable (seconds).</summary>
         public int BlockDurationSeconds { get; set; } = 80;
