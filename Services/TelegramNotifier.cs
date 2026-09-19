@@ -15,6 +15,22 @@ namespace Affiliate.Services
 
         /// <summary>Sends a plain test message to verify BotToken/ChatId.</summary>
         Task<(bool Success, string Detail)> SendTestMessageAsync(CancellationToken cancellationToken = default);
+
+        /// <summary>Plain text reply (e.g. prepare-for-publish failure).</summary>
+        Task<bool> SendPlainTextAsync(
+            string chatId,
+            string text,
+            int? replyToMessageId = null,
+            CancellationToken cancellationToken = default);
+
+        /// <summary>Publish-ready photo: product name + URL caption and copy-text button.</summary>
+        Task<bool> SendPreparePublishAsync(
+            string chatId,
+            string productName,
+            string productUrl,
+            byte[] screenshotPng,
+            int? replyToMessageId = null,
+            CancellationToken cancellationToken = default);
     }
 
     public sealed class ProductDropAlert
@@ -91,7 +107,11 @@ namespace Affiliate.Services
 
             var chatId = tierChatId.Trim();
             var productUrl = BuildProductUrl(alert.Product.Asin);
-            var replyMarkup = BuildAlertReplyMarkupJson(alert.Product.Name, productUrl);
+            var replyMarkup = BuildAlertReplyMarkupJson(
+                alert.Product.Name,
+                productUrl,
+                alert.Product.Asin,
+                alert.CurrentPrice);
             bool sent;
 
             // Mega deals need a colored card image — Telegram text messages cannot set a background.
@@ -100,11 +120,18 @@ namespace Affiliate.Services
                 var productImageBytes = await TryDownloadProductImageAsync(alert.Product.ImageUrl, cancellationToken);
                 var png = MegaDealCardImage.Render(alert, productImageBytes);
                 var caption = BuildMegaDealCaption(alert);
-                sent = await SendPhotoAsync(chatId, png, caption, replyMarkup, cancellationToken);
+                sent = await SendPhotoAsync(
+                    chatId,
+                    png,
+                    caption,
+                    replyMarkup,
+                    replyToMessageId: null,
+                    photoFileName: "mega-deal.png",
+                    cancellationToken: cancellationToken);
             }
             else
             {
-                sent = await SendMessageAsync(chatId, BuildDropHtml(alert), replyMarkup, cancellationToken);
+                sent = await SendMessageAsync(chatId, BuildDropHtml(alert), replyMarkup, replyToMessageId: null, cancellationToken);
             }
 
             if (sent)
@@ -128,10 +155,69 @@ namespace Affiliate.Services
                 $"✅ <b>Affiliate</b> Telegram is connected.\n" +
                 $"Time (UTC): {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}";
 
-            var sent = await SendMessageAsync(_options.PrimaryChatId!.Trim(), text, replyMarkupJson: null, cancellationToken);
+            var sent = await SendMessageAsync(
+                _options.PrimaryChatId!.Trim(),
+                text,
+                replyMarkupJson: null,
+                replyToMessageId: null,
+                cancellationToken);
             return sent
                 ? (true, "Test message sent successfully.")
                 : (false, "Telegram API rejected the request. Check logs and BotToken/ChatId.");
+        }
+
+        public Task<bool> SendPlainTextAsync(
+            string chatId,
+            string text,
+            int? replyToMessageId = null,
+            CancellationToken cancellationToken = default) =>
+            SendMessageAsync(chatId, Html(text), replyMarkupJson: null, replyToMessageId, cancellationToken);
+
+        public async Task<bool> SendPreparePublishAsync(
+            string chatId,
+            string productName,
+            string productUrl,
+            byte[] screenshotPng,
+            int? replyToMessageId = null,
+            CancellationToken cancellationToken = default)
+        {
+            var name = productName?.Trim() ?? "";
+            var url = productUrl?.Trim() ?? "";
+            var caption = $"{Html(name)}\n{Html(url)}";
+            if (caption.Length > 1024)
+                caption = caption[..1021] + "…";
+
+            var copyPayload = $"{name}\n{url}".Trim();
+            if (copyPayload.Length > TelegramCopyTextMaxLength)
+                copyPayload = copyPayload[..TelegramCopyTextMaxLength];
+
+            string? replyMarkup = null;
+            if (copyPayload.Length > 0)
+            {
+                replyMarkup = System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    inline_keyboard = new[]
+                    {
+                        new object[]
+                        {
+                            new Dictionary<string, object>
+                            {
+                                ["text"] = "📋 نسخ الاسم والرابط",
+                                ["copy_text"] = new Dictionary<string, string> { ["text"] = copyPayload }
+                            }
+                        }
+                    }
+                });
+            }
+
+            return await SendPhotoAsync(
+                chatId,
+                screenshotPng,
+                caption,
+                replyMarkup,
+                replyToMessageId: replyToMessageId,
+                photoFileName: "prepare-publish.png",
+                cancellationToken: cancellationToken);
         }
 
         private bool IsConfigured(out string detail)
@@ -181,6 +267,7 @@ namespace Affiliate.Services
             string chatId,
             string text,
             string? replyMarkupJson,
+            int? replyToMessageId,
             CancellationToken cancellationToken)
         {
             try
@@ -194,7 +281,8 @@ namespace Affiliate.Services
                     Text = text,
                     ParseMode = "HTML",
                     DisableWebPagePreview = false,
-                    ReplyMarkup = ParseReplyMarkup(replyMarkupJson)
+                    ReplyMarkup = ParseReplyMarkup(replyMarkupJson),
+                    ReplyToMessageId = replyToMessageId
                 };
 
                 using var response = await client.PostAsJsonAsync(url, payload, cancellationToken);
@@ -229,7 +317,9 @@ namespace Affiliate.Services
             byte[] pngBytes,
             string? captionHtml,
             string? replyMarkupJson,
-            CancellationToken cancellationToken)
+            int? replyToMessageId = null,
+            string photoFileName = "mega-deal.png",
+            CancellationToken cancellationToken = default)
         {
             try
             {
@@ -241,7 +331,7 @@ namespace Affiliate.Services
 
                 var photoContent = new ByteArrayContent(pngBytes);
                 photoContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/png");
-                form.Add(photoContent, "photo", "mega-deal.png");
+                form.Add(photoContent, "photo", photoFileName);
 
                 if (!string.IsNullOrWhiteSpace(captionHtml))
                 {
@@ -251,6 +341,9 @@ namespace Affiliate.Services
 
                 if (!string.IsNullOrWhiteSpace(replyMarkupJson))
                     form.Add(new StringContent(replyMarkupJson), "reply_markup");
+
+                if (replyToMessageId is > 0)
+                    form.Add(new StringContent(replyToMessageId.Value.ToString()), "reply_to_message_id");
 
                 using var response = await client.PostAsync(url, form, cancellationToken);
                 var body = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -291,12 +384,33 @@ namespace Affiliate.Services
                 : $"https://www.amazon.eg/dp/{asin.Trim()}?language=ar_AE";
 
         /// <summary>
-        /// Inline keyboard: copy product name + open Amazon (separate buttons).
-        /// Uses Telegram <c>copy_text</c> (clipboard) and <c>url</c>.
+        /// Inline keyboard: copy product name + open Amazon.
+        /// («تجهيز للنشر» is temporarily commented out.)
         /// </summary>
-        private static string? BuildAlertReplyMarkupJson(string? productName, string? productUrl)
+        private static string? BuildAlertReplyMarkupJson(
+            string? productName,
+            string? productUrl,
+            string? asin,
+            decimal? currentPrice)
         {
             var rows = new List<object[]>();
+
+            // Temporarily disabled — re-enable when prepare-for-publish is ready to ship.
+            // if (!string.IsNullOrWhiteSpace(asin))
+            // {
+            //     var callback = BuildPrepCallbackData(asin, currentPrice);
+            //     if (callback is not null)
+            //     {
+            //         rows.Add(
+            //         [
+            //             new Dictionary<string, object>
+            //             {
+            //                 ["text"] = "تجهيز للنشر",
+            //                 ["callback_data"] = callback
+            //             }
+            //         ]);
+            //     }
+            // }
 
             var name = productName?.Trim() ?? "";
             if (name.Length > 0)
@@ -330,6 +444,20 @@ namespace Affiliate.Services
                 return null;
 
             return System.Text.Json.JsonSerializer.Serialize(new { inline_keyboard = rows });
+        }
+
+        /// <summary>Telegram callback_data max 64 bytes: prep:ASIN:price</summary>
+        private static string? BuildPrepCallbackData(string asin, decimal? currentPrice)
+        {
+            var cleanedAsin = asin.Trim().ToUpperInvariant();
+            if (cleanedAsin.Length is < 8 or > 16)
+                return null;
+
+            var data = currentPrice.HasValue
+                ? $"prep:{cleanedAsin}:{currentPrice.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}"
+                : $"prep:{cleanedAsin}";
+
+            return data.Length <= 64 ? data : $"prep:{cleanedAsin}";
         }
 
         private static System.Text.Json.JsonElement? ParseReplyMarkup(string? replyMarkupJson)
@@ -482,6 +610,10 @@ namespace Affiliate.Services
             [JsonPropertyName("reply_markup")]
             [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
             public System.Text.Json.JsonElement? ReplyMarkup { get; set; }
+
+            [JsonPropertyName("reply_to_message_id")]
+            [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+            public int? ReplyToMessageId { get; set; }
         }
 
         private sealed class TelegramApiResponse

@@ -10,6 +10,12 @@ namespace Affiliate.Options
         /// <summary>Bot token from @BotFather (e.g. 123456:ABC...).</summary>
         public string BotToken { get; set; } = string.Empty;
 
+        /// <summary>
+        /// When true (default), a background service long-polls getUpdates for
+        /// «تجهيز للنشر» callbacks. Set false if you use an external webhook instead.
+        /// </summary>
+        public bool PollUpdates { get; set; } = true;
+
         /// <summary>Chat for price drops from 3% (inclusive) up to 10% (exclusive).</summary>
         public string ChatId3To10 { get; set; } = string.Empty;
 

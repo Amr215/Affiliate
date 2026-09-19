@@ -88,6 +88,11 @@
 }</code></pre>
             </li>
             <li>أعد تشغيل التطبيق ثم اضغط <strong>إرسال رسالة تجريبية</strong>.</li>
+            <li class="mb-2">
+                زر <strong>تجهيز للنشر</strong> في التنبيهات يحتاج Chromium عبر Playwright على السيرفر:
+                <pre class="bg-light border rounded-3 p-3 mt-2 mb-0 ltr"><code>powershell -ExecutionPolicy Bypass -File bin\Debug\net8.0\playwright.ps1 install chromium</code></pre>
+                وتأكد أن <code class="ltr">Telegram:PollUpdates</code> = <code class="ltr">true</code> لاستقبال ضغطات الزر.
+            </li>
         </ol>
         <p class="text-muted small mt-3 mb-0">
             عند اكتشاف انخفاض ≥3% عن السعر السابق للمنتج، يُرسل تنبيه إلى مجموعة واحدة فقط حسب نسبة الانخفاض:

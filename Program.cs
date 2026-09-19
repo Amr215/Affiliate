@@ -69,7 +69,8 @@ builder.Services.ConfigureApplicationCookie(options =>
 
 builder.Services.AddHttpClient(TelegramNotifier.HttpClientName, client =>
 {
-    client.Timeout = TimeSpan.FromSeconds(30);
+    // Long enough for Telegram getUpdates long-poll (~25s) plus overhead.
+    client.Timeout = TimeSpan.FromSeconds(60);
 });
 
 builder.Services.AddHttpClient(KeepAliveBackgroundService.HttpClientName, client =>
@@ -82,11 +83,13 @@ builder.Services.AddSingleton<IAsinRecheckPollCache, AsinRecheckPollCache>();
 builder.Services.AddSingleton<IScraperRunCoordinator, ScraperRunCoordinator>();
 builder.Services.AddSingleton<IIspProxyService, IspProxyService>();
 builder.Services.AddScoped<ITelegramNotifier, TelegramNotifier>();
+builder.Services.AddScoped<IPrepareForPublishService, PrepareForPublishService>();
 builder.Services.AddScoped<IAmazonScraperService, AmazonScraperService>();
 builder.Services.AddHostedService<AmazonScraperBackgroundService>();
 builder.Services.AddHostedService<AsinRecheckBackgroundService>();
 builder.Services.AddHostedService<KeepAliveBackgroundService>();
 builder.Services.AddHostedService<OxylabsRequestLogCleanupService>();
+builder.Services.AddHostedService<TelegramCallbackBackgroundService>();
 
 var app = builder.Build();
 
