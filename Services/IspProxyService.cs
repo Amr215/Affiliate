@@ -23,6 +23,7 @@ namespace Affiliate.Services
     }
 
     public sealed record IspProxyPortStatus(
+        string? Host,
         int Port,
         bool IsBlocked,
         int ConsecutiveFailures,
@@ -32,14 +33,14 @@ namespace Affiliate.Services
     public interface IIspProxyService
     {
         /// <summary>
-        /// Configured proxy endpoint (or direct when disabled). Temporarily blocked ports are skipped
+        /// Configured proxy endpoint (or direct when disabled). Temporarily blocked proxies are skipped
         /// unless <paramref name="allowBlocked"/> is set, in which case they can still be handed out
         /// with <see cref="IspProxyEndpoint.RouteThroughTranslate"/> so the caller reaches Amazon
         /// through Google Translate rather than leaving the IP idle.
         /// </summary>
         IspProxyEndpoint GetEndpoint(bool allowBlocked = false);
 
-        /// <summary>Snapshot of every configured port and its block / failure state.</summary>
+        /// <summary>Snapshot of every configured proxy and its block / failure state.</summary>
         IReadOnlyList<IspProxyPortStatus> GetPortStatuses();
 
         /// <summary>
@@ -50,9 +51,9 @@ namespace Affiliate.Services
         void ReportSuccess(IspProxyEndpoint endpoint);
 
         /// <summary>
-        /// Records a failed operation. After enough consecutive failures the port is blocked briefly;
-        /// if it was the last unblocked port, that port is still blocked and half of the other
-        /// blocked ports (shortest remaining block time) are freed instead of unblocking everything.
+        /// Records a failed operation. After enough consecutive failures the proxy is blocked briefly;
+        /// if it was the last unblocked proxy, that proxy is still blocked and half of the other
+        /// blocked proxies (shortest remaining block time) are freed instead of unblocking everything.
         /// Failures on the translate route are ignored for the same reason successes are: they
         /// describe Google's mood, not whether Amazon still blocks the IP.
         /// </summary>
@@ -66,56 +67,62 @@ namespace Affiliate.Services
 
     public sealed class IspProxyService : IIspProxyService
     {
+        private static readonly IspProxyEndpoint Direct = new(false, null, 0, null, null);
+
         private readonly IspProxyOptions _options;
         private readonly ILogger<IspProxyService> _logger;
         private readonly object _gate = new();
-        private readonly Dictionary<int, PortState> _ports = new();
+        private readonly List<IspProxyEndpoint> _proxies;
+        private readonly Dictionary<string, ProxyState> _states = new();
 
         public IspProxyService(IOptions<IspProxyOptions> options, ILogger<IspProxyService> logger)
         {
             _options = options.Value;
             _logger = logger;
+            _proxies = ParseProxies(_options.Proxies);
         }
 
         public int TransportRetriesPerIp => Math.Max(0, _options.TransportRetriesPerIp);
 
         public IspProxyEndpoint GetEndpoint(bool allowBlocked = false)
         {
-            if (!_options.Enabled || string.IsNullOrWhiteSpace(_options.Host))
-                return new IspProxyEndpoint(false, null, 0, null, null);
+            if (!_options.Enabled || _proxies.Count == 0)
+                return Direct;
 
-            var (port, isBlocked) = allowBlocked ? PickAnyPort() : (PickRandomAvailablePort(), false);
-            var endpoint = new IspProxyEndpoint(
-                true, _options.Host.Trim(), port, _options.Username, _options.Password, isBlocked);
+            IspProxyEndpoint endpoint;
+            lock (_gate)
+            {
+                var now = DateTimeOffset.UtcNow;
+                ExpireBlocks(now);
+                endpoint = allowBlocked ? PickAny(now) : PickAvailable(now);
+            }
+
             _logger.LogInformation("ISP proxy selected {Endpoint}", endpoint.Describe());
             return endpoint;
         }
 
         public IReadOnlyList<IspProxyPortStatus> GetPortStatuses()
         {
-            var min = _options.PortMin > 0 ? _options.PortMin : 8001;
-            var max = _options.PortMax >= min ? _options.PortMax : min;
-
             lock (_gate)
             {
                 var now = DateTimeOffset.UtcNow;
                 ExpireBlocks(now);
 
-                var list = new List<IspProxyPortStatus>(max - min + 1);
-                for (var port = min; port <= max; port++)
+                var list = new List<IspProxyPortStatus>(_proxies.Count);
+                foreach (var proxy in _proxies)
                 {
-                    _ports.TryGetValue(port, out var state);
-                    var blockedUntil = state?.BlockedUntil;
-                    var isBlocked = blockedUntil is { } until && until > now;
-                    int? remaining = null;
-                    if (isBlocked && blockedUntil is { } bu)
-                        remaining = Math.Max(0, (int)Math.Ceiling((bu - now).TotalSeconds));
+                    _states.TryGetValue(proxy.Key, out var state);
+                    var isBlocked = state?.BlockedUntil is { } until && until > now;
+                    int? remaining = isBlocked
+                        ? Math.Max(0, (int)Math.Ceiling((state!.BlockedUntil!.Value - now).TotalSeconds))
+                        : null;
 
                     list.Add(new IspProxyPortStatus(
-                        port,
+                        proxy.Host,
+                        proxy.Port,
                         isBlocked,
                         state?.ConsecutiveFailures ?? 0,
-                        isBlocked ? blockedUntil : null,
+                        isBlocked ? state!.BlockedUntil : null,
                         remaining));
                 }
 
@@ -138,7 +145,7 @@ namespace Affiliate.Services
 
             lock (_gate)
             {
-                var state = GetOrCreate(endpoint.Port);
+                var state = GetOrCreate(endpoint.Key);
                 if (state.ConsecutiveFailures > 0)
                 {
                     _logger.LogDebug(
@@ -158,7 +165,7 @@ namespace Affiliate.Services
             if (endpoint.RouteThroughTranslate)
             {
                 _logger.LogDebug(
-                    "ISP proxy {Port} failed through Google Translate; port state left unchanged",
+                    "ISP proxy {Port} failed through Google Translate; proxy state left unchanged",
                     endpoint.Port);
                 return;
             }
@@ -171,7 +178,7 @@ namespace Affiliate.Services
                 var now = DateTimeOffset.UtcNow;
                 ExpireBlocks(now);
 
-                var state = GetOrCreate(endpoint.Port);
+                var state = GetOrCreate(endpoint.Key);
                 state.ConsecutiveFailures++;
 
                 _logger.LogWarning(
@@ -181,16 +188,16 @@ namespace Affiliate.Services
                 if (state.ConsecutiveFailures < threshold)
                     return;
 
-                var unblockedCount = CountUnblocked(now);
-                // This port is still counted as unblocked until we block it.
+                var unblockedCount = _proxies.Count(p => IsAvailable(p.Key, now));
+                // This proxy is still counted as unblocked until we block it.
                 state.BlockedUntil = now.AddSeconds(blockSeconds);
                 state.ConsecutiveFailures = 0;
 
                 if (unblockedCount <= 1)
                 {
-                    var freed = UnblockShortestHalfUnlocked(now, excludePort: endpoint.Port);
+                    var freed = UnblockShortestHalfUnlocked(now, excludeKey: endpoint.Key);
                     _logger.LogWarning(
-                        "ISP proxy {Port} hit {Threshold} consecutive failures as the last unblocked proxy; blocked it for {Seconds}s and freed {Freed} blocked port(s) with the shortest remaining time",
+                        "ISP proxy {Port} hit {Threshold} consecutive failures as the last unblocked proxy; blocked it for {Seconds}s and freed {Freed} blocked proxy(ies) with the shortest remaining time",
                         endpoint.Port, threshold, blockSeconds, freed);
                     return;
                 }
@@ -201,127 +208,87 @@ namespace Affiliate.Services
             }
         }
 
+        /// <summary>Parses Webshare <c>host:port:username:password</c> entries; malformed ones are skipped.</summary>
+        private List<IspProxyEndpoint> ParseProxies(IEnumerable<string> entries)
+        {
+            var proxies = new List<IspProxyEndpoint>();
+            foreach (var entry in entries)
+            {
+                var parts = entry.Split(':');
+                if (parts.Length != 4 || !int.TryParse(parts[1], out var port))
+                {
+                    _logger.LogWarning("Ignoring malformed ISP proxy entry {Entry}", entry);
+                    continue;
+                }
+
+                proxies.Add(new IspProxyEndpoint(true, parts[0].Trim(), port, parts[2], parts[3]));
+            }
+
+            return proxies;
+        }
+
         /// <summary>
-        /// Picks from the whole port range, telling the caller whether the port is currently blocked
+        /// Picks from all proxies, telling the caller whether the proxy is currently blocked
         /// so it can be used through the translate route instead of sitting idle.
         /// </summary>
-        private (int Port, bool IsBlocked) PickAnyPort()
+        private IspProxyEndpoint PickAny(DateTimeOffset now)
         {
-            var min = _options.PortMin > 0 ? _options.PortMin : 8001;
-            var max = _options.PortMax >= min ? _options.PortMax : min;
-
-            lock (_gate)
-            {
-                var now = DateTimeOffset.UtcNow;
-                ExpireBlocks(now);
-
-                var port = Random.Shared.Next(min, max + 1);
-                var isBlocked = _ports.TryGetValue(port, out var state) && !IsAvailable(state, now);
-                return (port, isBlocked);
-            }
+            var proxy = _proxies[Random.Shared.Next(_proxies.Count)];
+            return proxy with { RouteThroughTranslate = !IsAvailable(proxy.Key, now) };
         }
 
-        private int PickRandomAvailablePort()
+        private IspProxyEndpoint PickAvailable(DateTimeOffset now)
         {
-            var min = _options.PortMin > 0 ? _options.PortMin : 8001;
-            var max = _options.PortMax >= min ? _options.PortMax : min;
+            var available = _proxies.Where(p => IsAvailable(p.Key, now)).ToList();
 
-            lock (_gate)
+            if (available.Count == 0)
             {
-                var now = DateTimeOffset.UtcNow;
-                ExpireBlocks(now);
+                // Safety net if every proxy is somehow blocked.
+                UnblockAllUnlocked();
+                available = _proxies;
 
-                var available = new List<int>(max - min + 1);
-                for (var port = min; port <= max; port++)
-                {
-                    if (!_ports.TryGetValue(port, out var state) || IsAvailable(state, now))
-                        available.Add(port);
-                }
-
-                if (available.Count == 0)
-                {
-                    // Safety net if every port is somehow blocked.
-                    UnblockAllUnlocked();
-                    for (var port = min; port <= max; port++)
-                        available.Add(port);
-
-                    _logger.LogWarning(
-                        "No ISP proxy ports available; unblocked all ports in {Min}-{Max}",
-                        min, max);
-                }
-
-                return available[Random.Shared.Next(available.Count)];
+                _logger.LogWarning("No ISP proxies available; unblocked all {Count} proxies", _proxies.Count);
             }
+
+            return available[Random.Shared.Next(available.Count)];
         }
 
-        private PortState GetOrCreate(int port)
+        private ProxyState GetOrCreate(string key)
         {
-            if (!_ports.TryGetValue(port, out var state))
+            if (!_states.TryGetValue(key, out var state))
             {
-                state = new PortState();
-                _ports[port] = state;
+                state = new ProxyState();
+                _states[key] = state;
             }
 
             return state;
         }
 
-        private int CountUnblocked(DateTimeOffset now)
-        {
-            var min = _options.PortMin > 0 ? _options.PortMin : 8001;
-            var max = _options.PortMax >= min ? _options.PortMax : min;
-            var count = 0;
-            for (var port = min; port <= max; port++)
-            {
-                if (!_ports.TryGetValue(port, out var state) || IsAvailable(state, now))
-                    count++;
-            }
-
-            return count;
-        }
-
         private void ExpireBlocks(DateTimeOffset now)
         {
-            foreach (var state in _ports.Values)
+            foreach (var state in _states.Values)
             {
                 if (state.BlockedUntil is { } until && until <= now)
-                {
-                    state.BlockedUntil = null;
-                    state.ConsecutiveFailures = 0;
-                }
+                    state.Reset();
             }
         }
 
         private void UnblockAllUnlocked()
         {
-            foreach (var state in _ports.Values)
-            {
-                state.BlockedUntil = null;
-                state.ConsecutiveFailures = 0;
-            }
+            foreach (var state in _states.Values)
+                state.Reset();
         }
 
         /// <summary>
-        /// Frees ceil(n/2) of currently blocked ports (excluding <paramref name="excludePort"/>),
+        /// Frees ceil(n/2) of currently blocked proxies (excluding <paramref name="excludeKey"/>),
         /// preferring those whose block expires soonest. Even n → n/2; odd n → (n+1)/2.
         /// </summary>
-        private int UnblockShortestHalfUnlocked(DateTimeOffset now, int excludePort)
+        private int UnblockShortestHalfUnlocked(DateTimeOffset now, string excludeKey)
         {
-            var min = _options.PortMin > 0 ? _options.PortMin : 8001;
-            var max = _options.PortMax >= min ? _options.PortMax : min;
-
-            var blocked = new List<(int Port, DateTimeOffset Until)>();
-            for (var port = min; port <= max; port++)
-            {
-                if (port == excludePort)
-                    continue;
-
-                if (_ports.TryGetValue(port, out var state)
-                    && state.BlockedUntil is { } until
-                    && until > now)
-                {
-                    blocked.Add((port, until));
-                }
-            }
+            var blocked = _proxies
+                .Where(p => p.Key != excludeKey && !IsAvailable(p.Key, now))
+                .Select(p => (State: _states[p.Key], Port: p.Port))
+                .ToList();
 
             if (blocked.Count == 0)
                 return 0;
@@ -329,21 +296,21 @@ namespace Affiliate.Services
             // Integer half that rounds up for odd counts: 1→1, 2→1, 3→2, 4→2, 5→3.
             var freeCount = (blocked.Count + 1) / 2;
 
-            foreach (var (port, _) in blocked
-                         .OrderBy(b => b.Until)
+            foreach (var (state, _) in blocked
+                         .OrderBy(b => b.State.BlockedUntil)
                          .ThenBy(b => b.Port)
                          .Take(freeCount))
             {
-                var state = _ports[port];
-                state.BlockedUntil = null;
-                state.ConsecutiveFailures = 0;
+                state.Reset();
             }
 
             return freeCount;
         }
 
-        private static bool IsAvailable(PortState state, DateTimeOffset now) =>
-            state.BlockedUntil is null || state.BlockedUntil <= now;
+        private bool IsAvailable(string key, DateTimeOffset now) =>
+            !_states.TryGetValue(key, out var state)
+            || state.BlockedUntil is null
+            || state.BlockedUntil <= now;
 
         public HttpClient CreateClient(IspProxyEndpoint endpoint)
         {
@@ -365,7 +332,8 @@ namespace Affiliate.Services
 
             if (endpoint.UseProxy && !string.IsNullOrWhiteSpace(endpoint.Host))
             {
-                var webProxy = new WebProxy(endpoint.Host, endpoint.Port);
+                // Webshare datacenter proxies serve SOCKS5 on the same port as HTTP.
+                var webProxy = new WebProxy($"socks5://{endpoint.Host}:{endpoint.Port}");
                 if (!string.IsNullOrWhiteSpace(endpoint.Username))
                 {
                     webProxy.Credentials = new NetworkCredential(
@@ -384,10 +352,16 @@ namespace Affiliate.Services
             return client;
         }
 
-        private sealed class PortState
+        private sealed class ProxyState
         {
             public int ConsecutiveFailures;
             public DateTimeOffset? BlockedUntil;
+
+            public void Reset()
+            {
+                ConsecutiveFailures = 0;
+                BlockedUntil = null;
+            }
         }
     }
 }

@@ -32,9 +32,7 @@ namespace Affiliate.Controllers
             return View(new IspProxyPortsIndexViewModel
             {
                 Enabled = _options.Enabled,
-                Host = _options.Host,
-                PortMin = _options.PortMin,
-                PortMax = _options.PortMax,
+                ProxyCount = ports.Count,
                 ConsecutiveFailuresBeforeBlock = _options.ConsecutiveFailuresBeforeBlock,
                 BlockDurationSeconds = _options.BlockDurationSeconds,
                 BlockedCount = blocked,

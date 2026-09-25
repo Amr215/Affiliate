@@ -36,16 +36,8 @@
     <div class="col-sm-6 col-lg-3">
         <div class="card h-100">
             <div class="card-body">
-                <div class="text-muted small mb-1">المضيف</div>
-                <div class="fw-bold ltr">@(string.IsNullOrWhiteSpace(Model.Host) ? "—" : Model.Host)</div>
-            </div>
-        </div>
-    </div>
-    <div class="col-sm-6 col-lg-3">
-        <div class="card h-100">
-            <div class="card-body">
-                <div class="text-muted small mb-1">نطاق المنافذ</div>
-                <div class="fw-bold ltr">@Model.PortMin – @Model.PortMax</div>
+                <div class="text-muted small mb-1">عدد البروكسيات</div>
+                <div class="fw-bold ltr">@Model.ProxyCount</div>
             </div>
         </div>
     </div>
@@ -68,7 +60,7 @@
         <table class="table table-hover mb-0 align-middle">
             <thead>
                 <tr>
-                    <th class="ltr">المنفذ</th>
+                    <th class="ltr">البروكسي</th>
                     <th>الحالة</th>
                     <th>إخفاقات متتالية</th>
                     <th>متبقي من الحظر</th>
@@ -79,7 +71,7 @@
             @if (Model.Ports.Count == 0)
             {
                 <tr>
-                    <td colspan="5" class="text-center text-muted py-4">لا توجد منافذ مُعدّة</td>
+                    <td colspan="5" class="text-center text-muted py-4">لا توجد بروكسيات مُعدّة</td>
                 </tr>
             }
             else
@@ -87,7 +79,7 @@
                 foreach (var port in Model.Ports)
                 {
                     <tr class="@(port.IsBlocked ? "table-danger" : null)">
-                        <td class="fw-semibold ltr">@port.Port</td>
+                        <td class="fw-semibold ltr">@($"{port.Host}:{port.Port}")</td>
                         <td>
                             @if (port.IsBlocked)
                             {
