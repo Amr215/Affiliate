@@ -27,7 +27,7 @@ namespace Affiliate.Controllers
         public IActionResult Index()
         {
             var ports = _ispProxy.GetPortStatuses();
-            var blocked = ports.Count(p => p.IsBlocked);
+            var blocked = ports.Count(p => p.Amazon.IsBlocked);
 
             return View(new IspProxyPortsIndexViewModel
             {
@@ -38,6 +38,23 @@ namespace Affiliate.Controllers
                 BlockedCount = blocked,
                 AvailableCount = ports.Count - blocked,
                 Ports = ports
+            });
+        }
+
+        /// <summary>Proxies Google Translate rejected too often; they stay off that route until the block expires.</summary>
+        public IActionResult GoogleBlocked()
+        {
+            var ports = _ispProxy.GetPortStatuses();
+
+            return View(new IspProxyGoogleBlockedViewModel
+            {
+                ProxyCount = ports.Count,
+                TranslateFailuresBeforeBlock = _options.TranslateFailuresBeforeBlock,
+                TranslateBlockDurationSeconds = _options.TranslateBlockDurationSeconds,
+                Ports = ports
+                    .Where(p => p.Translate.IsBlocked)
+                    .OrderByDescending(p => p.Translate.BlockedUntilUtc)
+                    .ToList()
             });
         }
 

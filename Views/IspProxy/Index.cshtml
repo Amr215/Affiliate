@@ -15,6 +15,9 @@
         <a class="btn btn-outline-primary" asp-action="Statistics">
             <i class="bi bi-bar-chart"></i> إحصائيات المنافذ
         </a>
+        <a class="btn btn-outline-danger" asp-action="GoogleBlocked">
+            <i class="bi bi-translate"></i> محظور من جوجل
+        </a>
         <a class="btn btn-outline-secondary" asp-action="Index">
             <i class="bi bi-arrow-clockwise"></i> تحديث
         </a>
@@ -78,10 +81,10 @@
             {
                 foreach (var port in Model.Ports)
                 {
-                    <tr class="@(port.IsBlocked ? "table-danger" : null)">
+                    <tr class="@(port.Amazon.IsBlocked ? "table-danger" : null)">
                         <td class="fw-semibold ltr">@($"{port.Host}:{port.Port}")</td>
                         <td>
-                            @if (port.IsBlocked)
+                            @if (port.Amazon.IsBlocked)
                             {
                                 <span class="badge text-bg-danger"><i class="bi bi-slash-circle"></i> محظور</span>
                             }
@@ -90,9 +93,9 @@
                                 <span class="badge text-bg-success"><i class="bi bi-check-circle"></i> متاح</span>
                             }
                         </td>
-                        <td class="ltr">@port.ConsecutiveFailures</td>
+                        <td class="ltr">@port.Amazon.ConsecutiveFailures</td>
                         <td class="ltr">
-                            @if (port.IsBlocked && port.RemainingBlockSeconds is int secs)
+                            @if (port.Amazon.RemainingBlockSeconds is int secs)
                             {
                                 <span>@secs ث</span>
                             }
@@ -102,7 +105,7 @@
                             }
                         </td>
                         <td class="ltr small">
-                            @(port.BlockedUntilUtc?.ToString("yyyy-MM-dd HH:mm:ss") ?? "—")
+                            @(port.Amazon.BlockedUntilUtc?.ToString("yyyy-MM-dd HH:mm:ss") ?? "—")
                         </td>
                     </tr>
                 }

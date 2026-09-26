@@ -1,0 +1,62 @@
+@model IspProxyGoogleBlockedViewModel
+@{
+    ViewData["Title"] = "بروكسيات محظورة من جوجل";
+}
+
+<div class="page-toolbar">
+    <div>
+        <h1 class="h2">بروكسيات محظورة من جوجل ترانسليت</h1>
+        <p class="text-muted mb-0">
+            <span class="stat-pill"><i class="bi bi-slash-circle"></i> @Model.Ports.Count محظور من @Model.ProxyCount</span>
+            <span class="stat-pill">
+                <i class="bi bi-translate"></i>
+                @Model.TranslateFailuresBeforeBlock فشل → @(Model.TranslateBlockDurationSeconds / 60) د
+            </span>
+        </p>
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+        <a class="btn btn-outline-primary" asp-action="Index">
+            <i class="bi bi-hdd-network"></i> منافذ البروكسي
+        </a>
+        <a class="btn btn-outline-secondary" asp-action="GoogleBlocked">
+            <i class="bi bi-arrow-clockwise"></i> تحديث
+        </a>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-translate"></i> مسار جوجل ترانسليت</span>
+        <span class="text-muted small">يُحدَّث عند إعادة تحميل الصفحة</span>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-hover mb-0 align-middle">
+            <thead>
+                <tr>
+                    <th class="ltr">البروكسي</th>
+                    <th>متبقي من الحظر</th>
+                    <th class="ltr">ينتهي الحظر (UTC)</th>
+                </tr>
+            </thead>
+            <tbody>
+            @if (Model.Ports.Count == 0)
+            {
+                <tr>
+                    <td colspan="3" class="text-center text-muted py-4">لا توجد بروكسيات محظورة من جوجل</td>
+                </tr>
+            }
+            else
+            {
+                foreach (var port in Model.Ports)
+                {
+                    <tr class="table-danger">
+                        <td class="fw-semibold ltr">@($"{port.Host}:{port.Port}")</td>
+                        <td class="ltr">@(TimeSpan.FromSeconds(port.Translate.RemainingBlockSeconds ?? 0).ToString(@"hh\:mm\:ss"))</td>
+                        <td class="ltr small">@(port.Translate.BlockedUntilUtc?.ToString("yyyy-MM-dd HH:mm:ss") ?? "—")</td>
+                    </tr>
+                }
+            }
+            </tbody>
+        </table>
+    </div>
+</div>

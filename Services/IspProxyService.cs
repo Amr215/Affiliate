@@ -22,13 +22,19 @@ namespace Affiliate.Services
                 : "direct (no proxy)";
     }
 
-    public sealed record IspProxyPortStatus(
-        string? Host,
-        int Port,
+    /// <summary>Block / failure state of one proxy on one route.</summary>
+    public sealed record ProxyRouteStatus(
         bool IsBlocked,
         int ConsecutiveFailures,
         DateTimeOffset? BlockedUntilUtc,
         int? RemainingBlockSeconds);
+
+    /// <summary>A proxy is blocked per route: straight to Amazon, and through Google Translate.</summary>
+    public sealed record IspProxyPortStatus(
+        string? Host,
+        int Port,
+        ProxyRouteStatus Amazon,
+        ProxyRouteStatus Translate);
 
     public interface IIspProxyService
     {
@@ -36,26 +42,25 @@ namespace Affiliate.Services
         /// Configured proxy endpoint (or direct when disabled). Temporarily blocked proxies are skipped
         /// unless <paramref name="allowBlocked"/> is set, in which case they can still be handed out
         /// with <see cref="IspProxyEndpoint.RouteThroughTranslate"/> so the caller reaches Amazon
-        /// through Google Translate rather than leaving the IP idle.
+        /// through Google Translate rather than leaving the IP idle — unless Google is blocking them too.
         /// </summary>
         IspProxyEndpoint GetEndpoint(bool allowBlocked = false);
 
-        /// <summary>Snapshot of every configured proxy and its block / failure state.</summary>
+        /// <summary>Snapshot of every configured proxy and its per-route block / failure state.</summary>
         IReadOnlyList<IspProxyPortStatus> GetPortStatuses();
 
         /// <summary>
-        /// Resets consecutive failure count for the proxy used in a successful operation.
-        /// Successes on the translate route are ignored: they say nothing about whether Amazon
-        /// still blocks the IP directly, so neither the counter nor the block window is touched.
+        /// Resets the consecutive failure count for the route the successful operation used. A success
+        /// through translate only clears the translate counter: it says nothing about whether Amazon
+        /// still blocks the IP directly.
         /// </summary>
         void ReportSuccess(IspProxyEndpoint endpoint);
 
         /// <summary>
-        /// Records a failed operation. After enough consecutive failures the proxy is blocked briefly;
-        /// if it was the last unblocked proxy, that proxy is still blocked and half of the other
-        /// blocked proxies (shortest remaining block time) are freed instead of unblocking everything.
-        /// Failures on the translate route are ignored for the same reason successes are: they
-        /// describe Google's mood, not whether Amazon still blocks the IP.
+        /// Records a failed operation against the route it used. After enough consecutive failures the
+        /// proxy is blocked on that route: briefly for Amazon, far longer for Google Translate.
+        /// For Amazon, if it was the last unblocked proxy, that proxy is still blocked and half of the
+        /// other blocked proxies (shortest remaining block time) are freed instead of unblocking everything.
         /// </summary>
         void ReportFailure(IspProxyEndpoint endpoint);
 
@@ -115,22 +120,25 @@ namespace Affiliate.Services
                 foreach (var proxy in _proxies)
                 {
                     _states.TryGetValue(proxy.Key, out var state);
-                    var isBlocked = state?.BlockedUntil is { } until && until > now;
-                    int? remaining = isBlocked
-                        ? Math.Max(0, (int)Math.Ceiling((state!.BlockedUntil!.Value - now).TotalSeconds))
-                        : null;
-
                     list.Add(new IspProxyPortStatus(
                         proxy.Host,
                         proxy.Port,
-                        isBlocked,
-                        state?.ConsecutiveFailures ?? 0,
-                        isBlocked ? state!.BlockedUntil : null,
-                        remaining));
+                        Describe(state?.Amazon, now),
+                        Describe(state?.Translate, now)));
                 }
 
                 return list;
             }
+        }
+
+        private static ProxyRouteStatus Describe(RouteState? route, DateTimeOffset now)
+        {
+            if (route is null || !route.IsBlocked(now))
+                return new ProxyRouteStatus(false, route?.ConsecutiveFailures ?? 0, null, null);
+
+            var remaining = (int)Math.Ceiling((route.BlockedUntil!.Value - now).TotalSeconds);
+            return new ProxyRouteStatus(
+                true, route.ConsecutiveFailures, route.BlockedUntil, Math.Max(0, remaining));
         }
 
         public void ReportSuccess(IspProxyEndpoint endpoint)
@@ -138,25 +146,17 @@ namespace Affiliate.Services
             if (!endpoint.UseProxy)
                 return;
 
-            if (endpoint.RouteThroughTranslate)
-            {
-                _logger.LogDebug(
-                    "ISP proxy {Port} succeeded through Google Translate; failure counter left unchanged",
-                    endpoint.Port);
-                return;
-            }
-
             lock (_gate)
             {
-                var state = GetOrCreate(endpoint.Key);
-                if (state.ConsecutiveFailures > 0)
+                var route = RouteFor(endpoint);
+                if (route.ConsecutiveFailures > 0)
                 {
                     _logger.LogDebug(
-                        "ISP proxy {Port} succeeded; clearing {Failures} consecutive failure(s)",
-                        endpoint.Port, state.ConsecutiveFailures);
+                        "ISP proxy {Port} succeeded{Via}; clearing {Failures} consecutive failure(s)",
+                        endpoint.Port, ViaTranslate(endpoint), route.ConsecutiveFailures);
                 }
 
-                state.ConsecutiveFailures = 0;
+                route.ConsecutiveFailures = 0;
             }
         }
 
@@ -167,9 +167,7 @@ namespace Affiliate.Services
 
             if (endpoint.RouteThroughTranslate)
             {
-                _logger.LogDebug(
-                    "ISP proxy {Port} failed through Google Translate; proxy state left unchanged",
-                    endpoint.Port);
+                ReportTranslateFailure(endpoint);
                 return;
             }
 
@@ -181,20 +179,20 @@ namespace Affiliate.Services
                 var now = DateTimeOffset.UtcNow;
                 ExpireBlocks(now);
 
-                var state = GetOrCreate(endpoint.Key);
-                state.ConsecutiveFailures++;
+                var route = GetOrCreate(endpoint.Key).Amazon;
+                route.ConsecutiveFailures++;
 
                 _logger.LogWarning(
                     "ISP proxy {Port} failed ({Failures}/{Threshold} consecutive)",
-                    endpoint.Port, state.ConsecutiveFailures, threshold);
+                    endpoint.Port, route.ConsecutiveFailures, threshold);
 
-                if (state.ConsecutiveFailures < threshold)
+                if (route.ConsecutiveFailures < threshold)
                     return;
 
                 var unblockedCount = _proxies.Count(p => IsAvailable(p.Key, now));
                 // This proxy is still counted as unblocked until we block it.
-                state.BlockedUntil = now.AddSeconds(blockSeconds);
-                state.ConsecutiveFailures = 0;
+                route.BlockedUntil = now.AddSeconds(blockSeconds);
+                route.ConsecutiveFailures = 0;
 
                 if (unblockedCount <= 1)
                 {
@@ -208,6 +206,40 @@ namespace Affiliate.Services
                 _logger.LogWarning(
                     "ISP proxy {Port} blocked for {Seconds}s after {Threshold} consecutive failures ({Remaining} still available)",
                     endpoint.Port, blockSeconds, threshold, unblockedCount - 1);
+            }
+        }
+
+        /// <summary>
+        /// Google blocks are tracked on their own: they say nothing about Amazon, and they last long
+        /// enough that the proxy simply stops being offered for the translate route meanwhile.
+        /// </summary>
+        private void ReportTranslateFailure(IspProxyEndpoint endpoint)
+        {
+            var threshold = Math.Max(1, _options.TranslateFailuresBeforeBlock);
+            var blockSeconds = Math.Max(1, _options.TranslateBlockDurationSeconds);
+
+            lock (_gate)
+            {
+                var now = DateTimeOffset.UtcNow;
+                ExpireBlocks(now);
+
+                var route = GetOrCreate(endpoint.Key).Translate;
+                route.ConsecutiveFailures++;
+
+                if (route.ConsecutiveFailures < threshold)
+                {
+                    _logger.LogWarning(
+                        "ISP proxy {Port} failed through Google Translate ({Failures}/{Threshold} consecutive)",
+                        endpoint.Port, route.ConsecutiveFailures, threshold);
+                    return;
+                }
+
+                route.BlockedUntil = now.AddSeconds(blockSeconds);
+                route.ConsecutiveFailures = 0;
+
+                _logger.LogWarning(
+                    "ISP proxy {Port} blocked from Google Translate for {Seconds}s after {Threshold} consecutive failures",
+                    endpoint.Port, blockSeconds, threshold);
             }
         }
 
@@ -251,11 +283,19 @@ namespace Affiliate.Services
 
         /// <summary>
         /// Picks from all proxies, telling the caller whether the proxy is currently blocked
-        /// so it can be used through the translate route instead of sitting idle.
+        /// so it can be used through the translate route instead of sitting idle. Proxies that
+        /// Amazon and Google both block have nowhere left to go, so they are skipped.
         /// </summary>
         private IspProxyEndpoint PickAny(DateTimeOffset now)
         {
-            var proxy = _proxies[Random.Shared.Next(_proxies.Count)];
+            var usable = _proxies
+                .Where(p => IsAvailable(p.Key, now) || IsTranslateAvailable(p.Key, now))
+                .ToList();
+
+            if (usable.Count == 0)
+                return PickAvailable(now);
+
+            var proxy = usable[Random.Shared.Next(usable.Count)];
             return proxy with { RouteThroughTranslate = !IsAvailable(proxy.Key, now) };
         }
 
@@ -290,15 +330,18 @@ namespace Affiliate.Services
         {
             foreach (var state in _states.Values)
             {
-                if (state.BlockedUntil is { } until && until <= now)
-                    state.Reset();
+                foreach (var route in state.Routes)
+                {
+                    if (route.BlockedUntil is { } until && until <= now)
+                        route.Reset();
+                }
             }
         }
 
         private void UnblockAllUnlocked()
         {
             foreach (var state in _states.Values)
-                state.Reset();
+                state.Amazon.Reset();
         }
 
         /// <summary>
@@ -309,7 +352,7 @@ namespace Affiliate.Services
         {
             var blocked = _proxies
                 .Where(p => p.Key != excludeKey && !IsAvailable(p.Key, now))
-                .Select(p => (State: _states[p.Key], Port: p.Port))
+                .Select(p => (Route: _states[p.Key].Amazon, Port: p.Port))
                 .ToList();
 
             if (blocked.Count == 0)
@@ -318,21 +361,32 @@ namespace Affiliate.Services
             // Integer half that rounds up for odd counts: 1→1, 2→1, 3→2, 4→2, 5→3.
             var freeCount = (blocked.Count + 1) / 2;
 
-            foreach (var (state, _) in blocked
-                         .OrderBy(b => b.State.BlockedUntil)
+            foreach (var (route, _) in blocked
+                         .OrderBy(b => b.Route.BlockedUntil)
                          .ThenBy(b => b.Port)
                          .Take(freeCount))
             {
-                state.Reset();
+                route.Reset();
             }
 
             return freeCount;
         }
 
         private bool IsAvailable(string key, DateTimeOffset now) =>
-            !_states.TryGetValue(key, out var state)
-            || state.BlockedUntil is null
-            || state.BlockedUntil <= now;
+            !_states.TryGetValue(key, out var state) || !state.Amazon.IsBlocked(now);
+
+        private bool IsTranslateAvailable(string key, DateTimeOffset now) =>
+            !_states.TryGetValue(key, out var state) || !state.Translate.IsBlocked(now);
+
+        /// <summary>Route state the endpoint's last call belongs to, created on demand.</summary>
+        private RouteState RouteFor(IspProxyEndpoint endpoint)
+        {
+            var state = GetOrCreate(endpoint.Key);
+            return endpoint.RouteThroughTranslate ? state.Translate : state.Amazon;
+        }
+
+        private static string ViaTranslate(IspProxyEndpoint endpoint) =>
+            endpoint.RouteThroughTranslate ? " through Google Translate" : string.Empty;
 
         public HttpClient CreateClient(IspProxyEndpoint endpoint)
         {
@@ -376,8 +430,18 @@ namespace Affiliate.Services
 
         private sealed class ProxyState
         {
+            public readonly RouteState Amazon = new();
+            public readonly RouteState Translate = new();
+
+            public IEnumerable<RouteState> Routes => [Amazon, Translate];
+        }
+
+        private sealed class RouteState
+        {
             public int ConsecutiveFailures;
             public DateTimeOffset? BlockedUntil;
+
+            public bool IsBlocked(DateTimeOffset now) => BlockedUntil is { } until && until > now;
 
             public void Reset()
             {
