@@ -75,11 +75,14 @@ namespace Affiliate.Services
         private readonly List<IspProxyEndpoint> _proxies;
         private readonly Dictionary<string, ProxyState> _states = new();
 
-        public IspProxyService(IOptions<IspProxyOptions> options, ILogger<IspProxyService> logger)
+        public IspProxyService(
+            IOptions<IspProxyOptions> options,
+            IWebHostEnvironment env,
+            ILogger<IspProxyService> logger)
         {
             _options = options.Value;
             _logger = logger;
-            _proxies = ParseProxies(_options.Proxies);
+            _proxies = ParseProxies(ReadProxyLines(env));
         }
 
         public int TransportRetriesPerIp => Math.Max(0, _options.TransportRetriesPerIp);
@@ -208,12 +211,31 @@ namespace Affiliate.Services
             }
         }
 
+        private IEnumerable<string> ReadProxyLines(IWebHostEnvironment env)
+        {
+            if (string.IsNullOrWhiteSpace(_options.ProxiesFile))
+                return [];
+
+            var path = Path.Combine(env.WebRootPath, _options.ProxiesFile);
+            if (!File.Exists(path))
+            {
+                _logger.LogWarning("ISP proxy file {Path} not found; no proxies loaded", path);
+                return [];
+            }
+
+            return File.ReadAllLines(path);
+        }
+
         /// <summary>Parses Webshare <c>host:port:username:password</c> entries; malformed ones are skipped.</summary>
         private List<IspProxyEndpoint> ParseProxies(IEnumerable<string> entries)
         {
             var proxies = new List<IspProxyEndpoint>();
-            foreach (var entry in entries)
+            foreach (var raw in entries)
             {
+                var entry = raw.Trim();
+                if (entry.Length == 0)
+                    continue;
+
                 var parts = entry.Split(':');
                 if (parts.Length != 4 || !int.TryParse(parts[1], out var port))
                 {

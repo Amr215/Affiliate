@@ -70,6 +70,8 @@ namespace Affiliate.Controllers
 
             ports = ports
                 .OrderBy(r => r.Port == null)
+                .ThenBy(r => r.SuccessRate)
+                .ThenByDescending(r => r.FailedCount)
                 .ThenBy(r => r.Port)
                 .ToList();
 

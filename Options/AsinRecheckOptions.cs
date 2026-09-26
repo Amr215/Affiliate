@@ -53,10 +53,11 @@ namespace Affiliate.Options
         public string Domain { get; set; } = "eg";
 
         /// <summary>
-        /// Seller filter for ASIN batch search (<c>rh=p_6:...</c>). Amazon.eg retail is
-        /// <c>A1ZVRGNO5AYLOV</c>. Empty skips the filter.
+        /// Seller filter for ASIN batch search (<c>rh=p_6:...</c>). Several sellers may be
+        /// separated by <c>|</c> or <c>,</c>. Amazon.eg retail is <c>A1ZVRGNO5AYLOV</c>,
+        /// Amazon Now is <c>A31TYDXOWA7X1E</c>. Empty skips the filter.
         /// </summary>
-        public string MerchantId { get; set; } = "A1ZVRGNO5AYLOV";
+        public string MerchantId { get; set; } = "A1ZVRGNO5AYLOV|A31TYDXOWA7X1E";
 
         /// <summary>Google Translate route used by proxy ports that Amazon is currently blocking.</summary>
         public AsinRecheckTranslateOptions Translate { get; set; } = new();

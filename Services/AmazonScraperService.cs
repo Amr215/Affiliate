@@ -32,6 +32,9 @@ namespace Affiliate.Services
 
         private const int MaxPagesPerSearch = 50;
 
+        /// <summary>Tries per URL-scrape page; every retry switches to another proxy.</summary>
+        private const int MaxPageAttempts = 30;
+
         private readonly AffiliateDbContext _db;
         private readonly IScraperRunCoordinator _runCoordinator;
         private readonly ITelegramNotifier _telegram;
@@ -309,6 +312,7 @@ namespace Affiliate.Services
         /// <summary>
         /// Fetches pages starting at <see cref="ScraperUrl.StartPage"/> up to the last visible page.
         /// Saves products (and sends drop alerts) after every successful page request.
+        /// A failed page is retried up to <see cref="MaxPageAttempts"/> times, each try on another proxy.
         /// </summary>
         private async Task<(int Found, int Saved)> FetchAllPagesAsync(ScraperUrl scraperUrl, CancellationToken ct)
         {
@@ -338,59 +342,72 @@ namespace Affiliate.Services
                     if (page > firstPage)
                         await Task.Delay(AmazonBrowserProfile.NextPageDelayMs(), ct);
 
-                    try
+                    for (var attempt = 1; attempt <= MaxPageAttempts; attempt++)
                     {
-                        if (!warmedHost)
+                        try
                         {
-                            await WarmupAmazonHomeAsync(client, scraperUrl, endpoint, ct);
-                            warmedHost = true;
+                            if (!warmedHost)
+                            {
+                                await WarmupAmazonHomeAsync(client, scraperUrl, endpoint, ct);
+                                warmedHost = true;
+                            }
+
+                            var (result, pageUrl) = await FetchSearchPageAsync(
+                                client, scraperUrl, page, referer, endpoint, proxyPort, ct);
+
+                            _ispProxy.ReportSuccess(endpoint);
+
+                            found += result.Organic.Count;
+                            lastPage = result.LastVisiblePage ?? lastPage;
+                            referer = pageUrl;
+
+                            if (result.Organic.Count > 0)
+                            {
+                                var pageSaved = await SaveProductsAsync(
+                                    result.Organic, scraperUrl.Domain, ct, scraperUrl.Id);
+                                saved += pageSaved;
+                            }
+
+                            _logger.LogInformation(
+                                "URL scrape {Id}: page {Page}/{Last} via {Proxy} — {Count} organic, saved={Saved}",
+                                scraperUrl.Id, page, lastPage, endpoint.Describe(), result.Organic.Count, saved);
+                            break;
                         }
-
-                        var (result, pageUrl) = await FetchSearchPageAsync(
-                            client, scraperUrl, page, referer, endpoint, proxyPort, ct);
-
-                        _ispProxy.ReportSuccess(endpoint);
-
-                        found += result.Organic.Count;
-                        lastPage = result.LastVisiblePage ?? lastPage;
-                        referer = pageUrl;
-
-                        if (result.Organic.Count > 0)
+                        catch (Exception ex) when (ex is not OperationCanceledException)
                         {
-                            var pageSaved = await SaveProductsAsync(
-                                result.Organic, scraperUrl.Domain, ct, scraperUrl.Id);
-                            saved += pageSaved;
+                            var rejected = ex is AmazonFetchRejectedException;
+                            var reason = rejected ? ex.Message : DescribeTransport(ex);
+
+                            _ispProxy.ReportFailure(endpoint);
+                            // A rejection is already logged once in FetchSearchPageAsync — do not write a second row.
+                            if (!rejected)
+                                QueueLog(scraperUrl.Id, page, DateTime.UtcNow, 0, "TransportError",
+                                    $"{endpoint.Describe()} page={page}", Truncate(reason, 2000), proxyPort);
+
+                            if (attempt >= MaxPageAttempts)
+                            {
+                                if (found == 0)
+                                    throw;
+
+                                _logger.LogWarning(
+                                    "URL scrape {Id}: giving up page {Page} after {Attempts} attempts ({Reason}); keeping {Count} products already saved",
+                                    scraperUrl.Id, page, attempt, reason, found);
+                                return (found, saved);
+                            }
+
+                            client.Dispose();
+                            endpoint = _ispProxy.GetEndpoint();
+                            client = _ispProxy.CreateClient(endpoint);
+                            proxyPort = endpoint.UseProxy ? endpoint.Port : null;
+                            referer = null;
+                            warmedHost = false;
+
+                            _logger.LogWarning(
+                                "URL scrape {Id}: page {Page} failed ({Reason}); retrying via {Proxy} (attempt {Attempt}/{Max})",
+                                scraperUrl.Id, page, reason, endpoint.Describe(), attempt + 1, MaxPageAttempts);
+
+                            await Task.Delay(AmazonBrowserProfile.AfterIpSwitchDelayMs(), ct);
                         }
-
-                        _logger.LogInformation(
-                            "URL scrape {Id}: page {Page}/{Last} via {Proxy} — {Count} organic, saved={Saved}",
-                            scraperUrl.Id, page, lastPage, endpoint.Describe(), result.Organic.Count, saved);
-                    }
-                    catch (AmazonFetchRejectedException ex)
-                    {
-                        _ispProxy.ReportFailure(endpoint);
-                        // Already logged once in FetchSearchPageAsync — do not write a second OxylabsRequestLog row.
-                        if (found == 0)
-                            throw;
-
-                        _logger.LogWarning(
-                            "URL scrape {Id}: giving up page {Page} ({Reason}); keeping {Count} products already saved",
-                            scraperUrl.Id, page, ex.Message, found);
-                        return (found, saved);
-                    }
-                    catch (Exception ex) when (ex is not OperationCanceledException and not AmazonFetchRejectedException)
-                    {
-                        _ispProxy.ReportFailure(endpoint);
-                        QueueLog(scraperUrl.Id, page, DateTime.UtcNow, 0, "TransportError",
-                            $"{endpoint.Describe()} page={page}", Truncate(DescribeTransport(ex), 2000), proxyPort);
-
-                        if (found == 0)
-                            throw;
-
-                        _logger.LogWarning(ex,
-                            "URL scrape {Id}: stopped at page {Page}; keeping {Count} products already saved",
-                            scraperUrl.Id, page, found);
-                        return (found, saved);
                     }
 
                     if (page >= lastPage)
@@ -1025,9 +1042,13 @@ namespace Affiliate.Services
         {
             var encoded = Uri.EscapeDataString(string.Join("|", asins));
             var d = domain.Trim();
-            var rh = string.IsNullOrWhiteSpace(merchantId)
+            // Amazon joins multiple sellers with an already-encoded pipe (%7C) inside the rh value,
+            // so after escaping the whole value it goes out as %257C.
+            var merchants = (merchantId ?? "")
+                .Split(new[] { '|', ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            var rh = merchants.Length == 0
                 ? ""
-                : $"&rh={Uri.EscapeDataString($"p_6:{merchantId.Trim()}")}";
+                : $"&rh={Uri.EscapeDataString($"p_6:{string.Join("%7C", merchants)}")}";
 
             var host = $"www.amazon.{d}";
             var language = translate is not null && !string.IsNullOrWhiteSpace(translate.AmazonLanguage)
