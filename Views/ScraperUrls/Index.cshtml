@@ -1,6 +1,7 @@
 @model IEnumerable<ScraperUrl>
 @{
     ViewData["Title"] = "روابط السكرابر";
+    var hasCategory = ViewData["HasCategory"] as bool?;
 }
 
 <div class="page-toolbar">
@@ -11,6 +12,13 @@
         </p>
     </div>
     <div class="d-flex flex-wrap gap-2">
+        <form asp-action="Index" method="get">
+            <select name="hasCategory" class="form-select arabic-text" aria-label="تصفية حسب التصنيف" onchange="this.form.submit()">
+                <option value="" selected="@(hasCategory is null)">كل الروابط</option>
+                <option value="true" selected="@(hasCategory == true)">لها تصنيف</option>
+                <option value="false" selected="@(hasCategory == false)">بدون تصنيف</option>
+            </select>
+        </form>
         <a asp-action="Create" class="btn btn-primary"><i class="bi bi-plus-lg"></i> إضافة رابط</a>
     </div>
 </div>
@@ -35,6 +43,16 @@
         <button type="button" class="btn btn-sm btn-outline-secondary" id="bulkDisable" disabled>
             <i class="bi bi-toggle-off"></i> تعطيل
         </button>
+        <select class="form-select form-select-sm w-auto arabic-text" id="bulkCategory" disabled aria-label="تعيين التصنيف">
+            <option value="">بدون تصنيف</option>
+            @foreach (var option in Html.GetEnumSelectList<ScraperCategory>())
+            {
+                <option value="@option.Value">@option.Text</option>
+            }
+        </select>
+        <button type="button" class="btn btn-sm btn-outline-primary" id="bulkAssignCategory" disabled>
+            <i class="bi bi-tag"></i> تعيين التصنيف
+        </button>
     </div>
 }
 
@@ -50,6 +68,7 @@
                         }
                     </th>
                     <th>الاسم</th>
+                    <th>التصنيف</th>
                     <th>النطاق</th>
                     <th>الفاصل</th>
                     <th>مفعّل</th>
@@ -66,6 +85,16 @@
                     </td>
                     <td>
                         <a asp-action="Details" asp-route-id="@item.Id" class="fw-semibold arabic-text">@item.Name</a>
+                    </td>
+                    <td>
+                        @if (item.Category is { } category)
+                        {
+                            <span class="badge text-bg-light arabic-text">@category.DisplayName()</span>
+                        }
+                        else
+                        {
+                            <span class="badge text-bg-warning">بدون تصنيف</span>
+                        }
                     </td>
                     <td class="ltr">@item.Domain</td>
                     <td class="num">@item.IntervalSeconds ث</td>
@@ -104,7 +133,14 @@
     </div>
 </div>
 
-@if (!Model.Any())
+@if (!Model.Any() && hasCategory.HasValue)
+{
+    <div class="empty-state mt-3">
+        <p class="mb-2">لا توجد روابط مطابقة للتصفية.</p>
+        <a asp-action="Index" class="btn btn-outline-secondary">عرض كل الروابط</a>
+    </div>
+}
+else if (!Model.Any())
 {
     <div class="empty-state mt-3">
         <p class="mb-2">لا توجد روابط بعد.</p>
@@ -121,6 +157,8 @@
     const countEl = document.getElementById('bulkSelectedCount');
     const enableBtn = document.getElementById('bulkEnable');
     const disableBtn = document.getElementById('bulkDisable');
+    const categorySelect = document.getElementById('bulkCategory');
+    const categoryBtn = document.getElementById('bulkAssignCategory');
 
     function selectedIds() {
         return boxes().filter(b => b.checked).map(b => Number(b.value));
@@ -132,6 +170,8 @@
         if (countEl) countEl.textContent = n === 0 ? 'لم يتم تحديد روابط' : `تم تحديد ${n}`;
         if (enableBtn) enableBtn.disabled = n === 0;
         if (disableBtn) disableBtn.disabled = n === 0;
+        if (categorySelect) categorySelect.disabled = n === 0;
+        if (categoryBtn) categoryBtn.disabled = n === 0;
         if (selectAll) {
             const all = boxes();
             selectAll.checked = all.length > 0 && all.every(b => b.checked);
@@ -147,16 +187,16 @@
         if (e.target.classList.contains('search-select')) refresh();
     });
 
-    async function bulk(isEnabled) {
+    async function bulk(url, payload) {
         const ids = selectedIds();
         if (!ids.length || !token) return;
-        const res = await fetch('@Url.Action("BulkUpdateEnabled")', {
+        const res = await fetch(url, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'RequestVerificationToken': token
             },
-            body: JSON.stringify({ ids, isEnabled })
+            body: JSON.stringify({ ids, ...payload })
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok || !data.success) {
@@ -166,8 +206,12 @@
         location.reload();
     }
 
-    enableBtn?.addEventListener('click', () => bulk(true));
-    disableBtn?.addEventListener('click', () => bulk(false));
+    const enabledUrl = '@Url.Action("BulkUpdateEnabled")';
+    enableBtn?.addEventListener('click', () => bulk(enabledUrl, { isEnabled: true }));
+    disableBtn?.addEventListener('click', () => bulk(enabledUrl, { isEnabled: false }));
+    categoryBtn?.addEventListener('click', () => bulk('@Url.Action("BulkAssignCategory")', {
+        category: categorySelect.value === '' ? null : Number(categorySelect.value)
+    }));
     refresh();
 })();
 </script>

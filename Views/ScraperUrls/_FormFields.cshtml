@@ -34,6 +34,14 @@
         <input asp-for="IntervalSeconds" class="form-control ltr" type="number" min="60" />
         <span asp-validation-for="IntervalSeconds" class="text-danger"></span>
     </div>
+    <div class="col-md-4">
+        <label asp-for="Category" class="form-label">التصنيف</label>
+        <select asp-for="Category" asp-items="Html.GetEnumSelectList<ScraperCategory>()" class="form-select arabic-text">
+            <option value="">بدون تصنيف</option>
+        </select>
+        <span asp-validation-for="Category" class="text-danger"></span>
+        <div class="form-text">يحدد مجموعة تيليجرام. بدون تصنيف لا تُرسل تنبيهات.</div>
+    </div>
     <div class="col-md-4 d-flex align-items-end">
         <div class="form-check mb-2">
             <input asp-for="IsEnabled" class="form-check-input" />

@@ -1252,6 +1252,7 @@ namespace Affiliate.Services
                 if (alerts.Count > 0)
                 {
                     await AttachPriceHistoryAsync(alerts, ct);
+                    await AttachCategoriesAsync(alerts, ct);
                     if (await DispatchAlertsAsync(alerts, ct))
                         await SaveChangesCoreAsync(ct);
                 }
@@ -1262,6 +1263,27 @@ namespace Affiliate.Services
             finally
             {
                 _dbGate.Release();
+            }
+        }
+
+        /// <summary>
+        /// Copies the notification category from the URL scrape that owns each product.
+        /// Alerts left without a category are not published by the notifier.
+        /// </summary>
+        private async Task AttachCategoriesAsync(List<ProductDropAlert> alerts, CancellationToken ct)
+        {
+            var urlIds = alerts.Select(a => a.Product.ScraperUrlId).OfType<int>().Distinct().ToList();
+            if (urlIds.Count == 0)
+                return;
+
+            var categories = await _db.ScraperUrls.AsNoTracking()
+                .Where(s => urlIds.Contains(s.Id) && s.Category != null)
+                .ToDictionaryAsync(s => s.Id, s => s.Category, ct);
+
+            foreach (var alert in alerts)
+            {
+                if (alert.Product.ScraperUrlId is int urlId && categories.TryGetValue(urlId, out var category))
+                    alert.Category = category;
             }
         }
 

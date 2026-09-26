@@ -28,7 +28,7 @@ namespace Affiliate.Options
         public int ConsecutiveFailuresBeforeBlock { get; set; } = 2;
 
         /// <summary>How long a blocked proxy stays unavailable (seconds).</summary>
-        public int BlockDurationSeconds { get; set; } = 80;
+        public int BlockDurationSeconds { get; set; } = 40;
 
         /// <summary>
         /// Consecutive failures on the Google Translate route before a proxy is barred from that route.
@@ -36,6 +36,6 @@ namespace Affiliate.Options
         public int TranslateFailuresBeforeBlock { get; set; } = 2;
 
         /// <summary>How long a proxy stays barred from the Google Translate route (seconds).</summary>
-        public int TranslateBlockDurationSeconds { get; set; } = 30 * 60;
+        public int TranslateBlockDurationSeconds { get; set; } = 40;
     }
 }

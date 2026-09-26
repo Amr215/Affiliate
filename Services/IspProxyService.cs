@@ -58,7 +58,7 @@ namespace Affiliate.Services
 
         /// <summary>
         /// Records a failed operation against the route it used. After enough consecutive failures the
-        /// proxy is blocked on that route: briefly for Amazon, far longer for Google Translate.
+        /// proxy is blocked on that route, each with its own configured duration.
         /// For Amazon, if it was the last unblocked proxy, that proxy is still blocked and half of the
         /// other blocked proxies (shortest remaining block time) are freed instead of unblocking everything.
         /// </summary>
@@ -210,8 +210,8 @@ namespace Affiliate.Services
         }
 
         /// <summary>
-        /// Google blocks are tracked on their own: they say nothing about Amazon, and they last long
-        /// enough that the proxy simply stops being offered for the translate route meanwhile.
+        /// Google blocks are tracked on their own: they say nothing about Amazon, and the proxy simply
+        /// stops being offered for the translate route while blocked.
         /// </summary>
         private void ReportTranslateFailure(IspProxyEndpoint endpoint)
         {

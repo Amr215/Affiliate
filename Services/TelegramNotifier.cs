@@ -40,6 +40,9 @@ namespace Affiliate.Services
         /// <summary>Percent drop of the current price versus the previous recorded price.</summary>
         public required decimal DropPercent { get; init; }
 
+        /// <summary>Category of the URL scrape that owns the product; null alerts are not published.</summary>
+        public ScraperCategory? Category { get; set; }
+
         /// <summary>Previous recorded price the drop is measured against.</summary>
         public decimal? BaselinePrice { get; init; }
 
@@ -95,53 +98,54 @@ namespace Affiliate.Services
                 return false;
             }
 
-            // Publish only to the matching drop-percentage tier group.
-            var tierChatId = ResolveTierChatId(alert.DropPercent);
-            if (string.IsNullOrWhiteSpace(tierChatId))
+            // Publish only to the group of the product's category; uncategorised URLs stay silent.
+            var categoryChatId = ResolveCategoryChatId(alert.Category);
+            if (categoryChatId is null)
             {
                 _logger.LogInformation(
-                    "No Telegram chat configured for drop tier — alert not sent: {Asin} {Percent}%",
-                    alert.Product.Asin, alert.DropPercent);
+                    "No Telegram chat for category {Category} — alert not sent: {Asin} {Percent}%",
+                    alert.Category, alert.Product.Asin, alert.DropPercent);
                 return false;
             }
 
-            var chatId = tierChatId.Trim();
             var productUrl = BuildProductUrl(alert.Product.Asin);
             var replyMarkup = BuildAlertReplyMarkupJson(
                 alert.Product.Name,
                 productUrl,
                 alert.Product.Asin,
                 alert.CurrentPrice);
-            bool sent;
+            var text = BuildDropHtml(alert);
 
-            // Mega deals need a colored card image — Telegram text messages cannot set a background.
-            if (alert.DropPercent > MegaDealDropPercent)
-            {
-                var productImageBytes = await TryDownloadProductImageAsync(alert.Product.ImageUrl, cancellationToken);
-                var png = MegaDealCardImage.Render(alert, productImageBytes);
-                var caption = BuildMegaDealCaption(alert);
-                sent = await SendPhotoAsync(
-                    chatId,
-                    png,
-                    caption,
-                    replyMarkup,
-                    replyToMessageId: null,
-                    photoFileName: "mega-deal.png",
-                    cancellationToken: cancellationToken);
-            }
-            else
-            {
-                sent = await SendMessageAsync(chatId, BuildDropHtml(alert), replyMarkup, replyToMessageId: null, cancellationToken);
-            }
+            // Mega deals used a colored card image; kept commented out until the card design is finalised.
+            // if (alert.DropPercent > MegaDealDropPercent)
+            // {
+            //     var productImageBytes = await TryDownloadProductImageAsync(alert.Product.ImageUrl, cancellationToken);
+            //     var png = MegaDealCardImage.Render(alert, productImageBytes);
+            //     var caption = BuildMegaDealCaption(alert);
+            //     sent = await SendPhotoAsync(
+            //         chatId,
+            //         png,
+            //         caption,
+            //         replyMarkup,
+            //         replyToMessageId: null,
+            //         photoFileName: "mega-deal.png",
+            //         cancellationToken: cancellationToken);
+            // }
+
+            var sent = await SendMessageAsync(categoryChatId, text, replyMarkup, replyToMessageId: null, cancellationToken);
+
+            // Drops above 50% are mirrored to the cross-category mega deals group.
+            if (alert.DropPercent > MegaDealDropPercent && NullIfBlank(_options.MegaDealsChatId) is { } megaChatId)
+                sent |= await SendMessageAsync(megaChatId.Trim(), text, replyMarkup, replyToMessageId: null, cancellationToken);
 
             if (sent)
                 _logger.LogInformation(
-                    "Telegram drop alert sent for {Asin} ({Percent}% → chat {ChatId})",
-                    alert.Product.Asin, alert.DropPercent, tierChatId);
+                    "Telegram drop alert sent for {Asin} ({Percent}% → {Category} chat {ChatId})",
+                    alert.Product.Asin, alert.DropPercent, alert.Category, categoryChatId);
             else
                 _logger.LogWarning(
-                    "Telegram drop alert failed for {Asin} ({Percent}% → chat {ChatId})",
-                    alert.Product.Asin, alert.DropPercent, tierChatId);
+                    "Telegram drop alert failed for {Asin} ({Percent}% → {Category} chat {ChatId})",
+                    alert.Product.Asin, alert.DropPercent, alert.Category, categoryChatId);
 
             return sent;
         }
@@ -238,27 +242,14 @@ namespace Affiliate.Services
             return true;
         }
 
-        /// <summary>
-        /// Maps drop % to a tier chat. Boundaries use inclusive lower / exclusive upper
-        /// except the top band: [3,10), [10,20), [20,40), [40,60), [60,80), [80,100].
-        /// </summary>
-        private string? ResolveTierChatId(decimal dropPercent)
+        /// <summary>Maps a product category to its group chat; null when unset or unconfigured.</summary>
+        private string? ResolveCategoryChatId(ScraperCategory? category) => category switch
         {
-            if (dropPercent >= 80m)
-                return NullIfBlank(_options.ChatId80To100);
-            if (dropPercent >= 60m)
-                return NullIfBlank(_options.ChatId60To80);
-            if (dropPercent >= 40m)
-                return NullIfBlank(_options.ChatId40To60);
-            if (dropPercent >= 20m)
-                return NullIfBlank(_options.ChatId20To40);
-            if (dropPercent >= 10m)
-                return NullIfBlank(_options.ChatId10To20);
-            if (dropPercent >= 3m)
-                return NullIfBlank(_options.ChatId3To10);
-
-            return null;
-        }
+            ScraperCategory.FoodDrinksAndCleaning => NullIfBlank(_options.FoodDrinksAndCleaningChatId)?.Trim(),
+            ScraperCategory.FashionAndWatches => NullIfBlank(_options.FashionAndWatchesChatId)?.Trim(),
+            ScraperCategory.Devices => NullIfBlank(_options.DevicesChatId)?.Trim(),
+            _ => null
+        };
 
         private static string? NullIfBlank(string? value) =>
             string.IsNullOrWhiteSpace(value) ? null : value;
@@ -468,7 +459,10 @@ namespace Affiliate.Services
             return System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(replyMarkupJson);
         }
 
-        /// <summary>Caption under the Mega Deal image: price history only (name is on the card; CTAs are buttons).</summary>
+        /// <summary>
+        /// Caption under the Mega Deal image: price history only (name is on the card; CTAs are buttons).
+        /// Unused while the Mega Deal card path in <see cref="NotifyDropAsync"/> is commented out.
+        /// </summary>
         private static string BuildMegaDealCaption(ProductDropAlert alert)
         {
             var currency = Html(alert.Product.Currency ?? "");
@@ -483,6 +477,7 @@ namespace Affiliate.Services
             return caption;
         }
 
+        /// <summary>Unused while the Mega Deal card path in <see cref="NotifyDropAsync"/> is commented out.</summary>
         private async Task<byte[]?> TryDownloadProductImageAsync(string? imageUrl, CancellationToken cancellationToken)
         {
             if (string.IsNullOrWhiteSpace(imageUrl) ||

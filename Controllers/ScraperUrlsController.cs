@@ -19,9 +19,14 @@ namespace Affiliate.Controllers
             _scraperService = scraperService;
         }
 
-        public async Task<IActionResult> Index()
+        public async Task<IActionResult> Index(bool? hasCategory)
         {
-            var urls = await _context.ScraperUrls
+            var query = _context.ScraperUrls.AsQueryable();
+            if (hasCategory.HasValue)
+                query = query.Where(s => (s.Category != null) == hasCategory.Value);
+
+            ViewData["HasCategory"] = hasCategory;
+            var urls = await query
                 .OrderBy(s => s.Name)
                 .ToListAsync();
             return View(urls);
@@ -50,7 +55,7 @@ namespace Affiliate.Controllers
             [Bind(
                 nameof(ScraperUrl.Name), nameof(ScraperUrl.Url), nameof(ScraperUrl.Domain),
                 nameof(ScraperUrl.StartPage), nameof(ScraperUrl.IntervalSeconds),
-                nameof(ScraperUrl.IsEnabled))] ScraperUrl scraperUrl)
+                nameof(ScraperUrl.IsEnabled), nameof(ScraperUrl.Category))] ScraperUrl scraperUrl)
         {
             Normalize(scraperUrl);
             if (!ModelState.IsValid)
@@ -82,7 +87,8 @@ namespace Affiliate.Controllers
             [Bind(
                 nameof(ScraperUrl.Id), nameof(ScraperUrl.Name), nameof(ScraperUrl.Url),
                 nameof(ScraperUrl.Domain), nameof(ScraperUrl.StartPage),
-                nameof(ScraperUrl.IntervalSeconds), nameof(ScraperUrl.IsEnabled))] ScraperUrl scraperUrl)
+                nameof(ScraperUrl.IntervalSeconds), nameof(ScraperUrl.IsEnabled),
+                nameof(ScraperUrl.Category))] ScraperUrl scraperUrl)
         {
             if (id != scraperUrl.Id)
                 return NotFound();
@@ -166,6 +172,39 @@ namespace Affiliate.Controllers
 
         [HttpPost]
         [ValidateAntiForgeryToken]
+        public async Task<IActionResult> BulkAssignCategory(
+            [FromBody] BulkAssignCategoryRequest request,
+            CancellationToken cancellationToken)
+        {
+            if (request.Ids is not { Length: > 0 })
+                return BadRequest(new { success = false, message = "لم يتم تحديد أي روابط." });
+
+            if (request.Category is { } category && !Enum.IsDefined(category))
+                return BadRequest(new { success = false, message = "تصنيف غير معروف." });
+
+            var items = await _context.ScraperUrls
+                .Where(s => request.Ids.Contains(s.Id))
+                .ToListAsync(cancellationToken);
+
+            if (items.Count == 0)
+                return BadRequest(new { success = false, message = "لم يتم العثور على الروابط المحددة." });
+
+            foreach (var item in items)
+                item.Category = request.Category;
+
+            await _context.SaveChangesAsync(cancellationToken);
+
+            return Ok(new
+            {
+                success = true,
+                message = request.Category is { } assigned
+                    ? $"تم تعيين تصنيف \"{assigned.DisplayName()}\" لـ {items.Count} رابط."
+                    : $"تم إزالة التصنيف من {items.Count} رابط."
+            });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
         public async Task<IActionResult> RunNow(int id, CancellationToken cancellationToken)
         {
             var item = await _context.ScraperUrls.FindAsync(id);
@@ -214,5 +253,13 @@ namespace Affiliate.Controllers
     {
         public int[] Ids { get; set; } = [];
         public bool IsEnabled { get; set; }
+    }
+
+    public class BulkAssignCategoryRequest
+    {
+        public int[] Ids { get; set; } = [];
+
+        /// <summary>Null clears the category, which stops Telegram alerts for these URLs.</summary>
+        public ScraperCategory? Category { get; set; }
     }
 }
