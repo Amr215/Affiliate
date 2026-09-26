@@ -444,7 +444,7 @@ namespace Affiliate.Services
                 request.Headers.Remove("Sec-Fetch-Site");
                 request.Headers.TryAddWithoutValidation("Sec-Fetch-Site", "none");
 
-                using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+                using var response = await client.SendAsync(request, HttpCompletionOption.ResponseContentRead, ct);
                 _ = await response.Content.ReadAsStringAsync(ct);
                 _logger.LogDebug(
                     "{Label}: warmed up {Home} via {Proxy} ({Status})",
@@ -634,7 +634,9 @@ namespace Affiliate.Services
                 {
                     using var request = new HttpRequestMessage(HttpMethod.Get, url);
                     AmazonBrowserProfile.ApplyNavigationHeaders(request, url, referer);
-                    return await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+                    // ResponseContentRead keeps the body download inside HttpClient.Timeout; with
+                    // ResponseHeadersRead a proxy that stalls mid-body hangs the whole poll forever.
+                    return await client.SendAsync(request, HttpCompletionOption.ResponseContentRead, ct);
                 }
                 catch (Exception ex) when (attempt < retries && IsRetryableTransport(ex, ct))
                 {

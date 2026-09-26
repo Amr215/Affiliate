@@ -20,7 +20,7 @@ namespace Affiliate.Options
         public int ConnectTimeoutSeconds { get; set; } = 20;
 
         /// <summary>Overall per-request timeout in seconds.</summary>
-        public int RequestTimeoutSeconds { get; set; } = 90;
+        public int RequestTimeoutSeconds { get; set; } = 50;
 
         /// <summary>
         /// Consecutive failures (with no success in between) before a proxy is temporarily blocked.
