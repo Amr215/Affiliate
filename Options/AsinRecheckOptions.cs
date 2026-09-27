@@ -47,17 +47,16 @@ namespace Affiliate.Options
         /// Attempts per batch page before giving up for this poll. Failed ASINs are retried next
         /// poll because they keep the oldest LastCheckedAt.
         /// </summary>
-        public int MaxAttemptsPerBatch { get; set; } = 3;
+        public int MaxAttemptsPerBatch { get; set; } = 10;
 
         /// <summary>Amazon TLD used in search URLs (e.g. eg).</summary>
         public string Domain { get; set; } = "eg";
 
         /// <summary>
-        /// Seller filter for ASIN batch search (<c>rh=p_6:...</c>). Several sellers may be
-        /// separated by <c>|</c> or <c>,</c>. Amazon.eg retail is <c>A1ZVRGNO5AYLOV</c>,
-        /// Amazon Now is <c>A31TYDXOWA7X1E</c>. Empty skips the filter.
+        /// Seller filter for ASIN batch search (<c>rh=p_6:...</c>). Amazon.eg retail is
+        /// <c>A1ZVRGNO5AYLOV</c>. Empty skips the filter.
         /// </summary>
-        public string MerchantId { get; set; } = "A1ZVRGNO5AYLOV|A31TYDXOWA7X1E";
+        public string MerchantId { get; set; } = "A1ZVRGNO5AYLOV";
 
         /// <summary>Google Translate route used by proxy ports that Amazon is currently blocking.</summary>
         public AsinRecheckTranslateOptions Translate { get; set; } = new();

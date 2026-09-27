@@ -1044,13 +1044,10 @@ namespace Affiliate.Services
         {
             var encoded = Uri.EscapeDataString(string.Join("|", asins));
             var d = domain.Trim();
-            // Amazon joins multiple sellers with an already-encoded pipe (%7C) inside the rh value,
-            // so after escaping the whole value it goes out as %257C.
-            var merchants = (merchantId ?? "")
-                .Split(new[] { '|', ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            var rh = merchants.Length == 0
+            var merchant = merchantId?.Trim();
+            var rh = string.IsNullOrEmpty(merchant)
                 ? ""
-                : $"&rh={Uri.EscapeDataString($"p_6:{string.Join("%7C", merchants)}")}";
+                : $"&rh={Uri.EscapeDataString($"p_6:{merchant}")}";
 
             var host = $"www.amazon.{d}";
             var language = translate is not null && !string.IsNullOrWhiteSpace(translate.AmazonLanguage)
