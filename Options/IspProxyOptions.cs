@@ -36,6 +36,6 @@ namespace Affiliate.Options
         public int TranslateFailuresBeforeBlock { get; set; } = 2;
 
         /// <summary>How long a proxy stays barred from the Google Translate route (seconds).</summary>
-        public int TranslateBlockDurationSeconds { get; set; } = 40;
+        public int TranslateBlockDurationSeconds { get; set; } = 720;
     }
 }

@@ -58,7 +58,8 @@ namespace Affiliate.Services
 
         /// <summary>
         /// Records a failed operation against the route it used. After enough consecutive failures the
-        /// proxy is blocked on that route, each with its own configured duration.
+        /// proxy is blocked on that route, each with its own configured duration. A proxy blocked by
+        /// Google is never blocked from Amazon, so it always has a route left.
         /// For Amazon, if it was the last unblocked proxy, that proxy is still blocked and half of the
         /// other blocked proxies (shortest remaining block time) are freed instead of unblocking everything.
         /// </summary>
@@ -179,7 +180,16 @@ namespace Affiliate.Services
                 var now = DateTimeOffset.UtcNow;
                 ExpireBlocks(now);
 
-                var route = GetOrCreate(endpoint.Key).Amazon;
+                var state = GetOrCreate(endpoint.Key);
+                if (state.Translate.IsBlocked(now))
+                {
+                    _logger.LogWarning(
+                        "ISP proxy {Port} failed but is blocked from Google Translate; not blocking it from Amazon",
+                        endpoint.Port);
+                    return;
+                }
+
+                var route = state.Amazon;
                 route.ConsecutiveFailures++;
 
                 _logger.LogWarning(
@@ -210,8 +220,8 @@ namespace Affiliate.Services
         }
 
         /// <summary>
-        /// Google blocks are tracked on their own: they say nothing about Amazon, and the proxy simply
-        /// stops being offered for the translate route while blocked.
+        /// A Google block stops the proxy being offered for the translate route and lifts any Amazon
+        /// block, so the proxy goes back to fetching Amazon directly instead of sitting idle.
         /// </summary>
         private void ReportTranslateFailure(IspProxyEndpoint endpoint)
         {
@@ -223,7 +233,8 @@ namespace Affiliate.Services
                 var now = DateTimeOffset.UtcNow;
                 ExpireBlocks(now);
 
-                var route = GetOrCreate(endpoint.Key).Translate;
+                var state = GetOrCreate(endpoint.Key);
+                var route = state.Translate;
                 route.ConsecutiveFailures++;
 
                 if (route.ConsecutiveFailures < threshold)
@@ -236,9 +247,10 @@ namespace Affiliate.Services
 
                 route.BlockedUntil = now.AddSeconds(blockSeconds);
                 route.ConsecutiveFailures = 0;
+                state.Amazon.Reset();
 
                 _logger.LogWarning(
-                    "ISP proxy {Port} blocked from Google Translate for {Seconds}s after {Threshold} consecutive failures",
+                    "ISP proxy {Port} blocked from Google Translate for {Seconds}s after {Threshold} consecutive failures; unblocked it from Amazon",
                     endpoint.Port, blockSeconds, threshold);
             }
         }

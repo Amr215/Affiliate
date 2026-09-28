@@ -47,7 +47,7 @@ namespace Affiliate.Options
         /// Attempts per batch page before giving up for this poll. Failed ASINs are retried next
         /// poll because they keep the oldest LastCheckedAt.
         /// </summary>
-        public int MaxAttemptsPerBatch { get; set; } = 10;
+        public int MaxAttemptsPerBatch { get; set; } = 30;
 
         /// <summary>Amazon TLD used in search URLs (e.g. eg).</summary>
         public string Domain { get; set; } = "eg";
