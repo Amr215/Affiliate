@@ -64,7 +64,6 @@
 92.112.168.214:6298:awuvknho:9day0vw44u8x
 142.147.131.50:5950:awuvknho:9day0vw44u8x
 167.100.105.87:7656:awuvknho:9day0vw44u8x
-23.27.209.97:6116:awuvknho:9day0vw44u8x
 82.29.235.136:7988:awuvknho:9day0vw44u8x
 45.39.75.53:5967:awuvknho:9day0vw44u8x
 136.0.194.137:6874:awuvknho:9day0vw44u8x
@@ -95,6 +94,7 @@
 13.143.123.184:6971:awuvknho:9day0vw44u8x
 45.91.167.66:6625:awuvknho:9day0vw44u8x
 46.203.206.64:5509:awuvknho:9day0vw44u8x
-103.99.33.243:6238:awuvknho:9day0vw44u8x
 142.147.244.253:6497:awuvknho:9day0vw44u8x
 82.23.239.149:6486:awuvknho:9day0vw44u8x
+82.24.232.144:6973:awuvknho:9day0vw44u8x
+93.113.144.144:7661:awuvknho:9day0vw44u8x
