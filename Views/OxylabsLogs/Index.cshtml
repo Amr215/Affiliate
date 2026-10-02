@@ -15,6 +15,9 @@
             <span class="stat-pill" title="طلبات ناجحة (200) تم جلبها عبر ترجمة جوجل">
                 <i class="bi bi-translate text-info"></i> @Model.SuccessTranslateCount ناجح عبر ترجمة جوجل
             </span>
+            <span class="stat-pill" title="طلبات ناجحة (200) تم جلبها عبر شبكة Tor">
+                <i class="bi bi-incognito text-secondary"></i> @Model.SuccessTorCount ناجح عبر Tor
+            </span>
             <span class="stat-pill" title="الطلبات الناجحة ضمن السجلات المعروضة في هذه الصفحة">
                 <i class="bi bi-file-earmark-check"></i> @Model.SuccessOnPageCount ناجح ضمن المعروض
             </span>
@@ -67,20 +70,16 @@
             </div>
             <div class="col-6 col-lg-2">
                 <label class="form-label">المسار</label>
-                <select name="ViaTranslate" class="form-select">
+                <select name="Route" class="form-select">
                     @{
                         var routeOptions = new (string Value, string Text)[]
                         {
                             ("", "الكل"),
-                            ("true", "ترجمة جوجل"),
-                            ("false", "مباشر")
+                            ("direct", "مباشر"),
+                            ("translate", "ترجمة جوجل"),
+                            ("tor", "Tor")
                         };
-                        var selectedRoute = f.ViaTranslate switch
-                        {
-                            true => "true",
-                            false => "false",
-                            _ => ""
-                        };
+                        var selectedRoute = f.Route ?? "";
                     }
                     @foreach (var option in routeOptions)
                     {
@@ -164,7 +163,13 @@
                     </td>
                     <td class="ltr num">@(log.Port?.ToString() ?? "—")</td>
                     <td>
-                        @if (log.ViaGoogleTranslate)
+                        @if (log.ViaTor)
+                        {
+                            <span class="badge text-bg-dark" title="تم الجلب عبر شبكة Tor">
+                                <i class="bi bi-incognito"></i> Tor
+                            </span>
+                        }
+                        else if (log.ViaGoogleTranslate)
                         {
                             <span class="badge text-bg-info" title="تم الجلب عبر ترجمة جوجل لأن البورت كان محظوراً">
                                 <i class="bi bi-translate"></i> ترجمة جوجل
@@ -250,7 +255,7 @@
             ["StatusCode"] = filter.StatusCode?.ToString(),
             ["Port"] = filter.Port?.ToString(),
             ["ErrorsOnly"] = filter.ErrorsOnly == true ? "true" : null,
-            ["ViaTranslate"] = filter.ViaTranslate switch { true => "true", false => "false", _ => null },
+            ["Route"] = filter.Route,
             ["From"] = filter.From?.ToString("yyyy-MM-dd"),
             ["To"] = filter.To?.ToString("yyyy-MM-dd")
         };

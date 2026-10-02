@@ -60,6 +60,31 @@ namespace Affiliate.Options
 
         /// <summary>Google Translate route used by proxy ports that Amazon is currently blocking.</summary>
         public AsinRecheckTranslateOptions Translate { get; set; } = new();
+
+        /// <summary>Sends a share of each poll's batches through a local Tor SOCKS5 proxy.</summary>
+        public AsinRecheckTorOptions Tor { get; set; } = new();
+    }
+
+    /// <summary>
+    /// Tor route for ASIN recheck. Needs <c>SocksPort ... IsolateSOCKSAuth</c> in torrc so each
+    /// SOCKS username (<c>tor1</c>..<c>torN</c>) gets its own circuit and exit IP.
+    /// </summary>
+    public class AsinRecheckTorOptions
+    {
+        public bool Enabled { get; set; }
+
+        public string Host { get; set; } = "127.0.0.1";
+
+        public int SocksPort { get; set; } = 9050;
+
+        /// <summary>Distinct circuits (SOCKS usernames) handed out in rotation.</summary>
+        public int Circuits { get; set; } = 20;
+
+        /// <summary>Share of each poll's batches sent through Tor (0-100).</summary>
+        public int TorPercent { get; set; } = 10;
+
+        /// <summary>Failed Tor attempts per batch before the rest of the batch falls back to Webshare.</summary>
+        public int MaxAttempts { get; set; } = 2;
     }
 
     /// <summary>

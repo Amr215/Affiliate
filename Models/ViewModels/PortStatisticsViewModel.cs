@@ -20,6 +20,14 @@ namespace Affiliate.ViewModels
         public int SuccessCount { get; set; }
         public int FailedCount { get; set; }
 
+        /// <summary>Requests routed through Google Translate.</summary>
+        public int GoogleSuccessCount { get; set; }
+        public int GoogleFailedCount { get; set; }
+
+        /// <summary>Requests sent straight to Amazon.</summary>
+        public int AmazonSuccessCount { get; set; }
+        public int AmazonFailedCount { get; set; }
+
         public double SuccessRate =>
             TotalRequests == 0 ? 0 : 100.0 * SuccessCount / TotalRequests;
     }

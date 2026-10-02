@@ -15,9 +15,9 @@ namespace Affiliate.ViewModels
         /// <summary>When true, only rows with StatusCode != 200.</summary>
         public bool? ErrorsOnly { get; set; }
 
-        /// <summary>True = Google Translate route only, false = direct only, null = both.</summary>
+        /// <summary>"direct", "translate", "tor", or null for all routes.</summary>
         [Display(Name = "Route")]
-        public bool? ViaTranslate { get; set; }
+        public string? Route { get; set; }
 
         [DataType(DataType.Date)]
         public DateTime? From { get; set; }
@@ -43,6 +43,9 @@ namespace Affiliate.ViewModels
         /// <summary>Successful (HTTP 200) requests fetched through Google Translate, across the whole filter.</summary>
         public int SuccessTranslateCount { get; set; }
 
+        /// <summary>Successful (HTTP 200) requests fetched through Tor, across the whole filter.</summary>
+        public int SuccessTorCount { get; set; }
+
         /// <summary>Successful requests among the rows currently displayed.</summary>
         public int SuccessOnPageCount => Logs.Count(l => l.StatusCode == 200);
     }
@@ -64,6 +67,9 @@ namespace Affiliate.ViewModels
         /// through Google Translate because the port was blocked.
         /// </summary>
         public bool ViaGoogleTranslate { get; set; }
+
+        /// <summary>True when the request went through the local Tor SOCKS proxy.</summary>
+        public bool ViaTor { get; set; }
     }
 
     public class ScraperUrlOption

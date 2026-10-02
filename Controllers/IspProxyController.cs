@@ -81,7 +81,23 @@ namespace Affiliate.Controllers
                     Port = g.Key,
                     TotalRequests = g.Count(),
                     SuccessCount = g.Count(l => l.StatusCode == 200),
-                    FailedCount = g.Count(l => l.StatusCode != 200)
+                    FailedCount = g.Count(l => l.StatusCode != 200),
+                    GoogleSuccessCount = g.Count(l => l.StatusCode == 200
+                        && l.RequestBody != null
+                        && (l.RequestBody.Contains(GoogleTranslateProxy.LogMarker)
+                            || l.RequestBody.Contains(GoogleTranslateProxy.HostSuffix))),
+                    GoogleFailedCount = g.Count(l => l.StatusCode != 200
+                        && l.RequestBody != null
+                        && (l.RequestBody.Contains(GoogleTranslateProxy.LogMarker)
+                            || l.RequestBody.Contains(GoogleTranslateProxy.HostSuffix))),
+                    AmazonSuccessCount = g.Count(l => l.StatusCode == 200
+                        && (l.RequestBody == null
+                            || (!l.RequestBody.Contains(GoogleTranslateProxy.LogMarker)
+                                && !l.RequestBody.Contains(GoogleTranslateProxy.HostSuffix)))),
+                    AmazonFailedCount = g.Count(l => l.StatusCode != 200
+                        && (l.RequestBody == null
+                            || (!l.RequestBody.Contains(GoogleTranslateProxy.LogMarker)
+                                && !l.RequestBody.Contains(GoogleTranslateProxy.HostSuffix))))
                 })
                 .ToListAsync(cancellationToken);
 

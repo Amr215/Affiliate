@@ -35,6 +35,9 @@ namespace Affiliate.Services
         /// <summary>Tries per URL-scrape page; every retry switches to another proxy.</summary>
         private const int MaxPageAttempts = 30;
 
+        /// <summary>Shared across scoped instances so consecutive polls keep rotating circuits.</summary>
+        private static int _torCircuitCursor;
+
         private readonly AffiliateDbContext _db;
         private readonly IScraperRunCoordinator _runCoordinator;
         private readonly ITelegramNotifier _telegram;
@@ -154,10 +157,11 @@ namespace Affiliate.Services
                 var maxParallel = ResolveParallelism(batches.Count);
                 var startedAtUtc = DateTime.UtcNow;
                 var startedAt = Stopwatch.GetTimestamp();
+                var torBatches = PickTorBatches(batches.Count);
 
                 _logger.LogInformation(
-                    "ASIN recheck starting via ISP — {Count} ASINs in {Batches} search request(s) of up to {BatchSize}, {Parallel} in parallel, translateFallback={Translate} (save+alert after each page)",
-                    asins.Count, batches.Count, batchSize, maxParallel, TranslateRoute is not null);
+                    "ASIN recheck starting via ISP — {Count} ASINs in {Batches} search request(s) of up to {BatchSize}, {Parallel} in parallel, translateFallback={Translate}, viaTor={TorBatches} (save+alert after each page)",
+                    asins.Count, batches.Count, batchSize, maxParallel, TranslateRoute is not null, torBatches.Count);
 
                 var failedBatches = 0;
                 var incompleteBatches = 0;
@@ -180,7 +184,8 @@ namespace Affiliate.Services
                         try
                         {
                             var (organic, complete, pageSaved) = await FetchAsinBatchSearchViaIspAsync(
-                                batch, domain, index + 1, pageCounters, token);
+                                batch, domain, index + 1, pageCounters, token,
+                                useTor: torBatches.Contains(index));
 
                             Interlocked.Add(ref updated, pageSaved);
 
@@ -278,6 +283,28 @@ namespace Affiliate.Services
         {
             var configured = Math.Max(1, _asinRecheck.MaxParallelBatches);
             return Math.Clamp(configured, 1, batchCount);
+        }
+
+        /// <summary>Random batch indexes sent through Tor this poll (TorPercent of all batches).</summary>
+        private HashSet<int> PickTorBatches(int batchCount)
+        {
+            var tor = _asinRecheck.Tor;
+            if (tor is not { Enabled: true } || batchCount == 0)
+                return [];
+
+            var count = (int)Math.Round(batchCount * Math.Clamp(tor.TorPercent, 0, 100) / 100.0);
+            return Enumerable.Range(0, batchCount)
+                .OrderBy(_ => Random.Shared.Next())
+                .Take(count)
+                .ToHashSet();
+        }
+
+        /// <summary>Next Tor circuit in rotation; each SOCKS username is its own circuit under IsolateSOCKSAuth.</summary>
+        private static IspProxyEndpoint TorEndpoint(AsinRecheckTorOptions tor)
+        {
+            var circuits = (uint)Math.Max(1, tor.Circuits);
+            var n = (int)((uint)Interlocked.Increment(ref _torCircuitCursor) % circuits) + 1;
+            return new IspProxyEndpoint(true, tor.Host, tor.SocksPort, $"tor{n}", "x");
         }
 
         private async Task ExecuteUrlScrapeAsync(ScraperUrl scraperUrl, CancellationToken ct)
@@ -683,7 +710,8 @@ namespace Affiliate.Services
             string domain,
             int batchIndex,
             AsinRecheckPageRequestCounters pageCounters,
-            CancellationToken ct)
+            CancellationToken ct,
+            bool useTor = false)
         {
             if (asins.Count < 2)
                 throw new InvalidOperationException("ASIN batch search requires at least 2 ASINs per request");
@@ -695,8 +723,44 @@ namespace Affiliate.Services
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var saved = 0;
 
-            // Blocked ports are handed out too — they go through Google Translate instead of idling.
-            var endpoint = _ispProxy.GetEndpoint(allowBlocked: translateRoute is not null);
+            var tor = _asinRecheck.Tor;
+            var onTor = useTor && tor is { Enabled: true };
+            var torFailures = 0;
+
+            // Tor circuits share one key (host:port), so they stay out of the ISP block tracking.
+            void ReportSuccess(IspProxyEndpoint ep)
+            {
+                if (!onTor)
+                    _ispProxy.ReportSuccess(ep);
+            }
+
+            void ReportFailure(IspProxyEndpoint ep)
+            {
+                if (onTor)
+                    torFailures++;
+                else
+                    _ispProxy.ReportFailure(ep);
+            }
+
+            // Next Tor circuit until MaxAttempts Tor failures, then Webshare for the rest of the batch.
+            IspProxyEndpoint NextEndpoint()
+            {
+                if (onTor && torFailures < Math.Max(1, tor.MaxAttempts))
+                    return TorEndpoint(tor);
+
+                if (onTor)
+                {
+                    onTor = false;
+                    _logger.LogWarning(
+                        "ASIN batch {Index}: Tor failed {Failures} time(s); falling back to Webshare",
+                        batchIndex, torFailures);
+                }
+
+                // Blocked ports are handed out too — they go through Google Translate instead of idling.
+                return _ispProxy.GetEndpoint(allowBlocked: translateRoute is not null);
+            }
+
+            var endpoint = NextEndpoint();
             var client = _ispProxy.CreateClient(endpoint);
             string? referer = null;
             var warmedHost = false;
@@ -790,7 +854,7 @@ namespace Affiliate.Services
                                 saved += pageSaved;
                             }
 
-                            _ispProxy.ReportSuccess(endpoint);
+                            ReportSuccess(endpoint);
 
                             _logger.LogInformation(
                                 "ASIN batch {Index}: Amazon page {Page}/{Last} via {Proxy} — {PageCount} organic, {New} new (total {Total}/{Requested}, saved={Saved}, hasNext={HasNext}) GET {Url}",
@@ -802,7 +866,7 @@ namespace Affiliate.Services
                         catch (AmazonFetchRejectedException ex)
                         {
                             pageCounters.RecordFailure();
-                            _ispProxy.ReportFailure(endpoint);
+                            ReportFailure(endpoint);
                             // Already logged once in FetchAsinBatchSearchPageAsync — do not write a second OxylabsRequestLog row.
                             if (attempt >= maxAttempts)
                             {
@@ -816,7 +880,7 @@ namespace Affiliate.Services
                             }
 
                             client.Dispose();
-                            endpoint = _ispProxy.GetEndpoint(allowBlocked: translateRoute is not null);
+                            endpoint = NextEndpoint();
                             client = _ispProxy.CreateClient(endpoint);
                             proxyPort = endpoint.UseProxy ? endpoint.Port : null;
                             referer = null;
@@ -832,7 +896,7 @@ namespace Affiliate.Services
                         catch (Exception ex) when (ex is not OperationCanceledException and not AmazonFetchRejectedException)
                         {
                             pageCounters.RecordFailure();
-                            _ispProxy.ReportFailure(endpoint);
+                            ReportFailure(endpoint);
                             var reason = DescribeTransport(ex);
                             QueueLog(null, page, DateTime.UtcNow, 0, "TransportError",
                                 $"{endpoint.Describe()} batch={batchIndex} page={page} asins={asins.Count}",
@@ -850,7 +914,7 @@ namespace Affiliate.Services
                             }
 
                             client.Dispose();
-                            endpoint = _ispProxy.GetEndpoint(allowBlocked: translateRoute is not null);
+                            endpoint = NextEndpoint();
                             client = _ispProxy.CreateClient(endpoint);
                             proxyPort = endpoint.UseProxy ? endpoint.Port : null;
                             referer = null;

@@ -1,18 +1,22 @@
 using Affiliate.Data;
+using Affiliate.Options;
 using Affiliate.Services;
 using Affiliate.ViewModels;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace Affiliate.Controllers
 {
     public class OxylabsLogsController : Controller
     {
         private readonly AffiliateDbContext _context;
+        private readonly AsinRecheckTorOptions _tor;
 
-        public OxylabsLogsController(AffiliateDbContext context)
+        public OxylabsLogsController(AffiliateDbContext context, IOptions<AsinRecheckOptions> asinRecheck)
         {
             _context = context;
+            _tor = asinRecheck.Value.Tor;
         }
 
         public async Task<IActionResult> Index(
@@ -41,8 +45,11 @@ namespace Affiliate.Controllers
             if (filter.To.HasValue)
                 query = query.Where(l => l.RequestedAt < filter.To.Value.Date.AddDays(1));
 
-            // Projecting before the route filter keeps the "was this fetched through Google
-            // Translate" rule in one place — it is derived from the logged request, not stored.
+            // Tor requests are logged as "{Host}:{SocksPort} GET ..." by the ASIN recheck.
+            var torPrefix = $"{_tor.Host}:{_tor.SocksPort}";
+
+            // Projecting before the route filter keeps the route rules in one place — they are
+            // derived from the logged request, not stored.
             var rows = query.Select(l => new OxylabsRequestLogListItem
             {
                 Id = l.Id,
@@ -58,11 +65,17 @@ namespace Affiliate.Controllers
                 HasResponseBody = l.ResponseBody != null && l.ResponseBody != "",
                 ViaGoogleTranslate = l.RequestBody != null
                                      && (l.RequestBody.Contains(GoogleTranslateProxy.LogMarker)
-                                         || l.RequestBody.Contains(GoogleTranslateProxy.HostSuffix))
+                                         || l.RequestBody.Contains(GoogleTranslateProxy.HostSuffix)),
+                ViaTor = l.RequestBody != null && l.RequestBody.StartsWith(torPrefix)
             });
 
-            if (filter.ViaTranslate is bool viaTranslate)
-                rows = rows.Where(l => l.ViaGoogleTranslate == viaTranslate);
+            rows = filter.Route switch
+            {
+                "translate" => rows.Where(l => l.ViaGoogleTranslate),
+                "tor" => rows.Where(l => l.ViaTor),
+                "direct" => rows.Where(l => !l.ViaGoogleTranslate && !l.ViaTor),
+                _ => rows
+            };
 
             var totalCount = await rows.CountAsync(cancellationToken);
             var totalPages = Math.Max(1, (int)Math.Ceiling(totalCount / (double)filter.PageSize));
@@ -72,6 +85,8 @@ namespace Affiliate.Controllers
             // Counted over the whole filtered set, not just the visible page.
             var successTranslate = await rows
                 .CountAsync(l => l.StatusCode == 200 && l.ViaGoogleTranslate, cancellationToken);
+            var successTor = await rows
+                .CountAsync(l => l.StatusCode == 200 && l.ViaTor, cancellationToken);
             var successTotal = await rows
                 .CountAsync(l => l.StatusCode == 200, cancellationToken);
 
@@ -93,8 +108,9 @@ namespace Affiliate.Controllers
                 Logs = logs,
                 TotalCount = totalCount,
                 TotalPages = totalPages,
-                SuccessDirectCount = successTotal - successTranslate,
+                SuccessDirectCount = successTotal - successTranslate - successTor,
                 SuccessTranslateCount = successTranslate,
+                SuccessTorCount = successTor,
                 Searches = searches
             });
         }
