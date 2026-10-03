@@ -8,7 +8,7 @@ namespace Affiliate.Services
     {
         /// <summary>
         /// Opens Amazon.eg (no proxy), ensures Arabic UI, and returns a publish screenshot:
-        /// highlighted DP when page price matches <paramref name="alertPrice"/>;
+        /// highlighted DP when <paramref name="alertPrice"/> is null or matches the page price;
         /// otherwise adds to cart and returns a plain cart screenshot.
         /// </summary>
         Task<PrepareForPublishResult> PrepareAsync(
@@ -135,7 +135,8 @@ namespace Affiliate.Services
             {
                 var context = await browser.NewContextAsync(new BrowserNewContextOptions
                 {
-                    ViewportSize = new ViewportSize { Width = 1366, Height = 1100 },
+                    ViewportSize = new ViewportSize { Width = 1000, Height = 1100 },
+                    DeviceScaleFactor = 2,
                     Locale = "ar-AE",
                     TimezoneId = "Africa/Cairo",
                     UserAgent =
@@ -188,9 +189,8 @@ namespace Affiliate.Services
                     "Prepare-for-publish {Asin}: pagePrice={PagePrice}, alertPrice={AlertPrice}, lang={Lang}",
                     asin, pagePrice, alertPrice, await ReadHtmlLangAsync(page));
 
-                var pricesMatch = alertPrice.HasValue
-                    && pagePrice.HasValue
-                    && PricesMatch(pagePrice.Value, alertPrice.Value);
+                var pricesMatch = alertPrice is null
+                    || (pagePrice.HasValue && PricesMatch(pagePrice.Value, alertPrice.Value));
 
                 byte[] screenshot;
                 var usedCart = false;
@@ -206,7 +206,7 @@ namespace Affiliate.Services
                     {
                         await AddToCartAndOpenCartAsync(page, asin, cancellationToken);
                         usedCart = true;
-                        screenshot = await CapturePublishScreenshotAsync(page, cart: true);
+                        screenshot = await CaptureMobileCartItemAsync(browser, context, asin);
                     }
                     catch (Exception cartEx)
                     {
@@ -481,8 +481,8 @@ namespace Affiliate.Services
                 """,
                 cart);
 
-            const float maxHeight = 620f;
-            const float pad = 16f;
+            const float maxHeight = 720f;
+            const float pad = 60f;
             var height = Math.Clamp(contentBottom - y + pad, 280f, maxHeight);
             height = Math.Min(height, viewport.Height - y);
 
@@ -500,6 +500,42 @@ namespace Affiliate.Services
             });
         }
 
+        /// <summary>
+        /// Reopens the cart as a phone (same session/cookies) and captures only the product's
+        /// cart card — a compact image instead of the wide desktop cart.
+        /// </summary>
+        private static async Task<byte[]> CaptureMobileCartItemAsync(
+            IBrowser browser,
+            IBrowserContext desktopContext,
+            string asin)
+        {
+            await using var mobile = await browser.NewContextAsync(new BrowserNewContextOptions
+            {
+                StorageState = await desktopContext.StorageStateAsync(),
+                ViewportSize = new ViewportSize { Width = 412, Height = 915 },
+                DeviceScaleFactor = 2.5f,
+                IsMobile = true,
+                HasTouch = true,
+                Locale = "ar-AE",
+                TimezoneId = "Africa/Cairo",
+                UserAgent =
+                    "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36",
+                ExtraHTTPHeaders = new Dictionary<string, string>
+                {
+                    ["Accept-Language"] = "ar-AE,ar;q=0.9,en-AE;q=0.5,en;q=0.4"
+                }
+            });
+
+            var page = await mobile.NewPageAsync();
+            await page.GotoAsync(
+                "https://www.amazon.eg/-/ar/gp/cart/view.html?language=ar_AE",
+                new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 45_000 });
+
+            var item = page.Locator($".sc-list-item[data-asin='{asin}'], [data-asin='{asin}'][data-itemtype='active']").First;
+            await item.WaitForAsync(new LocatorWaitForOptions { State = WaitForSelectorState.Visible, Timeout = 30_000 });
+            return await item.ScreenshotAsync(new LocatorScreenshotOptions { Type = ScreenshotType.Png });
+        }
+
         private static async Task HighlightDesktopPublishTargetsAsync(IPage page)
         {
             await page.EvaluateAsync(
@@ -514,40 +550,11 @@ namespace Affiliate.Services
                     return true;
                   };
 
-                  const outlined = new Set();
-                  const outlinePrice = (el) => {
-                    if (!el || outlined.has(el)) return;
-                    outlined.add(el);
-                    outline(el);
-                  };
-
-                  // Center column price (below title / rating).
-                  outlinePrice(document.querySelector('#corePriceDisplay_desktop_feature_div'));
-
-                  // Left buybox price (often #corePrice_feature_div inside buybox).
-                  const buybox =
-                    document.querySelector('#desktop_buybox') ||
-                    document.querySelector('#buybox') ||
-                    document.querySelector('#qualifiedBuybox');
-                  if (buybox) {
-                    outlinePrice(
-                      buybox.querySelector('#corePrice_feature_div') ||
-                      buybox.querySelector('#priceInsideBuyBox_feature_div') ||
-                      buybox.querySelector('#desktop_unifiedPrice') ||
-                      buybox.querySelector('.a-price.priceToPay')?.closest('[id], .a-section') ||
-                      buybox.querySelector('.a-price.priceToPay') ||
-                      buybox.querySelector('.a-price'));
-                  }
-
-                  // Fallbacks if a layout omits one of the above.
-                  if (outlined.size === 0) {
-                    outlinePrice(document.querySelector('#corePrice_feature_div'));
-                    outlinePrice(document.querySelector('#centerCol .a-price.priceToPay'));
-                  } else if (outlined.size === 1) {
-                    outlinePrice(document.querySelector('#corePrice_feature_div'));
-                    outlinePrice(document.querySelector('#corePriceDisplay_desktop_feature_div'));
-                    outlinePrice(document.querySelector('#centerCol .a-price.priceToPay')?.closest('[id], .a-section'));
-                  }
+                  // Only the center column price (below title / rating).
+                  outline(
+                    document.querySelector('#corePriceDisplay_desktop_feature_div') ||
+                    document.querySelector('#centerCol #corePrice_feature_div') ||
+                    document.querySelector('#centerCol .a-price.priceToPay')?.closest('[id], .a-section'));
 
                   // Exact buybox block: الشاحن / البائع (+ الدفع) — never fall back to huge buybox.
                   const hasShipper = (el) => {

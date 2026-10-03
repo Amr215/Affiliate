@@ -31,6 +31,23 @@ namespace Affiliate.Services
             byte[] screenshotPng,
             int? replyToMessageId = null,
             CancellationToken cancellationToken = default);
+
+        /// <summary>Replies to a posted Amazon link with the publish template buttons.</summary>
+        Task<bool> SendPublishOptionsAsync(
+            string chatId,
+            string asin,
+            int replyToMessageId,
+            CancellationToken cancellationToken = default);
+
+        /// <summary>Publish photo captioned with the template of <paramref name="kind"/> (offer / snap / free).</summary>
+        Task<bool> SendPublishPostAsync(
+            string chatId,
+            string kind,
+            string productName,
+            string productUrl,
+            byte[] screenshotPng,
+            int? replyToMessageId = null,
+            CancellationToken cancellationToken = default);
     }
 
     public sealed class ProductDropAlert
@@ -221,6 +238,64 @@ namespace Affiliate.Services
                 replyMarkup,
                 replyToMessageId: replyToMessageId,
                 photoFileName: "prepare-publish.png",
+                cancellationToken: cancellationToken);
+        }
+
+        public Task<bool> SendPublishOptionsAsync(
+            string chatId,
+            string asin,
+            int replyToMessageId,
+            CancellationToken cancellationToken = default)
+        {
+            object Button(string text, string kind) => new[]
+            {
+                new Dictionary<string, object>
+                {
+                    ["text"] = text,
+                    ["callback_data"] = $"{TelegramCallbackBackgroundService.PublishCallbackPrefix}{kind}:{asin}"
+                }
+            };
+
+            var replyMarkup = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                inline_keyboard = new[] { Button("نشر عرض", "offer"), Button("نشر لقطة", "snap"), Button("نشر ببلاش", "free") }
+            });
+
+            return SendMessageAsync(chatId, Html($"اختر قالب النشر ({asin}):"), replyMarkup, replyToMessageId, cancellationToken);
+        }
+
+        public async Task<bool> SendPublishPostAsync(
+            string chatId,
+            string kind,
+            string productName,
+            string productUrl,
+            byte[] screenshotPng,
+            int? replyToMessageId = null,
+            CancellationToken cancellationToken = default)
+        {
+            var name = productName.Trim();
+            var url = productUrl.Trim();
+            var caption = kind switch
+            {
+                "offer" => $"عرض على {name}\n{url}",
+                "snap" => $"لقطة\n\n{name}\n{url}",
+                "free" => $"ببلاش\n\n{name}\n{url}",
+                _ => null
+            };
+            if (caption is null)
+                return false;
+
+            caption = Html(caption);
+            if (caption.Length > 1024)
+                caption = caption[..1021] + "…";
+
+            return await SendPhotoAsync(
+                chatId,
+                screenshotPng,
+                caption,
+                replyMarkupJson: null,
+                replyToMessageId: replyToMessageId,
+                photoFileName: "publish.png",
                 cancellationToken: cancellationToken);
         }
 

@@ -28,6 +28,12 @@ namespace Affiliate.Options
         /// <summary>Chat that also receives every drop above 50%, whatever the category.</summary>
         public string MegaDealsChatId { get; set; } = string.Empty;
 
+        /// <summary>Group where posted Amazon links get «نشر عرض / نشر لقطة / نشر ببلاش» buttons.</summary>
+        public string PublishChatId { get; set; } = string.Empty;
+
+        /// <summary>Channel that also receives every post published from the publish group.</summary>
+        public string PublishChannelId { get; set; } = string.Empty;
+
         /// <summary>First configured chat; used for the test message and setup checks.</summary>
         public string? PrimaryChatId =>
             new[] { FoodDrinksAndCleaningChatId, FashionAndWatchesChatId, DevicesChatId, MegaDealsChatId }

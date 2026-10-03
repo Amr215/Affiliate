@@ -1,16 +1,25 @@
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.RegularExpressions;
+using Affiliate.Data;
 using Affiliate.Options;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
 namespace Affiliate.Services
 {
     /// <summary>
-    /// Long-polls Telegram getUpdates and handles «تجهيز للنشر» callback buttons.
+    /// Long-polls Telegram getUpdates: handles «تجهيز للنشر» callbacks, and Amazon links
+    /// posted in the publish group (reply with template buttons, then publish on click).
     /// </summary>
     public sealed class TelegramCallbackBackgroundService : BackgroundService
     {
         public const string CallbackPrefix = "prep:";
+        public const string PublishCallbackPrefix = "pub:";
+
+        private static readonly Regex AsinInUrl = new(
+            @"amazon\.[^\s]*?/(?:dp|gp/product|gp/aw/d)/([A-Z0-9]{10})",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly IOptions<TelegramOptions> _options;
@@ -55,6 +64,9 @@ namespace Affiliate.Services
                     foreach (var update in updates)
                     {
                         _offset = update.UpdateId + 1;
+                        if (update.Message is not null)
+                            await HandleMessageAsync(update.Message, stoppingToken);
+
                         if (update.CallbackQuery is null)
                             continue;
 
@@ -94,9 +106,77 @@ namespace Affiliate.Services
             }
         }
 
+        private async Task HandleMessageAsync(TelegramCallbackMessage message, CancellationToken ct)
+        {
+            var chatId = message.Chat?.Id?.ToString();
+            if (chatId is null || chatId != _options.Value.PublishChatId.Trim())
+                return;
+
+            var match = AsinInUrl.Match(message.Text ?? "");
+            if (!match.Success)
+                return;
+
+            using var scope = _scopeFactory.CreateScope();
+            var telegram = scope.ServiceProvider.GetRequiredService<ITelegramNotifier>();
+            await telegram.SendPublishOptionsAsync(chatId, match.Groups[1].Value.ToUpperInvariant(), message.MessageId, ct);
+        }
+
+        private async Task HandlePublishCallbackAsync(TelegramCallbackQuery callback, string data, CancellationToken ct)
+        {
+            // pub:kind:ASIN
+            var parts = data.Split(':');
+            var chatId = callback.Message?.Chat?.Id?.ToString();
+            if (parts.Length != 3 || string.IsNullOrWhiteSpace(chatId))
+            {
+                await AnswerCallbackAsync(callback.Id, "بيانات غير صالحة", showAlert: true, ct);
+                return;
+            }
+
+            var (kind, asin) = (parts[1], parts[2]);
+            await AnswerCallbackAsync(callback.Id, "جاري التجهيز للنشر…", showAlert: false, ct);
+
+            using var scope = _scopeFactory.CreateScope();
+            var prepare = scope.ServiceProvider.GetRequiredService<IPrepareForPublishService>();
+            var telegram = scope.ServiceProvider.GetRequiredService<ITelegramNotifier>();
+            var db = scope.ServiceProvider.GetRequiredService<AffiliateDbContext>();
+
+            var knownPrice = await db.Products
+                .Where(p => p.Asin == asin)
+                .Select(p => p.CurrentPrice)
+                .FirstOrDefaultAsync(ct);
+
+            var result = await prepare.PrepareAsync(asin, knownPrice, ct);
+            if (!result.Success || result.ScreenshotPng is null)
+            {
+                await telegram.SendPlainTextAsync(
+                    chatId,
+                    result.Error ?? "فشل تجهيز المنتج للنشر.",
+                    callback.Message?.MessageId,
+                    ct);
+                return;
+            }
+
+            var productName = result.ProductName ?? asin;
+            var productUrl = result.ProductUrl ?? PrepareForPublishService.BuildProductUrl(asin);
+
+            await telegram.SendPublishPostAsync(
+                chatId, kind, productName, productUrl, result.ScreenshotPng, callback.Message?.MessageId, ct);
+
+            var channelId = _options.Value.PublishChannelId.Trim();
+            if (channelId.Length > 0)
+                await telegram.SendPublishPostAsync(
+                    channelId, kind, productName, productUrl, result.ScreenshotPng, cancellationToken: ct);
+        }
+
         private async Task HandleCallbackAsync(TelegramCallbackQuery callback, CancellationToken ct)
         {
             var data = callback.Data?.Trim() ?? "";
+            if (data.StartsWith(PublishCallbackPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                await HandlePublishCallbackAsync(callback, data, ct);
+                return;
+            }
+
             if (!data.StartsWith(CallbackPrefix, StringComparison.OrdinalIgnoreCase))
                 return;
 
@@ -185,7 +265,7 @@ namespace Affiliate.Services
             // Long poll — allow up to ~35s (client timeout is 30s on TelegramBot; raise via query 25).
             var url =
                 $"https://api.telegram.org/bot{botToken}/getUpdates?timeout=25&offset={_offset}" +
-                "&allowed_updates=%5B%22callback_query%22%5D";
+                "&allowed_updates=%5B%22callback_query%22%2C%22message%22%5D";
 
             using var response = await client.GetAsync(url, ct);
             var body = await response.Content.ReadAsStringAsync(ct);
@@ -246,6 +326,9 @@ namespace Affiliate.Services
 
             [System.Text.Json.Serialization.JsonPropertyName("callback_query")]
             public TelegramCallbackQuery? CallbackQuery { get; set; }
+
+            [System.Text.Json.Serialization.JsonPropertyName("message")]
+            public TelegramCallbackMessage? Message { get; set; }
         }
 
         private sealed class TelegramCallbackQuery
@@ -267,6 +350,9 @@ namespace Affiliate.Services
 
             [System.Text.Json.Serialization.JsonPropertyName("chat")]
             public TelegramChat? Chat { get; set; }
+
+            [System.Text.Json.Serialization.JsonPropertyName("text")]
+            public string? Text { get; set; }
         }
 
         private sealed class TelegramChat
