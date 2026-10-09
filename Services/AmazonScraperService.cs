@@ -840,7 +840,7 @@ namespace Affiliate.Services
 
                             if (result.Organic.Count > 0)
                             {
-                                var pageSaved = await SaveProductsAsync(result.Organic, domain, ct);
+                                var pageSaved = await SaveProductsAsync(result.Organic, domain, ct, allowNew: false);
                                 saved += pageSaved;
                             }
 
@@ -1240,7 +1240,8 @@ namespace Affiliate.Services
             List<OrganicProduct> products,
             string domain,
             CancellationToken ct,
-            int? scraperUrlId = null)
+            int? scraperUrlId = null,
+            bool allowNew = true)
         {
             var byAsin = new Dictionary<string, OrganicProduct>(StringComparer.OrdinalIgnoreCase);
             foreach (var p in products)
@@ -1269,6 +1270,9 @@ namespace Affiliate.Services
                 foreach (var (asin, org) in byAsin)
                 {
                     var isNew = !existing.TryGetValue(asin, out var product);
+
+                    if (isNew && !allowNew)
+                        continue;
 
                     if (!isNew && product!.IsBlocked == true)
                         continue;
