@@ -77,6 +77,12 @@ namespace Affiliate.Services
 
         /// <summary>True when middle history points were omitted from <see cref="History"/>.</summary>
         public bool HistoryTruncated { get; set; }
+
+        /// <summary>Whole days the current price has been the lowest recorded price.</summary>
+        public int LowestPriceDays { get; set; }
+
+        /// <summary>True when no lower price was ever recorded.</summary>
+        public bool IsLowestEver { get; set; }
     }
 
     /// <summary>A price-history data point rendered inside a drop alert (label optional).</summary>
@@ -155,6 +161,9 @@ namespace Affiliate.Services
             // Drops above 50% are mirrored to the cross-category mega deals group.
             if (alert.DropPercent > MegaDealDropPercent && NullIfBlank(_options.MegaDealsChatId) is { } megaChatId)
                 sent |= await SendMessageAsync(megaChatId.Trim(), text, replyMarkup, replyToMessageId: null, cancellationToken);
+
+            if (alert.LowestPriceDays >= LowestPriceGroupMinDays && NullIfBlank(_options.LowestPriceChatId) is { } lowestChatId)
+                sent |= await SendMessageAsync(lowestChatId.Trim(), text, replyMarkup, replyToMessageId: null, cancellationToken);
 
             if (sent)
                 _logger.LogInformation(
@@ -445,6 +454,9 @@ namespace Affiliate.Services
         /// <summary>Discounts strictly above this % use the premium Mega Deal image card.</summary>
         private const decimal MegaDealDropPercent = 50m;
 
+        /// <summary>Drops that are the lowest price for at least this many days also go to the lowest-price group.</summary>
+        private const int LowestPriceGroupMinDays = 30;
+
         /// <summary>Telegram <c>copy_text</c> button payload max length.</summary>
         private const int TelegramCopyTextMaxLength = 256;
 
@@ -506,6 +518,15 @@ namespace Affiliate.Services
                     {
                         ["text"] = "📋 نسخ اسم المنتج",
                         ["copy_text"] = new Dictionary<string, string> { ["text"] = name }
+                    }
+                ]);
+
+                rows.Add(
+                [
+                    new Dictionary<string, object>
+                    {
+                        ["text"] = "🔍 بحث جوجل",
+                        ["url"] = $"https://www.google.com/search?q={Uri.EscapeDataString(name)}"
                     }
                 ]);
             }
@@ -618,6 +639,10 @@ namespace Affiliate.Services
             var sb = new StringBuilder();
 
             sb.AppendLine($"🔻 <b>انخفاض السعر {alert.DropPercent:0.#}%</b>");
+            if (alert.IsLowestEver)
+                sb.AppendLine("🏆 <b><u>أقل سعر على الإطلاق</u></b>");
+            else if (alert.LowestPriceDays > 0)
+                sb.AppendLine($"🔥 <b><u>أقل سعر منذ {alert.LowestPriceDays} يوم</u></b>");
             sb.AppendLine();
             AppendProductHeader(sb, product, name, asin);
             sb.AppendLine($"السعر الحالي: <b>{alert.CurrentPrice} {currency}</b>");

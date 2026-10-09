@@ -29,7 +29,6 @@ namespace Affiliate.Services
 
         /// <summary>How far below the average price the new price must sit to pass the gate.</summary>
         private const decimal MinimumBelowAveragePercent = 3m;
-
         private const int MaxPagesPerSearch = 50;
 
         /// <summary>Tries per URL-scrape page; every retry switches to another proxy.</summary>
@@ -1372,7 +1371,13 @@ namespace Affiliate.Services
                         IReadOnlyList<PriceHistoryPoint> window = truncated
                             ? all.Take(historyEnds).Concat(all.TakeLast(historyEnds)).ToList()
                             : all;
-                        return (History: window, Average: average, Truncated: truncated);
+
+                        // History only records changes, so the latest price has been the lowest since the point after the last lower one.
+                        var lowerIndex = all.FindLastIndex(p => p.Price < all[^1].Price);
+                        var lowestSince = g.ElementAt(lowerIndex + 1).CheckedAt;
+
+                        return (History: window, Average: average, Truncated: truncated,
+                            LowestDays: (DateTime.UtcNow - lowestSince).Days, LowestEver: lowerIndex < 0);
                     });
 
             foreach (var alert in alerts)
@@ -1385,6 +1390,8 @@ namespace Affiliate.Services
                     ? Math.Round(data.Average.Value, 2, MidpointRounding.AwayFromZero)
                     : null;
                 alert.HistoryTruncated = data.Truncated;
+                alert.LowestPriceDays = data.LowestDays;
+                alert.IsLowestEver = data.LowestEver;
             }
         }
 
