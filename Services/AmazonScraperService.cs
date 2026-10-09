@@ -1374,6 +1374,7 @@ namespace Affiliate.Services
                             .ToList();
                         var priced = all.Where(p => p.Price.HasValue).Select(p => p.Price!.Value).ToList();
                         var average = priced.Count > 0 ? priced.Average() : (decimal?)null;
+                        var lowest = priced.Count > 0 ? priced.Min() : (decimal?)null;
                         var truncated = all.Count > historyEnds * 2;
                         IReadOnlyList<PriceHistoryPoint> window = truncated
                             ? all.Take(historyEnds).Concat(all.TakeLast(historyEnds)).ToList()
@@ -1383,7 +1384,7 @@ namespace Affiliate.Services
                         var lowerIndex = all.FindLastIndex(p => p.Price < all[^1].Price);
                         var lowestSince = g.ElementAt(lowerIndex + 1).CheckedAt;
 
-                        return (History: window, Average: average, Truncated: truncated,
+                        return (History: window, Average: average, Lowest: lowest, Truncated: truncated,
                             LowestDays: (DateTime.UtcNow - lowestSince).Days, LowestEver: lowerIndex < 0);
                     });
 
@@ -1396,6 +1397,7 @@ namespace Affiliate.Services
                 alert.AveragePrice = data.Average.HasValue
                     ? Math.Round(data.Average.Value, 2, MidpointRounding.AwayFromZero)
                     : null;
+                alert.LowestPrice = data.Lowest;
                 alert.HistoryTruncated = data.Truncated;
                 alert.LowestPriceDays = data.LowestDays;
                 alert.IsLowestEver = data.LowestEver;

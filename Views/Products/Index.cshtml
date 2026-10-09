@@ -41,17 +41,17 @@
                 </div>
                 <div class="col-sm-6 col-lg-3">
                     <label asp-for="Filter.ScraperUrlId" class="form-label">رابط السكرابر</label>
-                    <select name="ScraperUrlId" class="form-select">
+                    <select id="scraperUrlFilter" name="ScraperUrlId" class="form-select" placeholder="ابحث بالاسم…">
                         <option value="">الكل</option>
                         @foreach (var s in Model.Searches)
                         {
                             if (f.ScraperUrlId == s.Id)
                                 {
-                                    <option value="@s.Id" selected>@s.DisplayLabel</option>
+                                    <option value="@s.Id" selected>@s.Name</option>
                                 }
                                 else
                                 {
-                                    <option value="@s.Id">@s.DisplayLabel</option>
+                                    <option value="@s.Id">@s.Name</option>
                                 }
                         }
                     </select>
@@ -449,6 +449,17 @@
 }
 
 @section Scripts {
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/css/tom-select.bootstrap5.min.css" />
+<script src="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/js/tom-select.complete.min.js"></script>
+<script>
+new TomSelect('#scraperUrlFilter', {
+    allowEmptyOption: true,
+    maxOptions: null,
+    render: {
+        no_results: () => '<div class="no-results">لا توجد نتائج</div>'
+    }
+});
+</script>
 <script>
 (() => {
     const selectAll = document.getElementById('selectAllProducts');

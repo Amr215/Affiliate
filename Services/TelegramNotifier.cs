@@ -75,6 +75,9 @@ namespace Affiliate.Services
         /// <summary>Average of all recorded prices (not only the truncated History window).</summary>
         public decimal? AveragePrice { get; set; }
 
+        /// <summary>Lowest of all recorded prices (not only the truncated History window).</summary>
+        public decimal? LowestPrice { get; set; }
+
         /// <summary>True when middle history points were omitted from <see cref="History"/>.</summary>
         public bool HistoryTruncated { get; set; }
 
@@ -650,6 +653,9 @@ namespace Affiliate.Services
 
             if (alert.BaselinePrice.HasValue)
                 sb.AppendLine($"السعر السابق: {alert.BaselinePrice} {currency}");
+
+            if (alert.LowestPrice.HasValue)
+                sb.AppendLine($"أقل سعر: <b>{alert.LowestPrice:0.##} {currency}</b>");
 
             if (alert.AveragePrice.HasValue)
                 sb.AppendLine($"متوسط السعر: <b>{alert.AveragePrice:0.##} {currency}</b>");

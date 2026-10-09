@@ -237,7 +237,7 @@ namespace Affiliate.Services
                     Success = true,
                     ProductName = productName,
                     ProductUrl = productUrl,
-                    ProductPrice = pagePrice ?? alertPrice,
+                    ProductPrice = usedCart ? (alertPrice ?? pagePrice) : (pagePrice ?? alertPrice),
                     ScreenshotPng = screenshot,
                     UsedCartScreenshot = usedCart
                 };
