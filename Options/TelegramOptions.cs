@@ -31,7 +31,7 @@ namespace Affiliate.Options
         /// <summary>Chat that also receives every drop to the lowest price in at least 30 days.</summary>
         public string LowestPriceChatId { get; set; } = string.Empty;
 
-        /// <summary>Group where posted Amazon links get «نشر عرض / نشر لقطة / نشر ببلاش» buttons.</summary>
+        /// <summary>Group where posted Amazon links get «نشر عرض / نشر عرض ممتاز / نشر لقطة / نشر ببلاش» buttons.</summary>
         public string PublishChatId { get; set; } = string.Empty;
 
         /// <summary>Channel that also receives every post published from the publish group.</summary>

@@ -127,8 +127,15 @@ namespace Affiliate.Services
             var asinsPerPoll = Math.Max(batchSize, _asinRecheck.AsinsPerPoll);
             var domain = string.IsNullOrWhiteSpace(_asinRecheck.Domain) ? "eg" : _asinRecheck.Domain.Trim();
 
+            var now = DateTime.UtcNow;
+            var longUnavailableSince = now.AddHours(-_asinRecheck.LongUnavailableAfterHours);
+            var longUnavailableRecheckBefore = now.AddHours(-_asinRecheck.LongUnavailableRecheckIntervalHours);
+
             var asins = await _db.Products
                 .Where(p => p.IsAvailable && p.IsBlocked != true && p.Asin != null && p.Asin != "")
+                .Where(p => p.NotAvailableDate == null
+                    || p.NotAvailableDate > longUnavailableSince
+                    || p.LastCheckedAt < longUnavailableRecheckBefore)
                 .OrderBy(p => p.LastCheckedAt)
                 .ThenBy(p => p.Id)
                 .Take(asinsPerPoll)

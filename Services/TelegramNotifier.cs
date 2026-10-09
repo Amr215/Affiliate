@@ -39,7 +39,7 @@ namespace Affiliate.Services
             int replyToMessageId,
             CancellationToken cancellationToken = default);
 
-        /// <summary>Publish photo captioned with the template of <paramref name="kind"/> (offer / snap / free).</summary>
+        /// <summary>Publish photo captioned with the template of <paramref name="kind"/> (offer / greatoffer / snap / free).</summary>
         Task<bool> SendPublishPostAsync(
             string chatId,
             string kind,
@@ -268,7 +268,7 @@ namespace Affiliate.Services
 
             var replyMarkup = System.Text.Json.JsonSerializer.Serialize(new
             {
-                inline_keyboard = new[] { Button("نشر عرض", "offer"), Button("نشر لقطة", "snap"), Button("نشر ببلاش", "free") }
+                inline_keyboard = new[] { Button("نشر عرض", "offer"), Button("نشر عرض ممتاز", "greatoffer"), Button("نشر لقطة", "snap"), Button("نشر ببلاش", "free") }
             });
 
             return SendMessageAsync(chatId, Html($"اختر قالب النشر ({asin}):"), replyMarkup, replyToMessageId, cancellationToken);
@@ -291,6 +291,7 @@ namespace Affiliate.Services
             var caption = kind switch
             {
                 "offer" => $"عرض على {name}\n\n{url}",
+                "greatoffer" => $"عرض ممتاز على {name}\n\n{url}",
                 "snap" => $"لقطة\n\n{name}\n\n{url}",
                 "free" => $"ببلاش\n\n{name}\n\n{url}",
                 _ => null
@@ -641,7 +642,7 @@ namespace Affiliate.Services
             sb.AppendLine($"🔻 <b>انخفاض السعر {alert.DropPercent:0.#}%</b>");
             if (alert.IsLowestEver)
                 sb.AppendLine("🏆 <b><u>أقل سعر على الإطلاق</u></b>");
-            else if (alert.LowestPriceDays > 0)
+            else if (alert.LowestPriceDays >= LowestPriceGroupMinDays)
                 sb.AppendLine($"🔥 <b><u>أقل سعر منذ {alert.LowestPriceDays} يوم</u></b>");
             sb.AppendLine();
             AppendProductHeader(sb, product, name, asin);
