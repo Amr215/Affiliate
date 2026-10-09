@@ -45,6 +45,7 @@ namespace Affiliate.Services
             string kind,
             string productName,
             string productUrl,
+            decimal? productPrice,
             byte[] screenshotPng,
             int? replyToMessageId = null,
             CancellationToken cancellationToken = default);
@@ -203,7 +204,7 @@ namespace Affiliate.Services
             CancellationToken cancellationToken = default)
         {
             var name = productName?.Trim() ?? "";
-            var url = productUrl?.Trim() ?? "";
+            var url = ShortenProductUrl(productUrl?.Trim() ?? "");
             var caption = $"{Html(name)}\n{Html(url)}";
             if (caption.Length > 1024)
                 caption = caption[..1021] + "…";
@@ -269,17 +270,20 @@ namespace Affiliate.Services
             string kind,
             string productName,
             string productUrl,
+            decimal? productPrice,
             byte[] screenshotPng,
             int? replyToMessageId = null,
             CancellationToken cancellationToken = default)
         {
             var name = productName.Trim();
-            var url = productUrl.Trim();
+            if (productPrice.HasValue)
+                name += $" بسعر {Math.Truncate(productPrice.Value):0} جنية";
+            var url = ShortenProductUrl(productUrl.Trim());
             var caption = kind switch
             {
-                "offer" => $"عرض على {name}\n{url}",
-                "snap" => $"لقطة\n\n{name}\n{url}",
-                "free" => $"ببلاش\n\n{name}\n{url}",
+                "offer" => $"عرض على {name}\n\n{url}",
+                "snap" => $"لقطة\n\n{name}\n\n{url}",
+                "free" => $"ببلاش\n\n{name}\n\n{url}",
                 _ => null
             };
             if (caption is null)
@@ -447,7 +451,19 @@ namespace Affiliate.Services
         private static string? BuildProductUrl(string? asin) =>
             string.IsNullOrWhiteSpace(asin)
                 ? null
-                : $"https://www.amazon.eg/dp/{asin.Trim()}?language=ar_AE";
+                : $"https://{BuildShortProductUrl(asin)}";
+
+        private static string BuildShortProductUrl(string asin) => $"amazon.eg/dp/{asin.Trim()}";
+
+        private static readonly System.Text.RegularExpressions.Regex DpAsinRegex =
+            new(@"/dp/([A-Za-z0-9]{10})", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+        /// <summary>Rewrites any Amazon product URL to <c>amazon.eg/dp/ASIN</c>; other URLs are returned unchanged.</summary>
+        private static string ShortenProductUrl(string url)
+        {
+            var match = DpAsinRegex.Match(url);
+            return match.Success ? BuildShortProductUrl(match.Groups[1].Value) : url;
+        }
 
         /// <summary>
         /// Inline keyboard: copy product name + open Amazon.
@@ -496,6 +512,15 @@ namespace Affiliate.Services
 
             if (!string.IsNullOrWhiteSpace(productUrl))
             {
+                rows.Add(
+                [
+                    new Dictionary<string, object>
+                    {
+                        ["text"] = "🔗 نسخ الرابط",
+                        ["copy_text"] = new Dictionary<string, string> { ["text"] = ShortenProductUrl(productUrl) }
+                    }
+                ]);
+
                 rows.Add(
                 [
                     new Dictionary<string, object>
@@ -611,7 +636,7 @@ namespace Affiliate.Services
         {
             sb.AppendLine(string.IsNullOrWhiteSpace(product.Asin)
                 ? $"<b>{name}</b>"
-                : $"<a href=\"{Html($"https://www.amazon.eg/dp/{product.Asin.Trim()}?language=ar_AE")}\">{name}</a>");
+                : $"<a href=\"{Html(BuildProductUrl(product.Asin))}\">{name}</a>");
             sb.AppendLine($"ASIN: <code>{asin}</code>");
         }
 

@@ -23,6 +23,7 @@ namespace Affiliate.Services
         public string? Error { get; init; }
         public string? ProductName { get; init; }
         public string? ProductUrl { get; init; }
+        public decimal? ProductPrice { get; init; }
         public byte[]? ScreenshotPng { get; init; }
         public bool UsedCartScreenshot { get; init; }
     }
@@ -197,6 +198,7 @@ namespace Affiliate.Services
 
                 if (pricesMatch)
                 {
+                    await UseNarrowPublishLayoutAsync(page);
                     await HighlightDesktopPublishTargetsAsync(page);
                     screenshot = await CapturePublishScreenshotAsync(page, cart: false);
                 }
@@ -224,6 +226,7 @@ namespace Affiliate.Services
                             "#productTitle, #add-to-cart-button, #corePrice_feature_div",
                             new PageWaitForSelectorOptions { Timeout = 30_000 });
 
+                        await UseNarrowPublishLayoutAsync(page);
                         await HighlightDesktopPublishTargetsAsync(page);
                         screenshot = await CapturePublishScreenshotAsync(page, cart: false);
                     }
@@ -234,6 +237,7 @@ namespace Affiliate.Services
                     Success = true,
                     ProductName = productName,
                     ProductUrl = productUrl,
+                    ProductPrice = pagePrice ?? alertPrice,
                     ScreenshotPng = screenshot,
                     UsedCartScreenshot = usedCart
                 };
@@ -481,9 +485,9 @@ namespace Affiliate.Services
                 """,
                 cart);
 
-            const float maxHeight = 720f;
+            const float maxHeight = 1500f;
             const float pad = 60f;
-            var height = Math.Clamp(contentBottom - y + pad, 280f, maxHeight);
+            var height = Math.Clamp(contentBottom - y + pad, 400f, maxHeight);
             height = Math.Min(height, viewport.Height - y);
 
             return await page.ScreenshotAsync(new PageScreenshotOptions
@@ -535,6 +539,40 @@ namespace Affiliate.Services
             await item.WaitForAsync(new LocatorWaitForOptions { State = WaitForSelectorState.Visible, Timeout = 30_000 });
             return await item.ScreenshotAsync(new LocatorScreenshotOptions { Type = ScreenshotType.Png });
         }
+
+        /// <summary>
+        /// Switches to a narrow, tall viewport so the publish image is portrait — Telegram
+        /// scales images to the chat width, so a narrower capture shows much larger text.
+        /// </summary>
+        private static async Task UseNarrowPublishLayoutAsync(IPage page)
+        {
+            await page.SetViewportSizeAsync(PublishViewportWidth, PublishViewportHeight);
+            await page.EvaluateAsync(
+                """
+                () => {
+                  const style = document.createElement('style');
+                  style.textContent = `
+                    html, body, #a-page, #dp, #dp-container, #ppd, #centerCol, #rightCol,
+                    #leftCol, #navbar, #nav-belt, #nav-main {
+                      min-width: 0 !important;
+                    }
+                  `;
+                  document.head.appendChild(style);
+
+                  // Amazon's fixed column widths may still overflow; shrink the page to fit
+                  // so the RTL buybox (left edge) is never clipped.
+                  const overflow = document.documentElement.scrollWidth;
+                  if (overflow > window.innerWidth + 4) {
+                    document.body.style.zoom = (window.innerWidth / overflow).toString();
+                  }
+                  window.scrollTo(0, 0);
+                }
+                """);
+            await page.WaitForTimeoutAsync(300);
+        }
+
+        private const int PublishViewportWidth = 720;
+        private const int PublishViewportHeight = 1600;
 
         private static async Task HighlightDesktopPublishTargetsAsync(IPage page)
         {

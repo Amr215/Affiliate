@@ -69,7 +69,7 @@ namespace Affiliate.Services
 
         public async Task ProcessScheduledSearchesAsync(CancellationToken ct = default)
         {
-            _logger.LogDebug("URL scraper scheduler waiting for scrape lock (if ASIN recheck is running)");
+            _logger.LogDebug("URL scraper scheduler waiting for scrape lock (if a run-now scrape is running)");
             await _runCoordinator.WaitEnterAsync(ct);
 
             try
@@ -124,135 +124,125 @@ namespace Affiliate.Services
                 return;
             }
 
-            _logger.LogInformation("ASIN recheck waiting for scrape lock (if URL scrape is running)");
-            await _runCoordinator.WaitEnterAsync(ct);
+            var batchSize = Math.Clamp(_asinRecheck.BatchSize, 2, 200);
+            var asinsPerPoll = Math.Max(batchSize, _asinRecheck.AsinsPerPoll);
+            var domain = string.IsNullOrWhiteSpace(_asinRecheck.Domain) ? "eg" : _asinRecheck.Domain.Trim();
 
-            try
+            var asins = await _db.Products
+                .Where(p => p.IsAvailable && p.IsBlocked != true && p.Asin != null && p.Asin != "")
+                .OrderBy(p => p.LastCheckedAt)
+                .ThenBy(p => p.Id)
+                .Take(asinsPerPoll)
+                .Select(p => p.Asin!)
+                .ToListAsync(ct);
+
+            if (asins.Count == 0)
             {
-                var batchSize = Math.Clamp(_asinRecheck.BatchSize, 2, 200);
-                var asinsPerPoll = Math.Max(batchSize, _asinRecheck.AsinsPerPoll);
-                var domain = string.IsNullOrWhiteSpace(_asinRecheck.Domain) ? "eg" : _asinRecheck.Domain.Trim();
+                _logger.LogInformation("ASIN recheck: no available products to check");
+                return;
+            }
 
-                var asins = await _db.Products
-                    .Where(p => p.IsAvailable && p.IsBlocked != true && p.Asin != null && p.Asin != "")
-                    .OrderBy(p => p.LastCheckedAt)
-                    .ThenBy(p => p.Id)
-                    .Take(asinsPerPoll)
-                    .Select(p => p.Asin!)
-                    .ToListAsync(ct);
+            var batches = SplitIntoBatches(asins, batchSize);
+            if (batches.Count == 0)
+            {
+                _logger.LogInformation("ASIN recheck: not enough ASINs for a batch (need ≥2)");
+                return;
+            }
 
-                if (asins.Count == 0)
+            var maxParallel = ResolveParallelism(batches.Count);
+            var startedAtUtc = DateTime.UtcNow;
+            var startedAt = Stopwatch.GetTimestamp();
+            var torBatches = PickTorBatches(batches.Count);
+
+            _logger.LogInformation(
+                "ASIN recheck starting via ISP — {Count} ASINs in {Batches} search request(s) of up to {BatchSize}, {Parallel} in parallel, translateFallback={Translate}, viaTor={TorBatches} (save+alert after each page)",
+                asins.Count, batches.Count, batchSize, maxParallel, TranslateRoute is not null, torBatches.Count);
+
+            var failedBatches = 0;
+            var incompleteBatches = 0;
+            var updated = 0;
+            var unavailable = 0;
+            var pageCounters = new AsinRecheckPageRequestCounters();
+
+            await Parallel.ForEachAsync(
+                Enumerable.Range(0, batches.Count),
+                new ParallelOptions { MaxDegreeOfParallelism = maxParallel, CancellationToken = ct },
+                async (index, token) =>
                 {
-                    _logger.LogInformation("ASIN recheck: no available products to check");
-                    return;
-                }
+                    var batch = batches[index];
 
-                var batches = SplitIntoBatches(asins, batchSize);
-                if (batches.Count == 0)
-                {
-                    _logger.LogInformation("ASIN recheck: not enough ASINs for a batch (need ≥2)");
-                    return;
-                }
+                    if (maxParallel > 1)
+                        await Task.Delay(AmazonBrowserProfile.BatchStaggerMs(index % maxParallel), token);
+                    else if (index > 0)
+                        await Task.Delay(AmazonBrowserProfile.BetweenAsinDelayMs(), token);
 
-                var maxParallel = ResolveParallelism(batches.Count);
-                var startedAtUtc = DateTime.UtcNow;
-                var startedAt = Stopwatch.GetTimestamp();
-                var torBatches = PickTorBatches(batches.Count);
-
-                _logger.LogInformation(
-                    "ASIN recheck starting via ISP — {Count} ASINs in {Batches} search request(s) of up to {BatchSize}, {Parallel} in parallel, translateFallback={Translate}, viaTor={TorBatches} (save+alert after each page)",
-                    asins.Count, batches.Count, batchSize, maxParallel, TranslateRoute is not null, torBatches.Count);
-
-                var failedBatches = 0;
-                var incompleteBatches = 0;
-                var updated = 0;
-                var unavailable = 0;
-                var pageCounters = new AsinRecheckPageRequestCounters();
-
-                await Parallel.ForEachAsync(
-                    Enumerable.Range(0, batches.Count),
-                    new ParallelOptions { MaxDegreeOfParallelism = maxParallel, CancellationToken = ct },
-                    async (index, token) =>
+                    try
                     {
-                        var batch = batches[index];
+                        var (organic, complete, pageSaved) = await FetchAsinBatchSearchViaIspAsync(
+                            batch, domain, index + 1, pageCounters, token,
+                            useTor: torBatches.Contains(index));
 
-                        if (maxParallel > 1)
-                            await Task.Delay(AmazonBrowserProfile.BatchStaggerMs(index % maxParallel), token);
-                        else if (index > 0)
-                            await Task.Delay(AmazonBrowserProfile.BetweenAsinDelayMs(), token);
+                        Interlocked.Add(ref updated, pageSaved);
 
-                        try
+                        if (!complete)
                         {
-                            var (organic, complete, pageSaved) = await FetchAsinBatchSearchViaIspAsync(
-                                batch, domain, index + 1, pageCounters, token,
-                                useTor: torBatches.Contains(index));
-
-                            Interlocked.Add(ref updated, pageSaved);
-
-                            if (!complete)
-                            {
-                                Interlocked.Increment(ref incompleteBatches);
-                                _logger.LogWarning(
-                                    "ASIN recheck batch {Index}: pagination incomplete — leaving missing ASINs unchecked",
-                                    index + 1);
-                                return;
-                            }
-
-                            var returned = new HashSet<string>(
-                                organic
-                                    .Where(p => !string.IsNullOrWhiteSpace(p.Asin))
-                                    .Select(p => p.Asin!),
-                                StringComparer.OrdinalIgnoreCase);
-
-                            var missing = batch
-                                .Where(a => !returned.Contains(a))
-                                .Distinct(StringComparer.OrdinalIgnoreCase)
-                                .ToList();
-
-                            if (missing.Count > 0)
-                            {
-                                var marked = await RecordNotAvailableAsync(missing, token);
-                                Interlocked.Add(ref unavailable, marked);
-                            }
+                            Interlocked.Increment(ref incompleteBatches);
+                            _logger.LogWarning(
+                                "ASIN recheck batch {Index}: pagination incomplete — leaving missing ASINs unchecked",
+                                index + 1);
+                            return;
                         }
-                        catch (Exception ex) when (ex is not OperationCanceledException)
+
+                        var returned = new HashSet<string>(
+                            organic
+                                .Where(p => !string.IsNullOrWhiteSpace(p.Asin))
+                                .Select(p => p.Asin!),
+                            StringComparer.OrdinalIgnoreCase);
+
+                        var missing = batch
+                            .Where(a => !returned.Contains(a))
+                            .Distinct(StringComparer.OrdinalIgnoreCase)
+                            .ToList();
+
+                        if (missing.Count > 0)
                         {
-                            Interlocked.Increment(ref failedBatches);
-                            _logger.LogError(ex,
-                                "ASIN recheck batch failed ({Count} ASINs)", batch.Count);
+                            var marked = await RecordNotAvailableAsync(missing, token);
+                            Interlocked.Add(ref unavailable, marked);
                         }
-                    });
-
-                await FlushPendingLogsAsync(ct);
-
-                var elapsed = Stopwatch.GetElapsedTime(startedAt);
-                var completedAtUtc = DateTime.UtcNow;
-                var successBatches = Math.Max(0, batches.Count - failedBatches - incompleteBatches);
-
-                _pollCache.Record(new AsinRecheckPollSnapshot
-                {
-                    StartedAtUtc = startedAtUtc,
-                    CompletedAtUtc = completedAtUtc,
-                    DurationSeconds = elapsed.TotalSeconds,
-                    AsinsRequested = asins.Count,
-                    BatchCount = batches.Count,
-                    SuccessBatches = successBatches,
-                    FailedBatches = failedBatches,
-                    IncompleteBatches = incompleteBatches,
-                    SuccessPageRequests = pageCounters.Success,
-                    FailedPageRequests = pageCounters.Failed,
-                    Page1Success = pageCounters.Page1Success,
-                    Page2Success = pageCounters.Page2Success
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        Interlocked.Increment(ref failedBatches);
+                        _logger.LogError(ex,
+                            "ASIN recheck batch failed ({Count} ASINs)", batch.Count);
+                    }
                 });
 
-                _logger.LogInformation(
-                    "ASIN recheck completed in {Seconds:0.0}s — {Asins} ASINs, updated={Updated}, recordedNotAvailable={Unavailable}, failedBatches={Failed}, incompleteBatches={Incomplete}",
-                    elapsed.TotalSeconds, asins.Count, updated, unavailable, failedBatches, incompleteBatches);
-            }
-            finally
+            await FlushPendingLogsAsync(ct);
+
+            var elapsed = Stopwatch.GetElapsedTime(startedAt);
+            var completedAtUtc = DateTime.UtcNow;
+            var successBatches = Math.Max(0, batches.Count - failedBatches - incompleteBatches);
+
+            _pollCache.Record(new AsinRecheckPollSnapshot
             {
-                _runCoordinator.Release();
-            }
+                StartedAtUtc = startedAtUtc,
+                CompletedAtUtc = completedAtUtc,
+                DurationSeconds = elapsed.TotalSeconds,
+                AsinsRequested = asins.Count,
+                BatchCount = batches.Count,
+                SuccessBatches = successBatches,
+                FailedBatches = failedBatches,
+                IncompleteBatches = incompleteBatches,
+                SuccessPageRequests = pageCounters.Success,
+                FailedPageRequests = pageCounters.Failed,
+                Page1Success = pageCounters.Page1Success,
+                Page2Success = pageCounters.Page2Success
+            });
+
+            _logger.LogInformation(
+                "ASIN recheck completed in {Seconds:0.0}s — {Asins} ASINs, updated={Updated}, recordedNotAvailable={Unavailable}, failedBatches={Failed}, incompleteBatches={Incomplete}",
+                elapsed.TotalSeconds, asins.Count, updated, unavailable, failedBatches, incompleteBatches);
         }
 
         /// <summary>

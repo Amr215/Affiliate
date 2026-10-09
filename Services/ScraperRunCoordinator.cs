@@ -1,6 +1,6 @@
 namespace Affiliate.Services
 {
-    /// <summary>Ensures only one scrape (URL page or ASIN recheck) runs at a time.</summary>
+    /// <summary>Ensures only one URL scrape (scheduled or run-now) runs at a time. ASIN recheck does not use it.</summary>
     public interface IScraperRunCoordinator
     {
         /// <summary>Tries to take the lock immediately. Returns false if another scrape holds it.</summary>

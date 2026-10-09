@@ -159,13 +159,15 @@ namespace Affiliate.Services
             var productName = result.ProductName ?? asin;
             var productUrl = result.ProductUrl ?? PrepareForPublishService.BuildProductUrl(asin);
 
+            var productPrice = result.ProductPrice ?? knownPrice;
+
             await telegram.SendPublishPostAsync(
-                chatId, kind, productName, productUrl, result.ScreenshotPng, callback.Message?.MessageId, ct);
+                chatId, kind, productName, productUrl, productPrice, result.ScreenshotPng, callback.Message?.MessageId, ct);
 
             var channelId = _options.Value.PublishChannelId.Trim();
             if (channelId.Length > 0)
                 await telegram.SendPublishPostAsync(
-                    channelId, kind, productName, productUrl, result.ScreenshotPng, cancellationToken: ct);
+                    channelId, kind, productName, productUrl, productPrice, result.ScreenshotPng, cancellationToken: ct);
         }
 
         private async Task HandleCallbackAsync(TelegramCallbackQuery callback, CancellationToken ct)
