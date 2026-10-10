@@ -1,4 +1,16 @@
-﻿<!DOCTYPE html>
+﻿@{
+    var controller = ViewContext.RouteData.Values["controller"]?.ToString();
+    var action = ViewContext.RouteData.Values["action"]?.ToString();
+    // Each dashboard has its own navbar; the home page only shows the dashboard cards.
+    var dashboardNav = controller switch
+    {
+        "Home" when action == "Index" => null,
+        "NoonBrands" or "NoonProducts" or "NoonLogs" or "NoonReports" => "_NoonNav",
+        "ProductLinks" => "_LinksNav",
+        _ => "_AmazonNav"
+    };
+}
+<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
     <meta charset="utf-8" />
@@ -28,61 +40,10 @@
                     @if (User.Identity?.IsAuthenticated == true)
                     {
                         <ul class="navbar-nav me-auto mb-2 mb-lg-0 gap-lg-1">
-                            <li class="nav-item">
-                                <a class="nav-link" asp-area="" asp-controller="Home" asp-action="Index">
-                                    <i class="bi bi-house-door"></i> الرئيسية
-                                </a>
-                            </li>
-                            <li class="nav-item">
-                                <a class="nav-link" asp-area="" asp-controller="ScraperUrls" asp-action="Index">
-                                    <i class="bi bi-search"></i> روابط السكرابر
-                                </a>
-                            </li>
-                            <li class="nav-item">
-                                <a class="nav-link" asp-area="" asp-controller="Products" asp-action="Index">
-                                    <i class="bi bi-box-seam"></i> المنتجات
-                                </a>
-                            </li>
-                            <li class="nav-item">
-                                <a class="nav-link" asp-area="" asp-controller="OxylabsLogs" asp-action="Index">
-                                    <i class="bi bi-journal-text"></i> سجلات Oxylabs
-                                </a>
-                            </li>
-                            <li class="nav-item">
-                                <a class="nav-link" asp-area="" asp-controller="IspProxy" asp-action="Index">
-                                    <i class="bi bi-hdd-network"></i> منافذ البروكسي
-                                </a>
-                            </li>
-                            <li class="nav-item">
-                                <a class="nav-link" asp-area="" asp-controller="IspProxy" asp-action="Statistics">
-                                    <i class="bi bi-bar-chart"></i> إحصائيات المنافذ
-                                </a>
-                            </li>
-                            <li class="nav-item">
-                                <a class="nav-link" asp-area="" asp-controller="IspProxy" asp-action="GoogleBlocked">
-                                    <i class="bi bi-translate"></i> محظور من جوجل
-                                </a>
-                            </li>
-                            <li class="nav-item">
-                                <a class="nav-link" asp-area="" asp-controller="AsinRecheckReports" asp-action="Index">
-                                    <i class="bi bi-arrow-repeat"></i> تقرير ASIN
-                                </a>
-                            </li>
-                            <li class="nav-item">
-                                <a class="nav-link" asp-area="" asp-controller="Telegram" asp-action="Index">
-                                    <i class="bi bi-telegram"></i> تيليجرام
-                                </a>
-                            </li>
-                            <li class="nav-item">
-                                <a class="nav-link" asp-area="" asp-controller="Users" asp-action="Index">
-                                    <i class="bi bi-people"></i> المستخدمون
-                                </a>
-                            </li>
-                            <li class="nav-item">
-                                <a class="nav-link" asp-area="" asp-controller="Home" asp-action="Privacy">
-                                    <i class="bi bi-shield-check"></i> الخصوصية
-                                </a>
-                            </li>
+                            @if (dashboardNav is not null)
+                            {
+                                <partial name="@dashboardNav" />
+                            }
                         </ul>
                         <ul class="navbar-nav mb-2 mb-lg-0 align-items-lg-center gap-lg-2">
                             <li class="nav-item">

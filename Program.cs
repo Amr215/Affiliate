@@ -1,5 +1,6 @@
 using Affiliate.Data;
 using Affiliate.Identity;
+using Affiliate.Noon;
 using Affiliate.Options;
 using Affiliate.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -90,6 +91,7 @@ builder.Services.AddHostedService<AsinRecheckBackgroundService>();
 builder.Services.AddHostedService<KeepAliveBackgroundService>();
 builder.Services.AddHostedService<OxylabsRequestLogCleanupService>();
 builder.Services.AddHostedService<TelegramCallbackBackgroundService>();
+builder.Services.AddNoon(builder.Configuration);
 
 var app = builder.Build();
 

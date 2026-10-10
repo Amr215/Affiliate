@@ -6,6 +6,7 @@ using Affiliate.Models.Dtos;
 using Affiliate.Options;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using static Affiliate.Services.PriceDropRules;
 
 namespace Affiliate.Services
 {
@@ -22,13 +23,6 @@ namespace Affiliate.Services
 
     public class AmazonScraperService : IAmazonScraperService
     {
-        private const decimal PriceDropAlertThresholdPercent = 3m;
-
-        /// <summary>Below this drop %, an alert also requires the new price to beat the average price.</summary>
-        private const decimal AveragePriceGateBelowPercent = 10m;
-
-        /// <summary>How far below the average price the new price must sit to pass the gate.</summary>
-        private const decimal MinimumBelowAveragePercent = 3m;
         private const int MaxPagesPerSearch = 50;
 
         /// <summary>Tries per URL-scrape page; every retry switches to another proxy.</summary>
@@ -1314,6 +1308,7 @@ namespace Affiliate.Services
                 {
                     await AttachPriceHistoryAsync(alerts, ct);
                     await AttachCategoriesAsync(alerts, ct);
+                    await AttachLinkedNoonAsync(alerts, ct);
                     if (await DispatchAlertsAsync(alerts, ct))
                         await SaveChangesCoreAsync(ct);
                 }
@@ -1358,49 +1353,27 @@ namespace Affiliate.Services
                 .Where(h => productIds.Contains(h.ProductId) && h.Price != null)
                 .OrderBy(h => h.CheckedAt)
                 .ThenBy(h => h.Id)
-                .Select(h => new { h.ProductId, h.CheckedAt, h.Price })
+                .Select(h => new { h.ProductId, h.CheckedAt, Price = h.Price!.Value })
                 .ToListAsync(ct);
 
-            const int historyEnds = 5;
+            var byProduct = points.ToLookup(p => p.ProductId, p => (p.CheckedAt, p.Price));
+            foreach (var alert in alerts)
+                ApplyHistory(alert, byProduct[alert.Product.Id].ToList());
+        }
 
-            var byProduct = points
-                .GroupBy(p => p.ProductId)
-                .ToDictionary(
-                    g => g.Key,
-                    g =>
-                    {
-                        var all = g
-                            .Select(p => new PriceHistoryPoint(string.Empty, p.Price, p.CheckedAt))
-                            .ToList();
-                        var priced = all.Where(p => p.Price.HasValue).Select(p => p.Price!.Value).ToList();
-                        var average = priced.Count > 0 ? priced.Average() : (decimal?)null;
-                        var lowest = priced.Count > 0 ? priced.Min() : (decimal?)null;
-                        var truncated = all.Count > historyEnds * 2;
-                        IReadOnlyList<PriceHistoryPoint> window = truncated
-                            ? all.Take(historyEnds).Concat(all.TakeLast(historyEnds)).ToList()
-                            : all;
-
-                        // History only records changes, so the latest price has been the lowest since the point after the last lower one.
-                        var lowerIndex = all.FindLastIndex(p => p.Price < all[^1].Price);
-                        var lowestSince = g.ElementAt(lowerIndex + 1).CheckedAt;
-
-                        return (History: window, Average: average, Lowest: lowest, Truncated: truncated,
-                            LowestDays: (DateTime.UtcNow - lowestSince).Days, LowestEver: lowerIndex < 0);
-                    });
+        /// <summary>Adds the price of the linked Noon product, when there is one.</summary>
+        private async Task AttachLinkedNoonAsync(List<ProductDropAlert> alerts, CancellationToken ct)
+        {
+            var productIds = alerts.Select(a => a.Product.Id).ToList();
+            var links = await _db.ProductLinks.AsNoTracking()
+                .Where(l => productIds.Contains(l.ProductId))
+                .Select(l => new { l.ProductId, l.NoonProduct!.CurrentPrice, l.NoonProduct.Url, l.NoonProduct.IsAvailable })
+                .ToDictionaryAsync(l => l.ProductId, ct);
 
             foreach (var alert in alerts)
             {
-                if (!byProduct.TryGetValue(alert.Product.Id, out var data))
-                    continue;
-
-                alert.History = data.History;
-                alert.AveragePrice = data.Average.HasValue
-                    ? Math.Round(data.Average.Value, 2, MidpointRounding.AwayFromZero)
-                    : null;
-                alert.LowestPrice = data.Lowest;
-                alert.HistoryTruncated = data.Truncated;
-                alert.LowestPriceDays = data.LowestDays;
-                alert.IsLowestEver = data.LowestEver;
+                if (links.TryGetValue(alert.Product.Id, out var noon))
+                    alert.Linked = new LinkedOffer("نون", noon.CurrentPrice, noon.Url, noon.IsAvailable);
             }
         }
 
@@ -1441,22 +1414,6 @@ namespace Affiliate.Services
             });
         }
 
-        /// <summary>
-        /// Drops of 10% or more always alert. Smaller drops alert only when the new price is also
-        /// at least 3% below the product's average recorded price, so noise around a high baseline is skipped.
-        /// Requires <see cref="AttachPriceHistoryAsync"/> to have run first.
-        /// </summary>
-        private static bool QualifiesForAlert(ProductDropAlert alert)
-        {
-            if (alert.DropPercent >= AveragePriceGateBelowPercent)
-                return true;
-
-            return alert.AveragePrice is > 0
-                && alert.CurrentPrice is > 0
-                && TryPercentOff(alert.AveragePrice.Value, alert.CurrentPrice.Value, out var belowAverage)
-                && RoundPct(belowAverage) >= MinimumBelowAveragePercent;
-        }
-
         private async Task<bool> DispatchAlertsAsync(List<ProductDropAlert> alerts, CancellationToken ct)
         {
             var sentAny = false;
@@ -1480,18 +1437,6 @@ namespace Affiliate.Services
 
             return sentAny;
         }
-
-        private static bool TryPercentOff(decimal original, decimal current, out decimal percent)
-        {
-            percent = 0;
-            if (original <= 0 || current < 0 || current >= original)
-                return false;
-            percent = (original - current) / original * 100m;
-            return true;
-        }
-
-        private static decimal RoundPct(decimal percent) =>
-            Math.Round(percent, 2, MidpointRounding.AwayFromZero);
 
         /// <summary>Sets or replaces the <c>page</c> query parameter on an Amazon search URL.</summary>
         internal static string BuildPageUrl(string baseUrl, int page)

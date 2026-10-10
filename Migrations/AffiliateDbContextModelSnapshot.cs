@@ -227,6 +227,34 @@ namespace Affiliate.Migrations
                     b.ToTable("Products");
                 });
 
+            modelBuilder.Entity("Affiliate.Models.ProductLink", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("NoonProductId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ProductId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("NoonProductId")
+                        .IsUnique();
+
+                    b.HasIndex("ProductId")
+                        .IsUnique();
+
+                    b.ToTable("ProductLinks");
+                });
+
             modelBuilder.Entity("Affiliate.Models.ScraperUrl", b =>
                 {
                     b.Property<int>("Id")
@@ -274,6 +302,232 @@ namespace Affiliate.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("ScraperUrls", (string)null);
+                });
+
+            modelBuilder.Entity("Affiliate.Noon.Models.NoonBrandUrl", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<bool>("IsEnabled")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTime?>("LastRunAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("LastRunError")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int?>("LastRunProductCount")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("Url")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("NoonBrandUrls");
+                });
+
+            modelBuilder.Entity("Affiliate.Noon.Models.NoonPriceHistory", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CheckedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("NoonProductId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal?>("OriginalPrice")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal?>("Price")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("NoonProductId");
+
+                    b.ToTable("NoonPriceHistories");
+                });
+
+            modelBuilder.Entity("Affiliate.Noon.Models.NoonProduct", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Brand")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasMaxLength(8)
+                        .HasColumnType("nvarchar(8)");
+
+                    b.Property<decimal?>("CurrentPrice")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal?>("DropBaselinePrice")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal?>("DropPercent")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal?>("HighestPrice")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("ImageUrl")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IsAvailable")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsBestSeller")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsBlocked")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTime>("LastCheckedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<decimal?>("LastDropAlertPercent")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal?>("LowestPrice")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int?>("NoonBrandUrlId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("NotAvailableDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<decimal?>("OriginalPrice")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<double?>("Rating")
+                        .HasColumnType("float");
+
+                    b.Property<int?>("ReviewsCount")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Sku")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<string>("StoreName")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Url")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("NoonBrandUrlId");
+
+                    b.HasIndex("Sku")
+                        .IsUnique();
+
+                    b.ToTable("NoonProducts");
+                });
+
+            modelBuilder.Entity("Affiliate.Noon.Models.NoonRequestLog", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<int>("Attempt")
+                        .HasColumnType("int");
+
+                    b.Property<int>("DurationMs")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int?>("NbHits")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("NbPages")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("NoonBrandUrlId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Outcome")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Page")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Proxy")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("RequestUrl")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<DateTime>("RequestedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("ResponseBody")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("StatusCode")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RequestedAt");
+
+                    b.HasIndex("NoonBrandUrlId", "RequestedAt");
+
+                    b.ToTable("NoonRequestLogs");
                 });
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRole", b =>
@@ -505,6 +759,56 @@ namespace Affiliate.Migrations
                     b.Navigation("ScraperUrl");
                 });
 
+            modelBuilder.Entity("Affiliate.Models.ProductLink", b =>
+                {
+                    b.HasOne("Affiliate.Noon.Models.NoonProduct", "NoonProduct")
+                        .WithMany()
+                        .HasForeignKey("NoonProductId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Affiliate.Models.Product", "Product")
+                        .WithMany()
+                        .HasForeignKey("ProductId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("NoonProduct");
+
+                    b.Navigation("Product");
+                });
+
+            modelBuilder.Entity("Affiliate.Noon.Models.NoonPriceHistory", b =>
+                {
+                    b.HasOne("Affiliate.Noon.Models.NoonProduct", "NoonProduct")
+                        .WithMany("PriceHistory")
+                        .HasForeignKey("NoonProductId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("NoonProduct");
+                });
+
+            modelBuilder.Entity("Affiliate.Noon.Models.NoonProduct", b =>
+                {
+                    b.HasOne("Affiliate.Noon.Models.NoonBrandUrl", "NoonBrandUrl")
+                        .WithMany("Products")
+                        .HasForeignKey("NoonBrandUrlId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("NoonBrandUrl");
+                });
+
+            modelBuilder.Entity("Affiliate.Noon.Models.NoonRequestLog", b =>
+                {
+                    b.HasOne("Affiliate.Noon.Models.NoonBrandUrl", "NoonBrandUrl")
+                        .WithMany()
+                        .HasForeignKey("NoonBrandUrlId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("NoonBrandUrl");
+                });
+
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRoleClaim<string>", b =>
                 {
                     b.HasOne("Microsoft.AspNetCore.Identity.IdentityRole", null)
@@ -566,6 +870,16 @@ namespace Affiliate.Migrations
                     b.Navigation("OxylabsRequestLogs");
 
                     b.Navigation("Products");
+                });
+
+            modelBuilder.Entity("Affiliate.Noon.Models.NoonBrandUrl", b =>
+                {
+                    b.Navigation("Products");
+                });
+
+            modelBuilder.Entity("Affiliate.Noon.Models.NoonProduct", b =>
+                {
+                    b.Navigation("PriceHistory");
                 });
 #pragma warning restore 612, 618
         }

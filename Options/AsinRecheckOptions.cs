@@ -25,7 +25,7 @@ namespace Affiliate.Options
         public int AsinsPerPoll { get; set; } = 1000;
 
         /// <summary>Batches fetched concurrently within one poll.</summary>
-        public int MaxParallelBatches { get; set; } = 10;
+        public int MaxParallelBatches { get; set; } = 100;
 
         /// <summary>Shortest gap between cycles when a poll overruns its interval.</summary>
         public int MinimumGapSeconds { get; set; } = 3;

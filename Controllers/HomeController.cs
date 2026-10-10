@@ -1,7 +1,11 @@
 using System.Diagnostics;
+using Affiliate.Data;
 using Affiliate.Models;
+using Affiliate.Noon.Models;
+using Affiliate.ViewModels;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace Affiliate.Controllers
 {
@@ -14,9 +18,21 @@ namespace Affiliate.Controllers
             _logger = logger;
         }
 
-        public IActionResult Index()
+        public async Task<IActionResult> Index([FromServices] AffiliateDbContext db)
         {
-            return RedirectToAction("Index", "ScraperUrls");
+            var since = DateTime.UtcNow.AddHours(-1);
+            return View(new HomeDashboardViewModel
+            {
+                AmazonProducts = await db.Products.CountAsync(),
+                AmazonAvailable = await db.Products.CountAsync(p => p.IsAvailable),
+                AmazonUrls = await db.ScraperUrls.CountAsync(s => s.IsEnabled),
+                NoonProducts = await db.NoonProducts.CountAsync(),
+                NoonAvailable = await db.NoonProducts.CountAsync(p => p.IsAvailable),
+                NoonBrands = await db.NoonBrandUrls.CountAsync(b => b.IsEnabled),
+                NoonRequestsLastHour = await db.NoonRequestLogs.CountAsync(l => l.RequestedAt >= since),
+                NoonFailedLastHour = await db.NoonRequestLogs.CountAsync(l => l.RequestedAt >= since && l.Outcome != NoonRequestOutcome.Success),
+                Links = await db.ProductLinks.CountAsync()
+            });
         }
 
         public IActionResult Privacy()

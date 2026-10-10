@@ -1,48 +1,45 @@
-﻿@{
+﻿@model HomeDashboardViewModel
+@{
     ViewData["Title"] = "الرئيسية";
 }
 
-<section class="page-hero text-center">
-    <h1 class="display-5 display-title">Affiliate</h1>
-    <p class="lead mb-4">متابعة أسعار أمازون وتنبيهات الخصم عبر السكرابر والتيليجرام.</p>
-    <div class="home-actions">
-        <a asp-controller="Products" asp-action="Index" class="btn btn-light btn-lg">
-            <i class="bi bi-box-seam"></i> عرض المنتجات
-        </a>
-        <a asp-controller="ScraperUrls" asp-action="Index" class="btn btn-outline-light btn-lg">
-            <i class="bi bi-search"></i> روابط السكرابر
-        </a>
-    </div>
-</section>
-
 <div class="row g-3 feature-grid">
     <div class="col-md-4">
-        <div class="card feature-card h-100">
+        <div class="card feature-card h-100 position-relative">
             <div class="card-body">
-                <div class="feature-icon"><i class="bi bi-search"></i></div>
-                <h2 class="h5">روابط السكرابر</h2>
-                <p class="text-muted mb-3">جلب صفحات أمازون عبر ISP proxy ثم تحليل المنتجات وحفظها تلقائياً.</p>
-                <a asp-controller="ScraperUrls" asp-action="Index" class="btn btn-sm btn-outline-primary">إدارة الروابط</a>
+                <div class="feature-icon"><i class="bi bi-amazon"></i></div>
+                <h2 class="h5">لوحة أمازون</h2>
+                <ul class="list-unstyled text-muted mb-0">
+                    <li>المنتجات: <span class="num">@Model.AmazonProducts</span> (متوفر <span class="num">@Model.AmazonAvailable</span>)</li>
+                    <li>روابط مفعّلة: <span class="num">@Model.AmazonUrls</span></li>
+                </ul>
+                <a asp-controller="ScraperUrls" asp-action="Index" class="stretched-link" aria-label="لوحة أمازون"></a>
             </div>
         </div>
     </div>
     <div class="col-md-4">
-        <div class="card feature-card h-100">
+        <div class="card feature-card h-100 position-relative">
             <div class="card-body">
-                <div class="feature-icon"><i class="bi bi-graph-up"></i></div>
-                <h2 class="h5">تتبع الأسعار</h2>
-                <p class="text-muted mb-3">مراقبة تغيّر الأسعار وتاريخ الخصومات للمنتجات المحفوظة.</p>
-                <a asp-controller="Products" asp-action="Index" class="btn btn-sm btn-outline-primary">عرض المنتجات</a>
+                <div class="feature-icon"><i class="bi bi-bag"></i></div>
+                <h2 class="h5">لوحة نون</h2>
+                <ul class="list-unstyled text-muted mb-0">
+                    <li>المنتجات: <span class="num">@Model.NoonProducts</span> (متوفر <span class="num">@Model.NoonAvailable</span>)</li>
+                    <li>براندات مفعّلة: <span class="num">@Model.NoonBrands</span></li>
+                    <li>طلبات آخر ساعة: <span class="num">@Model.NoonRequestsLastHour</span> (فشل <span class="num">@Model.NoonFailedLastHour</span>)</li>
+                </ul>
+                <a asp-controller="NoonBrands" asp-action="Index" class="stretched-link" aria-label="لوحة نون"></a>
             </div>
         </div>
     </div>
     <div class="col-md-4">
-        <div class="card feature-card h-100">
+        <div class="card feature-card h-100 position-relative">
             <div class="card-body">
-                <div class="feature-icon"><i class="bi bi-telegram"></i></div>
-                <h2 class="h5">تنبيهات تيليجرام</h2>
-                <p class="text-muted mb-3">إرسال إشعارات عند انخفاض السعر بنسبة محددة.</p>
-                <a asp-controller="Telegram" asp-action="Index" class="btn btn-sm btn-outline-primary">إعدادات تيليجرام</a>
+                <div class="feature-icon"><i class="bi bi-link-45deg"></i></div>
+                <h2 class="h5">ربط أمازون ونون</h2>
+                <ul class="list-unstyled text-muted mb-0">
+                    <li>منتجات مربوطة: <span class="num">@Model.Links</span></li>
+                </ul>
+                <a asp-controller="ProductLinks" asp-action="Index" class="stretched-link" aria-label="ربط أمازون ونون"></a>
             </div>
         </div>
     </div>

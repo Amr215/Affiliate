@@ -1,4 +1,5 @@
 using Affiliate.Models;
+using Affiliate.Noon.Models;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
@@ -15,6 +16,11 @@ namespace Affiliate.Data
         public DbSet<PriceHistory> PriceHistories { get; set; }
         public DbSet<ScraperUrl> ScraperUrls { get; set; }
         public DbSet<OxylabsRequestLog> OxylabsRequestLogs { get; set; }
+        public DbSet<NoonBrandUrl> NoonBrandUrls { get; set; }
+        public DbSet<NoonProduct> NoonProducts { get; set; }
+        public DbSet<NoonPriceHistory> NoonPriceHistories { get; set; }
+        public DbSet<NoonRequestLog> NoonRequestLogs { get; set; }
+        public DbSet<ProductLink> ProductLinks { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -75,6 +81,67 @@ namespace Affiliate.Data
                 .WithMany(p => p.PriceHistory)
                 .HasForeignKey(ph => ph.ProductId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<NoonBrandUrl>(entity =>
+            {
+                entity.Property(b => b.Name).HasMaxLength(200);
+                entity.Property(b => b.Url).HasMaxLength(4000);
+            });
+
+            modelBuilder.Entity<NoonProduct>(entity =>
+            {
+                entity.Property(p => p.Sku).HasMaxLength(32);
+                entity.HasIndex(p => p.Sku).IsUnique();
+                entity.Property(p => p.Currency).HasMaxLength(8);
+                entity.Property(p => p.CurrentPrice).HasPrecision(18, 2);
+                entity.Property(p => p.OriginalPrice).HasPrecision(18, 2);
+                entity.Property(p => p.LowestPrice).HasPrecision(18, 2);
+                entity.Property(p => p.HighestPrice).HasPrecision(18, 2);
+                entity.Property(p => p.DropPercent).HasPrecision(18, 2);
+                entity.Property(p => p.DropBaselinePrice).HasPrecision(18, 2);
+                entity.Property(p => p.LastDropAlertPercent).HasPrecision(18, 2);
+
+                entity.HasOne(p => p.NoonBrandUrl)
+                    .WithMany(b => b.Products)
+                    .HasForeignKey(p => p.NoonBrandUrlId)
+                    .OnDelete(DeleteBehavior.SetNull);
+            });
+
+            modelBuilder.Entity<NoonPriceHistory>(entity =>
+            {
+                entity.Property(h => h.Price).HasPrecision(18, 2);
+                entity.Property(h => h.OriginalPrice).HasPrecision(18, 2);
+                entity.HasOne(h => h.NoonProduct)
+                    .WithMany(p => p.PriceHistory)
+                    .HasForeignKey(h => h.NoonProductId)
+                    .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            modelBuilder.Entity<NoonRequestLog>(entity =>
+            {
+                entity.Property(l => l.Proxy).HasMaxLength(64);
+                entity.Property(l => l.RequestUrl).HasMaxLength(4000);
+                entity.HasIndex(l => l.RequestedAt);
+                entity.HasIndex(l => new { l.NoonBrandUrlId, l.RequestedAt });
+                entity.HasOne(l => l.NoonBrandUrl)
+                    .WithMany()
+                    .HasForeignKey(l => l.NoonBrandUrlId)
+                    .OnDelete(DeleteBehavior.SetNull);
+            });
+
+            modelBuilder.Entity<ProductLink>(entity =>
+            {
+                entity.HasIndex(l => l.ProductId).IsUnique();
+                entity.HasIndex(l => l.NoonProductId).IsUnique();
+                entity.HasOne(l => l.Product)
+                    .WithMany()
+                    .HasForeignKey(l => l.ProductId)
+                    .OnDelete(DeleteBehavior.Cascade);
+                entity.HasOne(l => l.NoonProduct)
+                    .WithMany()
+                    .HasForeignKey(l => l.NoonProductId)
+                    .OnDelete(DeleteBehavior.Cascade);
+            });
         }
     }
 }

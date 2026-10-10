@@ -1,0 +1,115 @@
+@model NoonProxiesViewModel
+@{
+    ViewData["Title"] = "منافذ البروكسي";
+}
+
+<div class="page-toolbar">
+    <div>
+        <h1 class="h2">منافذ البروكسي — نون</h1>
+        <p class="text-muted mb-0">
+            <span class="stat-pill"><i class="bi bi-check-circle"></i> @Model.AvailableCount متاح</span>
+            <span class="stat-pill"><i class="bi bi-slash-circle"></i> @Model.BlockedCount محظور</span>
+        </p>
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+        <a class="btn btn-outline-primary" asp-action="Statistics">
+            <i class="bi bi-bar-chart"></i> إحصائيات المنافذ
+        </a>
+        <a class="btn btn-outline-secondary" asp-action="Proxies">
+            <i class="bi bi-arrow-clockwise"></i> تحديث
+        </a>
+    </div>
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-sm-6 col-lg-3">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="text-muted small mb-1">الحالة</div>
+                <div class="fw-bold">
+                    <span class="status-dot @(Model.Enabled ? "on" : "off")"></span>
+                    @(Model.Enabled ? "مفعّل" : "معطّل")
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="text-muted small mb-1">عدد البروكسيات</div>
+                <div class="fw-bold ltr">@Model.Proxies.Count</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="text-muted small mb-1">سياسة الحظر</div>
+                <div class="fw-bold">@Model.ConsecutiveFailuresBeforeBlock فشل → @Model.BlockDurationSeconds ث</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-hdd-network"></i> حالة المنافذ على نون</span>
+        <span class="text-muted small">مستقلة عن حظر أمازون — يُحدَّث عند إعادة تحميل الصفحة</span>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-hover mb-0 align-middle">
+            <thead>
+                <tr>
+                    <th class="ltr">البروكسي</th>
+                    <th>الحالة</th>
+                    <th>إخفاقات متتالية</th>
+                    <th>متبقي من الحظر</th>
+                    <th class="ltr">ينتهي الحظر (UTC)</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+            @if (Model.Proxies.Count == 0)
+            {
+                <tr>
+                    <td colspan="6" class="text-center text-muted py-4">لا توجد بروكسيات مُعدّة</td>
+                </tr>
+            }
+            else
+            {
+                foreach (var proxy in Model.Proxies)
+                {
+                    <tr class="@(proxy.IsBlocked ? "table-danger" : null)">
+                        <td class="fw-semibold ltr">@proxy.Key</td>
+                        <td>
+                            @if (proxy.IsBlocked)
+                            {
+                                <span class="badge text-bg-danger"><i class="bi bi-slash-circle"></i> محظور</span>
+                            }
+                            else
+                            {
+                                <span class="badge text-bg-success"><i class="bi bi-check-circle"></i> متاح</span>
+                            }
+                        </td>
+                        <td class="ltr">@proxy.ConsecutiveFailures</td>
+                        <td class="ltr">
+                            @if (proxy.RemainingBlockSeconds is int secs)
+                            {
+                                <span>@secs ث</span>
+                            }
+                            else
+                            {
+                                <span class="text-muted">—</span>
+                            }
+                        </td>
+                        <td class="ltr small">@(proxy.BlockedUntilUtc?.ToString("yyyy-MM-dd HH:mm:ss") ?? "—")</td>
+                        <td class="text-nowrap">
+                            <a asp-controller="NoonLogs" asp-action="Index" asp-route-Proxy="@proxy.Key" class="btn btn-sm btn-outline-primary">السجلات</a>
+                        </td>
+                    </tr>
+                }
+            }
+            </tbody>
+        </table>
+    </div>
+</div>

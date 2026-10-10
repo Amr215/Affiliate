@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json.Serialization;
 using System.Web;
 using Affiliate.Models;
+using Affiliate.Noon.Models;
 using Affiliate.Options;
 using Microsoft.Extensions.Options;
 
@@ -12,6 +13,9 @@ namespace Affiliate.Services
     {
         /// <summary>Returns true when the price-drop message was delivered to the main chat.</summary>
         Task<bool> NotifyDropAsync(ProductDropAlert alert, CancellationToken cancellationToken = default);
+
+        /// <summary>Sends a Noon price drop to the Noon chat.</summary>
+        Task<bool> NotifyNoonDropAsync(NoonDropAlert alert, CancellationToken cancellationToken = default);
 
         /// <summary>Sends a plain test message to verify BotToken/ChatId.</summary>
         Task<(bool Success, string Detail)> SendTestMessageAsync(CancellationToken cancellationToken = default);
@@ -51,15 +55,29 @@ namespace Affiliate.Services
             CancellationToken cancellationToken = default);
     }
 
-    public sealed class ProductDropAlert
+    public sealed class ProductDropAlert : PriceDropAlert
     {
         public required Product Product { get; init; }
 
+        /// <summary>Category of the URL scrape that owns the product; null alerts are not published.</summary>
+        public ScraperCategory? Category { get; set; }
+    }
+
+    public sealed class NoonDropAlert : PriceDropAlert
+    {
+        public required NoonProduct Product { get; init; }
+    }
+
+    /// <summary>The same product in the other store, shown under the alert.</summary>
+    public sealed record LinkedOffer(string Store, decimal? Price, string Url, bool IsAvailable);
+
+    public abstract class PriceDropAlert
+    {
         /// <summary>Percent drop of the current price versus the previous recorded price.</summary>
         public required decimal DropPercent { get; init; }
 
-        /// <summary>Category of the URL scrape that owns the product; null alerts are not published.</summary>
-        public ScraperCategory? Category { get; set; }
+        /// <summary>Linked product in the other store, when one is linked.</summary>
+        public LinkedOffer? Linked { get; set; }
 
         /// <summary>Previous recorded price the drop is measured against.</summary>
         public decimal? BaselinePrice { get; init; }
@@ -141,7 +159,7 @@ namespace Affiliate.Services
                 productUrl,
                 alert.Product.Asin,
                 alert.CurrentPrice);
-            var text = BuildDropHtml(alert);
+            var text = BuildDropHtml(alert, AmazonProductHeader(alert.Product), alert.Product.Currency);
 
             // Mega deals used a colored card image; kept commented out until the card design is finalised.
             // if (alert.DropPercent > MegaDealDropPercent)
@@ -177,6 +195,29 @@ namespace Affiliate.Services
                     "Telegram drop alert failed for {Asin} ({Percent}% → {Category} chat {ChatId})",
                     alert.Product.Asin, alert.DropPercent, alert.Category, categoryChatId);
 
+            return sent;
+        }
+
+        public async Task<bool> NotifyNoonDropAsync(NoonDropAlert alert, CancellationToken cancellationToken = default)
+        {
+            var product = alert.Product;
+            if (!_options.Enabled || NullIfBlank(_options.BotToken) is null || NullIfBlank(_options.NoonChatId) is not { } chatId)
+            {
+                _logger.LogInformation(
+                    "Telegram disabled or not configured for Noon — Noon drop alert not sent: {Sku} {Percent}%",
+                    product.Sku, alert.DropPercent);
+                return false;
+            }
+
+            var header = $"<a href=\"{Html(product.Url)}\">{Html(product.Name)}</a>\nSKU: <code>{Html(product.Sku)}</code>\n";
+            var text = BuildDropHtml(alert, header, product.Currency);
+            var replyMarkup = BuildAlertReplyMarkupJson(product.Name, product.Url, null, alert.CurrentPrice, "🛒 فتح نون");
+
+            var sent = await SendMessageAsync(chatId.Trim(), text, replyMarkup, replyToMessageId: null, cancellationToken);
+            _logger.Log(
+                sent ? LogLevel.Information : LogLevel.Warning,
+                "Telegram Noon drop alert {Result} for {Sku} ({Percent}%)",
+                sent ? "sent" : "failed", product.Sku, alert.DropPercent);
             return sent;
         }
 
@@ -489,7 +530,8 @@ namespace Affiliate.Services
             string? productName,
             string? productUrl,
             string? asin,
-            decimal? currentPrice)
+            decimal? currentPrice,
+            string openLabel = "🛒 فتح أمازون")
         {
             var rows = new List<object[]>();
 
@@ -550,7 +592,7 @@ namespace Affiliate.Services
                 [
                     new Dictionary<string, object>
                     {
-                        ["text"] = "🛒 فتح أمازون",
+                        ["text"] = openLabel,
                         ["url"] = productUrl
                     }
                 ]);
@@ -634,12 +676,10 @@ namespace Affiliate.Services
             }
         }
 
-        private static string BuildDropHtml(ProductDropAlert alert)
+        /// <param name="productHeaderHtml">Product link and id lines, each ending with a newline.</param>
+        private static string BuildDropHtml(PriceDropAlert alert, string productHeaderHtml, string? productCurrency)
         {
-            var product = alert.Product;
-            var name = Html(product.Name);
-            var asin = Html(product.Asin ?? "");
-            var currency = Html(product.Currency ?? "");
+            var currency = Html(productCurrency ?? "");
             var sb = new StringBuilder();
 
             sb.AppendLine($"🔻 <b>انخفاض السعر {alert.DropPercent:0.#}%</b>");
@@ -648,7 +688,7 @@ namespace Affiliate.Services
             else if (alert.LowestPriceDays >= LowestPriceGroupMinDays)
                 sb.AppendLine($"🔥 <b><u>أقل سعر منذ {alert.LowestPriceDays} يوم</u></b>");
             sb.AppendLine();
-            AppendProductHeader(sb, product, name, asin);
+            sb.Append(productHeaderHtml);
             sb.AppendLine($"السعر الحالي: <b>{alert.CurrentPrice} {currency}</b>");
 
             if (alert.BaselinePrice.HasValue)
@@ -660,21 +700,29 @@ namespace Affiliate.Services
             if (alert.AveragePrice.HasValue)
                 sb.AppendLine($"متوسط السعر: <b>{alert.AveragePrice:0.##} {currency}</b>");
 
+            if (alert.Linked is { } linked)
+            {
+                var price = linked.Price.HasValue ? $"{linked.Price:0.##} {currency}" : "—";
+                var availability = linked.IsAvailable ? "" : " (غير متاح)";
+                sb.AppendLine($"السعر على {Html(linked.Store)}: <a href=\"{Html(linked.Url)}\">{price}</a>{availability}");
+            }
+
             AppendPriceHistory(sb, alert, currency, megaDeal: false);
             return sb.ToString().TrimEnd();
         }
 
-        private static void AppendProductHeader(StringBuilder sb, Product product, string name, string asin)
+        private static string AmazonProductHeader(Product product)
         {
-            sb.AppendLine(string.IsNullOrWhiteSpace(product.Asin)
+            var name = Html(product.Name);
+            var link = string.IsNullOrWhiteSpace(product.Asin)
                 ? $"<b>{name}</b>"
-                : $"<a href=\"{Html(BuildProductUrl(product.Asin))}\">{name}</a>");
-            sb.AppendLine($"ASIN: <code>{asin}</code>");
+                : $"<a href=\"{Html(BuildProductUrl(product.Asin))}\">{name}</a>";
+            return $"{link}\nASIN: <code>{Html(product.Asin ?? "")}</code>\n";
         }
 
         private static void AppendPriceHistory(
             StringBuilder sb,
-            ProductDropAlert alert,
+            PriceDropAlert alert,
             string currency,
             bool megaDeal)
         {

@@ -1,0 +1,63 @@
+@{
+    ViewData["Title"] = "ربط منتجين";
+}
+
+<div class="page-toolbar">
+    <h1 class="h2">ربط منتج أمازون بمنتج نون</h1>
+    <a asp-action="Index" class="btn btn-outline-secondary">العودة</a>
+</div>
+
+@if (TempData["StatusMessage"] is string message)
+{
+    <div class="alert alert-warning">@message</div>
+}
+
+<form asp-action="Create" method="post">
+    <div class="row g-3">
+        @foreach (var (store, label, action) in new[] { ("productId", "أمازون (الاسم أو ASIN)", "SearchAmazon"), ("noonProductId", "نون (الاسم أو SKU)", "SearchNoon") })
+        {
+            <div class="col-md-6">
+                <label class="form-label">@label</label>
+                <input type="search" class="form-control product-search" data-url="@Url.Action(action)" data-target="@store" autocomplete="off" />
+                <input type="hidden" name="@store" id="@store" />
+                <div class="form-text selected-product" data-for="@store">لم يتم الاختيار</div>
+                <div class="list-group mt-2 search-results" data-for="@store"></div>
+            </div>
+        }
+    </div>
+    <button type="submit" class="btn btn-primary mt-4">ربط</button>
+</form>
+
+@section Scripts {
+<script>
+document.querySelectorAll('.product-search').forEach(input => {
+    const target = input.dataset.target;
+    const results = document.querySelector(`.search-results[data-for="${target}"]`);
+    const selected = document.querySelector(`.selected-product[data-for="${target}"]`);
+    let timer;
+
+    input.addEventListener('input', () => {
+        clearTimeout(timer);
+        timer = setTimeout(async () => {
+            const q = input.value.trim();
+            results.innerHTML = '';
+            if (q.length < 2) return;
+
+            const items = await (await fetch(`${input.dataset.url}?q=${encodeURIComponent(q)}`)).json();
+            for (const item of items) {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'list-group-item list-group-item-action';
+                button.textContent = `${item.name} — ${item.code ?? ''} — ${item.price ?? '—'}`;
+                button.addEventListener('click', () => {
+                    document.getElementById(target).value = item.id;
+                    selected.textContent = button.textContent;
+                    results.innerHTML = '';
+                });
+                results.appendChild(button);
+            }
+        }, 300);
+    });
+});
+</script>
+}

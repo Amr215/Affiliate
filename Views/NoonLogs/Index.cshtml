@@ -1,0 +1,240 @@
+@model NoonLogsIndexViewModel
+@{
+    ViewData["Title"] = "سجلات طلبات نون";
+    var f = Model.Filter;
+}
+
+<div class="page-toolbar">
+    <div>
+        <h1 class="h2">سجلات طلبات نون</h1>
+        <p class="text-muted mb-0 d-flex flex-wrap gap-2">
+            <span class="stat-pill"><i class="bi bi-journal-text"></i> @Model.TotalCount سجل</span>
+            <span class="stat-pill" title="طلبات ناجحة جُلبت عبر البروكسي">
+                <i class="bi bi-check-circle text-success"></i> @Model.SuccessCount ناجح
+            </span>
+            <span class="stat-pill" title="طلبات فاشلة (حظر، مهلة، خطأ اتصال أو صفحة بدون منتجات)">
+                <i class="bi bi-x-circle text-danger"></i> @(Model.TotalCount - Model.SuccessCount) فاشل
+            </span>
+            <span class="stat-pill" title="الطلبات الناجحة ضمن السجلات المعروضة في هذه الصفحة">
+                <i class="bi bi-file-earmark-check"></i> @Model.SuccessOnPageCount ناجح ضمن المعروض
+            </span>
+        </p>
+    </div>
+</div>
+
+<form method="get" asp-action="Index" class="card filter-card mb-4">
+    <div class="card-header"><i class="bi bi-funnel"></i> عوامل التصفية</div>
+    <div class="card-body">
+        <div class="row g-3">
+            <div class="col-sm-6 col-lg-3">
+                <label class="form-label">رابط البراند</label>
+                <select name="BrandId" class="form-select">
+                    <option value="">الكل</option>
+                    @foreach (var b in Model.Brands)
+                    {
+                        if (f.BrandId == b.Id)
+                        {
+                            <option value="@b.Id" selected>@b.Name</option>
+                        }
+                        else
+                        {
+                            <option value="@b.Id">@b.Name</option>
+                        }
+                    }
+                </select>
+            </div>
+            <div class="col-6 col-lg-2">
+                <label class="form-label">النتيجة</label>
+                <select name="Outcome" class="form-select">
+                    <option value="">الكل</option>
+                    @foreach (var outcome in Enum.GetValues<NoonRequestOutcome>())
+                    {
+                        if (f.Outcome == outcome)
+                        {
+                            <option value="@outcome" selected>@outcome</option>
+                        }
+                        else
+                        {
+                            <option value="@outcome">@outcome</option>
+                        }
+                    }
+                </select>
+            </div>
+            <div class="col-6 col-lg-2">
+                <label class="form-label">رمز الحالة</label>
+                <input name="StatusCode" value="@f.StatusCode" class="form-control ltr" type="number" placeholder="200" />
+            </div>
+            <div class="col-6 col-lg-2">
+                <label class="form-label">البروكسي</label>
+                <input name="Proxy" value="@f.Proxy" class="form-control ltr" placeholder="1.2.3.4:6000" />
+            </div>
+            <div class="col-6 col-lg-2">
+                <label class="form-label">الأخطاء فقط</label>
+                <select name="ErrorsOnly" class="form-select">
+                    <option value="">الكل</option>
+                    @if (f.ErrorsOnly == true)
+                    {
+                        <option value="true" selected>نعم</option>
+                    }
+                    else
+                    {
+                        <option value="true">نعم</option>
+                    }
+                </select>
+            </div>
+            <div class="col-sm-6 col-lg-2">
+                <label class="form-label">من تاريخ</label>
+                <input name="From" value="@(f.From?.ToString("yyyy-MM-dd"))" class="form-control" type="date" />
+            </div>
+            <div class="col-sm-6 col-lg-2">
+                <label class="form-label">إلى تاريخ</label>
+                <input name="To" value="@(f.To?.ToString("yyyy-MM-dd"))" class="form-control" type="date" />
+            </div>
+            <div class="col-6 col-lg-1">
+                <label class="form-label">حجم</label>
+                <select name="PageSize" class="form-select">
+                    @foreach (var size in new[] { 10, 25, 50, 100 })
+                    {
+                        if (f.PageSize == size)
+                        {
+                            <option value="@size" selected>@size</option>
+                        }
+                        else
+                        {
+                            <option value="@size">@size</option>
+                        }
+                    }
+                </select>
+            </div>
+        </div>
+        <div class="mt-3 d-flex flex-wrap gap-2">
+            <button type="submit" class="btn btn-primary"><i class="bi bi-check2"></i> تطبيق</button>
+            <a asp-action="Index" class="btn btn-outline-secondary">إعادة تعيين</a>
+        </div>
+    </div>
+</form>
+
+<div class="table-panel">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>وقت الطلب (UTC)</th>
+                    <th>رابط البراند</th>
+                    <th>البروكسي</th>
+                    <th>الصفحة</th>
+                    <th>المحاولة</th>
+                    <th>الحالة</th>
+                    <th>المدة</th>
+                    <th>المنتجات / الصفحات</th>
+                    <th>استجابة محفوظة</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+            @foreach (var log in Model.Logs)
+            {
+                var ok = log.Outcome == NoonRequestOutcome.Success;
+                <tr class="@(ok ? "" : "table-danger")">
+                    <td class="num">@log.Id</td>
+                    <td class="text-nowrap num">@log.RequestedAt.ToString("yyyy-MM-dd HH:mm:ss")</td>
+                    <td>
+                        @if (log.NoonBrandUrl != null)
+                        {
+                            <a asp-controller="NoonBrands" asp-action="Details" asp-route-id="@log.NoonBrandUrlId" class="arabic-text">@log.NoonBrandUrl.Name</a>
+                            <div class="small text-muted ltr">ID @log.NoonBrandUrlId</div>
+                        }
+                        else
+                        {
+                            <span class="text-muted">—</span>
+                        }
+                    </td>
+                    <td class="ltr num">@(log.Proxy ?? "—")</td>
+                    <td class="num">@log.Page</td>
+                    <td class="num">@log.Attempt</td>
+                    <td class="num">
+                        @if (ok)
+                        {
+                            <span class="badge text-bg-success">@log.StatusCode</span>
+                        }
+                        else if (log.StatusCode == 0)
+                        {
+                            <span class="badge text-bg-dark">@log.Outcome</span>
+                        }
+                        else
+                        {
+                            <span class="badge text-bg-danger">@log.StatusCode @log.Outcome</span>
+                        }
+                    </td>
+                    <td class="num text-nowrap">@log.DurationMs ms</td>
+                    <td class="num">@(log.NbHits is null ? "—" : $"{log.NbHits} / {log.NbPages}")</td>
+                    <td>
+                        @if (!string.IsNullOrEmpty(log.ResponseBody))
+                        {
+                            <span class="badge text-bg-warning">نعم</span>
+                        }
+                        else
+                        {
+                            <span class="text-muted">—</span>
+                        }
+                    </td>
+                    <td class="text-nowrap">
+                        <a asp-action="Details" asp-route-id="@log.Id" class="btn btn-sm btn-outline-primary">التفاصيل</a>
+                    </td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+@if (Model.Logs.Count == 0)
+{
+    <div class="empty-state">
+        <i class="bi bi-journal-x"></i>
+        <p class="mb-0">لا توجد سجلات مطابقة.</p>
+    </div>
+}
+
+@if (Model.TotalPages > 1)
+{
+    <nav class="mt-3 d-flex justify-content-center" aria-label="صفحات السجلات">
+        <ul class="pagination mb-0">
+            @{
+                var prevDisabled = f.Page <= 1 ? "disabled" : null;
+                var nextDisabled = f.Page >= Model.TotalPages ? "disabled" : null;
+            }
+            <li class="page-item @prevDisabled">
+                <a class="page-link" asp-action="Index" asp-all-route-data="@(ToRoute(f, f.Page - 1))">السابق</a>
+            </li>
+            <li class="page-item disabled">
+                <span class="page-link">صفحة @f.Page من @Model.TotalPages</span>
+            </li>
+            <li class="page-item @nextDisabled">
+                <a class="page-link" asp-action="Index" asp-all-route-data="@(ToRoute(f, f.Page + 1))">التالي</a>
+            </li>
+        </ul>
+    </nav>
+}
+
+@functions {
+    private static Dictionary<string, string?> ToRoute(NoonLogFilterViewModel filter, int page)
+    {
+        var d = new Dictionary<string, string?>
+        {
+            ["Page"] = page.ToString(),
+            ["PageSize"] = filter.PageSize.ToString(),
+            ["BrandId"] = filter.BrandId?.ToString(),
+            ["Outcome"] = filter.Outcome?.ToString(),
+            ["StatusCode"] = filter.StatusCode?.ToString(),
+            ["Proxy"] = filter.Proxy,
+            ["ErrorsOnly"] = filter.ErrorsOnly == true ? "true" : null,
+            ["From"] = filter.From?.ToString("yyyy-MM-dd"),
+            ["To"] = filter.To?.ToString("yyyy-MM-dd")
+        };
+
+        return d.Where(kv => !string.IsNullOrEmpty(kv.Value))
+            .ToDictionary(kv => kv.Key, kv => kv.Value);
+    }
+}

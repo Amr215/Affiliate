@@ -1,0 +1,121 @@
+@model NoonRequestLog
+@{
+    ViewData["Title"] = $"سجل نون #{Model.Id}";
+    var isOk = Model.Outcome == NoonRequestOutcome.Success;
+}
+
+<div class="page-toolbar">
+    <div>
+        <h1 class="h2 mb-2">سجل طلب #@Model.Id</h1>
+        <div class="d-flex flex-wrap gap-2">
+            @if (isOk)
+            {
+                <span class="badge text-bg-success">@Model.StatusCode @Model.Outcome</span>
+            }
+            else
+            {
+                <span class="badge text-bg-danger">@Model.StatusCode @Model.Outcome</span>
+            }
+            <span class="stat-pill"><i class="bi bi-clock"></i> @Model.RequestedAt.ToString("yyyy-MM-dd HH:mm:ss") UTC</span>
+        </div>
+    </div>
+    <a asp-action="Index" class="btn btn-outline-secondary"><i class="bi bi-arrow-right"></i> العودة للقائمة</a>
+</div>
+
+<div class="card mb-4">
+    <div class="card-body">
+        <dl class="row detail-grid mb-0">
+            <dt class="col-sm-3">رابط البراند</dt>
+            <dd class="col-sm-9">
+                @if (Model.NoonBrandUrl != null)
+                {
+                    <a asp-controller="NoonBrands" asp-action="Details" asp-route-id="@Model.NoonBrandUrlId" class="arabic-text">@Model.NoonBrandUrl.Name</a>
+                    <span class="text-muted ltr">(ID @Model.NoonBrandUrlId)</span>
+                }
+                else
+                {
+                    <span class="text-muted">—</span>
+                }
+            </dd>
+
+            <dt class="col-sm-3">الصفحة</dt>
+            <dd class="col-sm-9 num">@Model.Page</dd>
+
+            <dt class="col-sm-3">المحاولة</dt>
+            <dd class="col-sm-9 num">@Model.Attempt</dd>
+
+            <dt class="col-sm-3">البروكسي</dt>
+            <dd class="col-sm-9 ltr num">@(Model.Proxy ?? "—")</dd>
+
+            <dt class="col-sm-3">وقت الطلب (UTC)</dt>
+            <dd class="col-sm-9 num">@Model.RequestedAt.ToString("yyyy-MM-dd HH:mm:ss")</dd>
+
+            <dt class="col-sm-3">المدة</dt>
+            <dd class="col-sm-9 num">@Model.DurationMs ms</dd>
+
+            <dt class="col-sm-3">رمز الحالة</dt>
+            <dd class="col-sm-9 num">
+                @Model.StatusCode <span class="text-muted">— @Model.Outcome</span>
+            </dd>
+
+            <dt class="col-sm-3">المنتجات / الصفحات</dt>
+            <dd class="col-sm-9 num">@(Model.NbHits is null ? "—" : $"{Model.NbHits} / {Model.NbPages}")</dd>
+
+            @if (!string.IsNullOrEmpty(Model.ErrorMessage))
+            {
+                <dt class="col-sm-3">الخطأ</dt>
+                <dd class="col-sm-9 text-danger">@Model.ErrorMessage</dd>
+            }
+
+            <dt class="col-sm-3">الرابط المطلوب</dt>
+            <dd class="col-sm-9 min-w-0">
+                <div class="requested-url-row">
+                    <div class="requested-url-text">
+                        <a href="@Model.RequestUrl" target="_blank" rel="noopener" class="ltr" id="requestedUrlText">@Model.RequestUrl</a>
+                    </div>
+                    <button type="button"
+                            class="btn btn-sm btn-outline-secondary copy-to-clipboard flex-shrink-0"
+                            data-copy-target="#requestedUrlText"
+                            title="نسخ الرابط">
+                        <i class="bi bi-clipboard"></i> نسخ
+                    </button>
+                </div>
+            </dd>
+        </dl>
+    </div>
+</div>
+
+<div class="card mb-4">
+    <div class="card-header fw-bold d-flex flex-wrap align-items-center justify-content-between gap-2">
+        <span>
+            <i class="bi bi-reply"></i> نص الاستجابة (Response)
+            @if (isOk)
+            {
+                <span class="text-muted fw-normal small">— يُحفظ فقط عند الفشل</span>
+            }
+        </span>
+        @if (!string.IsNullOrEmpty(Model.ResponseBody))
+        {
+            <button type="button"
+                    class="btn btn-sm btn-outline-secondary copy-to-clipboard"
+                    data-copy-target="#responseBodyText"
+                    title="نسخ نص الاستجابة">
+                <i class="bi bi-clipboard"></i> نسخ
+            </button>
+        }
+    </div>
+    <div class="card-body">
+        @if (string.IsNullOrEmpty(Model.ResponseBody))
+        {
+            <p class="text-muted mb-0">لا يوجد محتوى محفوظ لهذه الاستجابة.</p>
+        }
+        else
+        {
+            <pre class="log-body mb-0 ltr"><code id="responseBodyText">@Model.ResponseBody</code></pre>
+        }
+    </div>
+</div>
+
+@section Scripts {
+    <partial name="_CopyToClipboardScript" />
+}

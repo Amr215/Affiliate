@@ -1,0 +1,142 @@
+@model NoonCycleReportViewModel
+@{
+    ViewData["Title"] = "تقرير دورات نون";
+}
+
+<div class="page-toolbar">
+    <div>
+        <h1 class="h2">تقرير دورات نون</h1>
+        <p class="text-muted mb-0">
+            آخر @((int)Model.Window.TotalMinutes) دقائق —
+            صفحات براندات نون
+            <span class="stat-pill"><i class="bi bi-list-ol"></i> @Model.CycleCount دورة</span>
+            <span class="stat-pill"><i class="bi bi-check-circle"></i> @Model.TotalSuccessPages صفحة ناجحة</span>
+            <span class="stat-pill"><i class="bi bi-x-circle"></i> @Model.TotalFailedPages صفحة فاشلة</span>
+            <span class="stat-pill"><i class="bi bi-percent"></i> @Model.PageSuccessRate.ToString("0.0")% صفحات</span>
+        </p>
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+        <a class="btn btn-outline-secondary" asp-action="Index">
+            <i class="bi bi-arrow-clockwise"></i> تحديث
+        </a>
+    </div>
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-sm-6 col-lg-3">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="text-muted small mb-1">صفحات ناجحة</div>
+                <div class="fw-bold text-success ltr">@Model.TotalSuccessPages</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="text-muted small mb-1">صفحات فاشلة (محاولات)</div>
+                <div class="fw-bold text-danger ltr">@Model.TotalFailedPages</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="text-muted small mb-1">نجاح صفحة 1</div>
+                <div class="fw-bold text-success ltr">@Model.TotalPage1Success</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="text-muted small mb-1">المنتجات</div>
+                <div class="fw-bold ltr">@Model.TotalProducts</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-sm-6 col-lg-3">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="text-muted small mb-1">عدد الدورات</div>
+                <div class="fw-bold ltr">@Model.CycleCount</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="text-muted small mb-1">براندات مكتملة</div>
+                <div class="fw-bold text-success ltr">@Model.TotalCompleteBrands</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="text-muted small mb-1">براندات ناقصة</div>
+                <div class="fw-bold text-danger ltr">@Model.TotalIncompleteBrands</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="text-muted small mb-1">متوسط مدة الدورة</div>
+                <div class="fw-bold ltr">@Model.AvgDurationSeconds.ToString("0.0") ث</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-clock-history"></i> دورات آخر @((int)Model.Window.TotalMinutes) دقائق</span>
+        <span class="text-muted small">الذاكرة فقط — تُفقد عند إعادة تشغيل التطبيق</span>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-hover mb-0 align-middle">
+            <thead>
+                <tr>
+                    <th class="ltr">انتهت (UTC)</th>
+                    <th class="ltr">المدة</th>
+                    <th class="ltr">براندات</th>
+                    <th class="ltr">مكتملة</th>
+                    <th class="ltr">ناقصة</th>
+                    <th class="ltr">المنتجات</th>
+                    <th class="ltr">صفحات ناجحة</th>
+                    <th class="ltr">صفحات فاشلة</th>
+                    <th class="ltr">ص1</th>
+                </tr>
+            </thead>
+            <tbody>
+            @if (Model.Cycles.Count == 0)
+            {
+                <tr>
+                    <td colspan="9" class="text-center text-muted py-4">لا توجد دورات في هذه النافذة بعد</td>
+                </tr>
+            }
+            else
+            {
+                foreach (var cycle in Model.Cycles)
+                {
+                    <tr>
+                        <td class="ltr num">@cycle.CompletedAtUtc.ToString("HH:mm:ss")</td>
+                        <td class="ltr num">@cycle.DurationSeconds.ToString("0.0") ث</td>
+                        <td class="ltr num">@cycle.Brands</td>
+                        <td class="ltr num text-success">@cycle.CompleteBrands</td>
+                        <td class="ltr num text-danger">@cycle.IncompleteBrands</td>
+                        <td class="ltr num">@cycle.Products</td>
+                        <td class="ltr num text-success">@cycle.SuccessPages</td>
+                        <td class="ltr num text-danger">@cycle.FailedPages</td>
+                        <td class="ltr num text-success">@cycle.Page1Success</td>
+                    </tr>
+                }
+            }
+            </tbody>
+        </table>
+    </div>
+</div>

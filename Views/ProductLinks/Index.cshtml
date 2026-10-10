@@ -1,0 +1,69 @@
+@model IEnumerable<ProductLink>
+@{
+    ViewData["Title"] = "ربط أمازون ونون";
+    var cheaper = ViewData["Cheaper"] as string;
+}
+
+<div class="page-toolbar">
+    <div>
+        <h1 class="h2">ربط أمازون ونون</h1>
+        <p class="text-muted mb-0">تنبيهات الخصم لكل منتج مربوط تعرض سعر المتجر الآخر.</p>
+    </div>
+    <div class="d-flex gap-2">
+        <div class="btn-group">
+            <a asp-action="Index" class="btn btn-outline-secondary @(cheaper is null ? "active" : "")">الكل</a>
+            <a asp-action="Index" asp-route-cheaper="amazon" class="btn btn-outline-secondary @(cheaper == "amazon" ? "active" : "")">أمازون أرخص</a>
+            <a asp-action="Index" asp-route-cheaper="noon" class="btn btn-outline-secondary @(cheaper == "noon" ? "active" : "")">نون أرخص</a>
+        </div>
+        <a asp-action="Create" class="btn btn-primary"><i class="bi bi-link-45deg"></i> ربط منتجين</a>
+    </div>
+</div>
+
+@if (TempData["StatusMessage"] is string message)
+{
+    <div class="alert alert-info">@message</div>
+}
+
+<div class="table-panel">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+            <thead>
+                <tr>
+                    <th>أمازون</th>
+                    <th>سعر أمازون</th>
+                    <th>نون</th>
+                    <th>سعر نون</th>
+                    <th>الفرق</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+            @foreach (var link in Model)
+            {
+                var amazon = link.Product!;
+                var noon = link.NoonProduct!;
+                var diff = amazon.CurrentPrice - noon.CurrentPrice;
+                <tr>
+                    <td><a href="@amazon.Url" target="_blank" rel="noopener">@amazon.Name</a><div class="small text-muted ltr">@amazon.Asin</div></td>
+                    <td class="num">@amazon.CurrentPrice?.ToString("0.##") @(amazon.IsAvailable ? "" : "(غير متاح)")</td>
+                    <td><a asp-controller="NoonProducts" asp-action="Details" asp-route-id="@noon.Id">@noon.Name</a><div class="small text-muted ltr">@noon.Sku</div></td>
+                    <td class="num">@noon.CurrentPrice?.ToString("0.##") @(noon.IsAvailable ? "" : "(غير متاح)")</td>
+                    <td class="num">
+                        @if (diff is { } d && d != 0 && noon.CurrentPrice > 0)
+                        {
+                            <span class="badge @(d > 0 ? "text-bg-warning" : "text-bg-info")">
+                                @(d > 0 ? "نون" : "أمازون") أرخص بـ @Math.Abs(d).ToString("0.##") (@((Math.Abs(d) / Math.Max(amazon.CurrentPrice!.Value, noon.CurrentPrice!.Value) * 100).ToString("0.#"))%)
+                            </span>
+                        }
+                    </td>
+                    <td>
+                        <form asp-action="Delete" asp-route-id="@link.Id" method="post" onsubmit="return confirm('إلغاء الربط؟')">
+                            <button type="submit" class="btn btn-sm btn-outline-danger">إلغاء الربط</button>
+                        </form>
+                    </td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    </div>
+</div>

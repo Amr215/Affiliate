@@ -1,0 +1,21 @@
+@model NoonBrandUrl
+
+<div asp-validation-summary="ModelOnly" class="text-danger mb-3"></div>
+
+<div class="mb-3">
+    <label asp-for="Name" class="form-label">الاسم</label>
+    <input asp-for="Name" class="form-control arabic-text" placeholder="Xiaomi" />
+    <span asp-validation-for="Name" class="text-danger"></span>
+</div>
+
+<div class="mb-3">
+    <label asp-for="Url" class="form-label">رابط البراند</label>
+    <textarea asp-for="Url" class="form-control ltr" rows="3" placeholder="https://www.noon.com/egypt-en/xiaomi/?f%5Bpartner%5D%5B%5D=p_9404"></textarea>
+    <span asp-validation-for="Url" class="text-danger"></span>
+    <div class="form-text">الصق رابط صفحة البراند من الموقع (أو رابط الـ API). الفلاتر والترتيب تبقى كما هي، ويُضاف <code class="ltr">page</code> تلقائياً.</div>
+</div>
+
+<div class="form-check">
+    <input asp-for="IsEnabled" class="form-check-input" />
+    <label asp-for="IsEnabled" class="form-check-label">مفعّل</label>
+</div>
