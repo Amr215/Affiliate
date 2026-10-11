@@ -19,17 +19,39 @@ namespace Affiliate.Controllers
             _scraperService = scraperService;
         }
 
-        public async Task<IActionResult> Index(bool? hasCategory)
+        public async Task<IActionResult> Index(
+            string? search, bool? hasCategory, bool? isEnabled, bool? isAsinRecheckEnabled, string? sort)
         {
             var query = _context.ScraperUrls.AsQueryable();
+            if (!string.IsNullOrWhiteSpace(search))
+                query = query.Where(s => s.Name.Contains(search.Trim()));
             if (hasCategory.HasValue)
                 query = query.Where(s => (s.Category != null) == hasCategory.Value);
+            if (isEnabled.HasValue)
+                query = query.Where(s => s.IsEnabled == isEnabled.Value);
+            if (isAsinRecheckEnabled.HasValue)
+                query = query.Where(s => s.IsAsinRecheckEnabled == isAsinRecheckEnabled.Value);
 
+            query = sort switch
+            {
+                "name_desc" => query.OrderByDescending(s => s.Name),
+                "lastRun" => query.OrderByDescending(s => s.LastRunAt),
+                "interval" => query.OrderBy(s => s.IntervalSeconds),
+                "created" => query.OrderByDescending(s => s.CreatedAt),
+                _ => query.OrderBy(s => s.Name)
+            };
+
+            ViewData["Search"] = search;
             ViewData["HasCategory"] = hasCategory;
-            var urls = await query
+            ViewData["IsEnabled"] = isEnabled;
+            ViewData["IsAsinRecheckEnabled"] = isAsinRecheckEnabled;
+            ViewData["Sort"] = sort;
+            ViewData["AllNames"] = await _context.ScraperUrls
                 .OrderBy(s => s.Name)
+                .Select(s => s.Name)
                 .ToListAsync();
-            return View(urls);
+
+            return View(await query.ToListAsync());
         }
 
         public async Task<IActionResult> Details(int? id)
@@ -173,6 +195,33 @@ namespace Affiliate.Controllers
 
         [HttpPost]
         [ValidateAntiForgeryToken]
+        public async Task<IActionResult> BulkUpdateAsinRecheck(
+            [FromBody] BulkUpdateAsinRecheckRequest request,
+            CancellationToken cancellationToken)
+        {
+            if (request.Ids is not { Length: > 0 })
+                return BadRequest(new { success = false, message = "لم يتم تحديد أي روابط." });
+
+            var updated = await _context.ScraperUrls
+                .Where(s => request.Ids.Contains(s.Id))
+                .ExecuteUpdateAsync(
+                    s => s.SetProperty(x => x.IsAsinRecheckEnabled, request.IsAsinRecheckEnabled),
+                    cancellationToken);
+
+            if (updated == 0)
+                return BadRequest(new { success = false, message = "لم يتم العثور على الروابط المحددة." });
+
+            return Ok(new
+            {
+                success = true,
+                message = request.IsAsinRecheckEnabled
+                    ? $"تم تفعيل فحص ASIN لـ {updated} رابط."
+                    : $"تم تعطيل فحص ASIN لـ {updated} رابط."
+            });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
         public async Task<IActionResult> BulkAssignCategory(
             [FromBody] BulkAssignCategoryRequest request,
             CancellationToken cancellationToken)
@@ -254,6 +303,12 @@ namespace Affiliate.Controllers
     {
         public int[] Ids { get; set; } = [];
         public bool IsEnabled { get; set; }
+    }
+
+    public class BulkUpdateAsinRecheckRequest
+    {
+        public int[] Ids { get; set; } = [];
+        public bool IsAsinRecheckEnabled { get; set; }
     }
 
     public class BulkAssignCategoryRequest

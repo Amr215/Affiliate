@@ -1,7 +1,13 @@
 @model IEnumerable<ScraperUrl>
 @{
     ViewData["Title"] = "روابط السكرابر";
+    var search = ViewData["Search"] as string;
     var hasCategory = ViewData["HasCategory"] as bool?;
+    var isEnabled = ViewData["IsEnabled"] as bool?;
+    var isAsinRecheckEnabled = ViewData["IsAsinRecheckEnabled"] as bool?;
+    var sort = ViewData["Sort"] as string;
+    var allNames = ViewData["AllNames"] as List<string> ?? [];
+    var isFiltered = !string.IsNullOrWhiteSpace(search) || hasCategory.HasValue || isEnabled.HasValue || isAsinRecheckEnabled.HasValue;
 }
 
 <div class="page-toolbar">
@@ -12,16 +18,46 @@
         </p>
     </div>
     <div class="d-flex flex-wrap gap-2">
-        <form asp-action="Index" method="get">
-            <select name="hasCategory" class="form-select arabic-text" aria-label="تصفية حسب التصنيف" onchange="this.form.submit()">
-                <option value="" selected="@(hasCategory is null)">كل الروابط</option>
-                <option value="true" selected="@(hasCategory == true)">لها تصنيف</option>
-                <option value="false" selected="@(hasCategory == false)">بدون تصنيف</option>
-            </select>
-        </form>
         <a asp-action="Create" class="btn btn-primary"><i class="bi bi-plus-lg"></i> إضافة رابط</a>
     </div>
 </div>
+
+<form asp-action="Index" method="get" class="d-flex flex-wrap gap-2 mb-3">
+    <input type="search" name="search" value="@search" list="scraperNames" class="form-control w-auto arabic-text"
+           placeholder="بحث بالاسم..." aria-label="بحث بالاسم" autocomplete="off" onchange="this.form.submit()" />
+    <datalist id="scraperNames">
+        @foreach (var name in allNames)
+        {
+            <option value="@name"></option>
+        }
+    </datalist>
+    <select name="hasCategory" class="form-select w-auto arabic-text" aria-label="تصفية حسب التصنيف" onchange="this.form.submit()">
+        <option value="" selected="@(hasCategory is null)">كل التصنيفات</option>
+        <option value="true" selected="@(hasCategory == true)">لها تصنيف</option>
+        <option value="false" selected="@(hasCategory == false)">بدون تصنيف</option>
+    </select>
+    <select name="isEnabled" class="form-select w-auto arabic-text" aria-label="تصفية حسب التفعيل" onchange="this.form.submit()">
+        <option value="" selected="@(isEnabled is null)">كل الحالات</option>
+        <option value="true" selected="@(isEnabled == true)">مفعّل</option>
+        <option value="false" selected="@(isEnabled == false)">معطّل</option>
+    </select>
+    <select name="isAsinRecheckEnabled" class="form-select w-auto arabic-text" aria-label="تصفية حسب فحص ASIN" onchange="this.form.submit()">
+        <option value="" selected="@(isAsinRecheckEnabled is null)">فحص ASIN: الكل</option>
+        <option value="true" selected="@(isAsinRecheckEnabled == true)">فحص ASIN مفعّل</option>
+        <option value="false" selected="@(isAsinRecheckEnabled == false)">فحص ASIN معطّل</option>
+    </select>
+    <select name="sort" class="form-select w-auto arabic-text" aria-label="الترتيب" onchange="this.form.submit()">
+        <option value="" selected="@(string.IsNullOrEmpty(sort))">الاسم (أ-ي)</option>
+        <option value="name_desc" selected="@(sort == "name_desc")">الاسم (ي-أ)</option>
+        <option value="lastRun" selected="@(sort == "lastRun")">آخر تشغيل</option>
+        <option value="interval" selected="@(sort == "interval")">الفاصل</option>
+        <option value="created" selected="@(sort == "created")">الأحدث إضافة</option>
+    </select>
+    @if (isFiltered)
+    {
+        <a asp-action="Index" asp-route-sort="@sort" class="btn btn-outline-secondary">مسح التصفية</a>
+    }
+</form>
 
 @if (TempData["StatusMessage"] is string message)
 {
@@ -42,6 +78,12 @@
         </button>
         <button type="button" class="btn btn-sm btn-outline-secondary" id="bulkDisable" disabled>
             <i class="bi bi-toggle-off"></i> تعطيل
+        </button>
+        <button type="button" class="btn btn-sm btn-outline-success" id="bulkEnableRecheck" disabled>
+            <i class="bi bi-arrow-repeat"></i> تفعيل فحص ASIN
+        </button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="bulkDisableRecheck" disabled>
+            <i class="bi bi-slash-circle"></i> تعطيل فحص ASIN
         </button>
         <select class="form-select form-select-sm w-auto arabic-text" id="bulkCategory" disabled aria-label="تعيين التصنيف">
             <option value="">بدون تصنيف</option>
@@ -72,6 +114,7 @@
                     <th>النطاق</th>
                     <th>الفاصل</th>
                     <th>مفعّل</th>
+                    <th>فحص ASIN</th>
                     <th>آخر تشغيل (UTC)</th>
                     <th></th>
                 </tr>
@@ -109,6 +152,16 @@
                         }
                     </td>
                     <td>
+                        @if (item.IsAsinRecheckEnabled)
+                        {
+                            <span class="badge text-bg-success"><span class="status-dot on"></span> نعم</span>
+                        }
+                        else
+                        {
+                            <span class="badge text-bg-secondary"><span class="status-dot off"></span> لا</span>
+                        }
+                    </td>
+                    <td>
                         @if (item.LastRunAt.HasValue)
                         {
                             <span class="num">@item.LastRunAt.Value.ToString("yyyy-MM-dd HH:mm")</span>
@@ -133,7 +186,7 @@
     </div>
 </div>
 
-@if (!Model.Any() && hasCategory.HasValue)
+@if (!Model.Any() && isFiltered)
 {
     <div class="empty-state mt-3">
         <p class="mb-2">لا توجد روابط مطابقة للتصفية.</p>
@@ -157,6 +210,8 @@ else if (!Model.Any())
     const countEl = document.getElementById('bulkSelectedCount');
     const enableBtn = document.getElementById('bulkEnable');
     const disableBtn = document.getElementById('bulkDisable');
+    const enableRecheckBtn = document.getElementById('bulkEnableRecheck');
+    const disableRecheckBtn = document.getElementById('bulkDisableRecheck');
     const categorySelect = document.getElementById('bulkCategory');
     const categoryBtn = document.getElementById('bulkAssignCategory');
 
@@ -170,6 +225,8 @@ else if (!Model.Any())
         if (countEl) countEl.textContent = n === 0 ? 'لم يتم تحديد روابط' : `تم تحديد ${n}`;
         if (enableBtn) enableBtn.disabled = n === 0;
         if (disableBtn) disableBtn.disabled = n === 0;
+        if (enableRecheckBtn) enableRecheckBtn.disabled = n === 0;
+        if (disableRecheckBtn) disableRecheckBtn.disabled = n === 0;
         if (categorySelect) categorySelect.disabled = n === 0;
         if (categoryBtn) categoryBtn.disabled = n === 0;
         if (selectAll) {
@@ -209,6 +266,9 @@ else if (!Model.Any())
     const enabledUrl = '@Url.Action("BulkUpdateEnabled")';
     enableBtn?.addEventListener('click', () => bulk(enabledUrl, { isEnabled: true }));
     disableBtn?.addEventListener('click', () => bulk(enabledUrl, { isEnabled: false }));
+    const recheckUrl = '@Url.Action("BulkUpdateAsinRecheck")';
+    enableRecheckBtn?.addEventListener('click', () => bulk(recheckUrl, { isAsinRecheckEnabled: true }));
+    disableRecheckBtn?.addEventListener('click', () => bulk(recheckUrl, { isAsinRecheckEnabled: false }));
     categoryBtn?.addEventListener('click', () => bulk('@Url.Action("BulkAssignCategory")', {
         category: categorySelect.value === '' ? null : Number(categorySelect.value)
     }));
