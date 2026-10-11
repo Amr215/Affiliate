@@ -127,6 +127,7 @@ namespace Affiliate.Services
 
             var asins = await _db.Products
                 .Where(p => p.IsAvailable && p.IsBlocked != true && p.Asin != null && p.Asin != "")
+                .Where(p => p.ScraperUrl == null || p.ScraperUrl.IsAsinRecheckEnabled)
                 .Where(p => p.NotAvailableDate == null
                     || p.NotAvailableDate > longUnavailableSince
                     || p.LastCheckedAt < longUnavailableRecheckBefore)

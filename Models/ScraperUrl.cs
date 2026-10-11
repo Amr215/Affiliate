@@ -67,6 +67,9 @@ namespace Affiliate.Models
 
         public bool IsEnabled { get; set; } = true;
 
+        /// <summary>When false, products scraped from this URL are skipped by the ASIN recheck.</summary>
+        public bool IsAsinRecheckEnabled { get; set; } = true;
+
         public DateTime? LastRunAt { get; set; }
         public string? LastRunError { get; set; }
 

@@ -277,6 +277,9 @@ namespace Affiliate.Migrations
                     b.Property<int>("IntervalSeconds")
                         .HasColumnType("int");
 
+                    b.Property<bool>("IsAsinRecheckEnabled")
+                        .HasColumnType("bit");
+
                     b.Property<bool>("IsEnabled")
                         .HasColumnType("bit");
 

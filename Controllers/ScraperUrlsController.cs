@@ -55,7 +55,8 @@ namespace Affiliate.Controllers
             [Bind(
                 nameof(ScraperUrl.Name), nameof(ScraperUrl.Url), nameof(ScraperUrl.Domain),
                 nameof(ScraperUrl.StartPage), nameof(ScraperUrl.IntervalSeconds),
-                nameof(ScraperUrl.IsEnabled), nameof(ScraperUrl.Category))] ScraperUrl scraperUrl)
+                nameof(ScraperUrl.IsEnabled), nameof(ScraperUrl.IsAsinRecheckEnabled),
+                nameof(ScraperUrl.Category))] ScraperUrl scraperUrl)
         {
             Normalize(scraperUrl);
             if (!ModelState.IsValid)
@@ -88,7 +89,7 @@ namespace Affiliate.Controllers
                 nameof(ScraperUrl.Id), nameof(ScraperUrl.Name), nameof(ScraperUrl.Url),
                 nameof(ScraperUrl.Domain), nameof(ScraperUrl.StartPage),
                 nameof(ScraperUrl.IntervalSeconds), nameof(ScraperUrl.IsEnabled),
-                nameof(ScraperUrl.Category))] ScraperUrl scraperUrl)
+                nameof(ScraperUrl.IsAsinRecheckEnabled), nameof(ScraperUrl.Category))] ScraperUrl scraperUrl)
         {
             if (id != scraperUrl.Id)
                 return NotFound();
