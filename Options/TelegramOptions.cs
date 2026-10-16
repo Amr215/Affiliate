@@ -40,6 +40,12 @@ namespace Affiliate.Options
         /// <summary>Channel that also receives every post published from the publish group.</summary>
         public string PublishChannelId { get; set; } = string.Empty;
 
+        /// <summary>
+        /// Amazon Associates tracking id appended as <c>?tag=…</c> on product links
+        /// in publish posts (group + channel).
+        /// </summary>
+        public string AffiliateTag { get; set; } = string.Empty;
+
         /// <summary>First configured chat; used for the test message and setup checks.</summary>
         public string? PrimaryChatId =>
             new[] { FoodDrinksAndCleaningChatId, FashionAndWatchesChatId, DevicesChatId, MegaDealsChatId }

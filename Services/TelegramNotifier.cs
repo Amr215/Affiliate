@@ -331,7 +331,7 @@ namespace Affiliate.Services
             var name = productName.Trim();
             if (productPrice.HasValue)
                 name += $" بسعر {Math.Truncate(productPrice.Value):0} جنية";
-            var url = ShortenProductUrl(productUrl.Trim());
+            var url = BuildAffiliateProductUrl(productUrl.Trim());
             var caption = kind switch
             {
                 "offer" => $"عرض على {name}\n\n{url}",
@@ -520,6 +520,24 @@ namespace Affiliate.Services
         {
             var match = DpAsinRegex.Match(url);
             return match.Success ? BuildShortProductUrl(match.Groups[1].Value) : url;
+        }
+
+        /// <summary>
+        /// Short Amazon link with Associates tag for publish posts, e.g.
+        /// <c>amazon.eg/dp/ASIN?tag=speed00a-21</c>.
+        /// </summary>
+        private string BuildAffiliateProductUrl(string url)
+        {
+            var shortUrl = ShortenProductUrl(url);
+            var tag = _options.AffiliateTag?.Trim();
+            if (string.IsNullOrEmpty(tag))
+                return shortUrl;
+
+            if (shortUrl.Contains("tag=", StringComparison.OrdinalIgnoreCase))
+                return shortUrl;
+
+            var separator = shortUrl.Contains('?') ? '&' : '?';
+            return $"{shortUrl}{separator}tag={Uri.EscapeDataString(tag)}";
         }
 
         /// <summary>
