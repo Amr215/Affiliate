@@ -69,7 +69,10 @@ namespace Affiliate.Services
             // History only records changes, so the latest price has been the lowest since the point after the last lower one.
             var lowerIndex = all.FindLastIndex(p => p.Price < all[^1].Price);
             alert.LowestPriceDays = (DateTime.UtcNow - points[lowerIndex + 1].CheckedAt).Days;
+            // Ties with a prior low still count as "lowest ever" for the regular lowest-price chats.
             alert.IsLowestEver = lowerIndex < 0;
+            // Unique = first time at this low (strictly cheaper than every earlier point).
+            alert.IsUniqueLowestEver = !points.Take(points.Count - 1).Any(p => p.Price <= points[^1].Price);
         }
     }
 }

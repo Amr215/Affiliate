@@ -102,8 +102,11 @@ namespace Affiliate.Services
         /// <summary>Whole days the current price has been the lowest recorded price.</summary>
         public int LowestPriceDays { get; set; }
 
-        /// <summary>True when no lower price was ever recorded.</summary>
+        /// <summary>True when no lower price was ever recorded (ties with a prior low still count).</summary>
         public bool IsLowestEver { get; set; }
+
+        /// <summary>True when the current price is strictly below every earlier recorded price.</summary>
+        public bool IsUniqueLowestEver { get; set; }
     }
 
     /// <summary>A price-history data point rendered inside a drop alert (label optional).</summary>
@@ -189,7 +192,7 @@ namespace Affiliate.Services
             if (QualifiesForLowestPriceGroup(alert) && NullIfBlank(_options.LowestPriceChatId) is { } lowestChatId)
                 sent |= await SendMessageAsync(lowestChatId.Trim(), text, replyMarkup, replyToMessageId: null, cancellationToken);
 
-            if (alert.IsLowestEver && NullIfBlank(_options.UniqueLowestPriceChatId) is { } uniqueLowestChatId)
+            if (alert.IsUniqueLowestEver && NullIfBlank(_options.UniqueLowestPriceChatId) is { } uniqueLowestChatId)
                 sent |= await SendMessageAsync(uniqueLowestChatId.Trim(), text, replyMarkup, replyToMessageId: null, cancellationToken);
 
             if (sent)
@@ -228,7 +231,7 @@ namespace Affiliate.Services
             if (QualifiesForLowestPriceGroup(alert) && NullIfBlank(_options.NoonLowestPriceChatId) is { } lowestChatId)
                 sent |= await SendMessageAsync(lowestChatId.Trim(), text, replyMarkup, replyToMessageId: null, cancellationToken);
 
-            if (alert.IsLowestEver && NullIfBlank(_options.NoonUniqueLowestPriceChatId) is { } uniqueLowestChatId)
+            if (alert.IsUniqueLowestEver && NullIfBlank(_options.NoonUniqueLowestPriceChatId) is { } uniqueLowestChatId)
                 sent |= await SendMessageAsync(uniqueLowestChatId.Trim(), text, replyMarkup, replyToMessageId: null, cancellationToken);
 
             _logger.Log(
