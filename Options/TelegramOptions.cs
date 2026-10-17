@@ -31,6 +31,9 @@ namespace Affiliate.Options
         /// <summary>Chat that also receives every drop to the lowest price in at least 30 days (or lowest ever if newer).</summary>
         public string LowestPriceChatId { get; set; } = string.Empty;
 
+        /// <summary>Chat that also receives every Amazon drop that is a unique lowest-ever price.</summary>
+        public string UniqueLowestPriceChatId { get; set; } = string.Empty;
+
         /// <summary>Chat that receives every Noon price drop.</summary>
         public string NoonChatId { get; set; } = string.Empty;
 
@@ -39,6 +42,9 @@ namespace Affiliate.Options
 
         /// <summary>Chat that also receives every Noon drop to the lowest price in at least 30 days (or lowest ever if newer).</summary>
         public string NoonLowestPriceChatId { get; set; } = string.Empty;
+
+        /// <summary>Chat that also receives every Noon drop that is a unique lowest-ever price.</summary>
+        public string NoonUniqueLowestPriceChatId { get; set; } = string.Empty;
 
         /// <summary>Group where posted Amazon links get «نشر عرض / نشر عرض ممتاز / نشر لقطة / نشر ببلاش» buttons.</summary>
         public string PublishChatId { get; set; } = string.Empty;

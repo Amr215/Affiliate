@@ -189,6 +189,9 @@ namespace Affiliate.Services
             if (QualifiesForLowestPriceGroup(alert) && NullIfBlank(_options.LowestPriceChatId) is { } lowestChatId)
                 sent |= await SendMessageAsync(lowestChatId.Trim(), text, replyMarkup, replyToMessageId: null, cancellationToken);
 
+            if (alert.IsLowestEver && NullIfBlank(_options.UniqueLowestPriceChatId) is { } uniqueLowestChatId)
+                sent |= await SendMessageAsync(uniqueLowestChatId.Trim(), text, replyMarkup, replyToMessageId: null, cancellationToken);
+
             if (sent)
                 _logger.LogInformation(
                     "Telegram drop alert sent for {Asin} ({Percent}% → {Category} chat {ChatId})",
@@ -224,6 +227,9 @@ namespace Affiliate.Services
 
             if (QualifiesForLowestPriceGroup(alert) && NullIfBlank(_options.NoonLowestPriceChatId) is { } lowestChatId)
                 sent |= await SendMessageAsync(lowestChatId.Trim(), text, replyMarkup, replyToMessageId: null, cancellationToken);
+
+            if (alert.IsLowestEver && NullIfBlank(_options.NoonUniqueLowestPriceChatId) is { } uniqueLowestChatId)
+                sent |= await SendMessageAsync(uniqueLowestChatId.Trim(), text, replyMarkup, replyToMessageId: null, cancellationToken);
 
             _logger.Log(
                 sent ? LogLevel.Information : LogLevel.Warning,
