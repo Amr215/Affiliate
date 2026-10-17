@@ -46,6 +46,9 @@ namespace Affiliate.Options
         /// <summary>Channel that also receives every post published from the publish group.</summary>
         public string PublishChannelId { get; set; } = string.Empty;
 
+        /// <summary>Chat that receives full prepare-for-publish exception / attempt logs (not the user-facing short error).</summary>
+        public string PublishLogChatId { get; set; } = string.Empty;
+
         /// <summary>
         /// Amazon Associates tracking id applied by the public <c>/{code}</c> redirect
         /// (not shown in publish captions).

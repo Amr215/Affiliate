@@ -7,9 +7,10 @@ namespace Affiliate.Services
     public interface IPrepareForPublishService
     {
         /// <summary>
-        /// Opens Amazon.eg (no proxy), ensures Arabic UI, and returns a publish screenshot:
+        /// Opens Amazon.eg (direct host first), ensures Arabic UI, and returns a publish screenshot:
         /// highlighted DP when <paramref name="alertPrice"/> is null or matches the page price;
         /// otherwise adds to cart and returns a plain cart screenshot.
+        /// On direct-host timeout/captcha/block, retries via ISP SOCKS5 proxies.
         /// </summary>
         Task<PrepareForPublishResult> PrepareAsync(
             string asin,
@@ -21,6 +22,10 @@ namespace Affiliate.Services
     {
         public bool Success { get; init; }
         public string? Error { get; init; }
+        /// <summary>Raw exception / Playwright detail for ops (sent to the publish group).</summary>
+        public string? Detail { get; init; }
+        /// <summary><c>direct</c> or proxy describe string used for the successful/final attempt.</summary>
+        public string? Route { get; init; }
         public string? ProductName { get; init; }
         public string? ProductUrl { get; init; }
         public decimal? ProductPrice { get; init; }
@@ -30,13 +35,19 @@ namespace Affiliate.Services
 
     public sealed class PrepareForPublishService : IPrepareForPublishService
     {
+        private const int MaxProxyAttempts = 20;
+        private const int ProxyParallelism = 5;
         private static readonly SemaphoreSlim BrowserGate = new(1, 1);
         private static int _browsersPathConfigured;
 
+        private readonly IIspProxyService _ispProxy;
         private readonly ILogger<PrepareForPublishService> _logger;
 
-        public PrepareForPublishService(ILogger<PrepareForPublishService> logger)
+        public PrepareForPublishService(
+            IIspProxyService ispProxy,
+            ILogger<PrepareForPublishService> logger)
         {
+            _ispProxy = ispProxy;
             _logger = logger;
         }
 
@@ -60,16 +71,18 @@ namespace Affiliate.Services
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 cts.CancelAfter(TimeSpan.FromMinutes(3));
 
-                return await CaptureAsync(asin, alertPrice, productUrl, cts.Token);
+                return await CaptureWithFallbackAsync(asin, alertPrice, productUrl, cts.Token);
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
-                return Fail("انتهت مهلة تجهيز المنتج للنشر.");
+                return Fail(
+                    "انتهت مهلة تجهيز المنتج للنشر.",
+                    "Overall prepare timeout (3 minutes).");
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 _logger.LogError(ex, "Prepare-for-publish failed for {Asin}", asin);
-                return Fail(DescribeFailure(ex));
+                return Fail(DescribeFailure(ex), FormatExceptionDetail(ex));
             }
             finally
             {
@@ -101,14 +114,218 @@ namespace Affiliate.Services
                 Environment.SetEnvironmentVariable("PLAYWRIGHT_BROWSERS_PATH", local);
         }
 
-        private async Task<PrepareForPublishResult> CaptureAsync(
+        private async Task<PrepareForPublishResult> CaptureWithFallbackAsync(
             string asin,
             decimal? alertPrice,
             string productUrl,
             CancellationToken cancellationToken)
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            var attemptLogs = new List<string>();
+            PrepareForPublishResult? lastFailure = null;
 
+            var direct = await TryCaptureOnceAsync(
+                asin, alertPrice, productUrl, proxy: null, cancellationToken);
+            if (direct.Success)
+                return WithRoute(direct, "direct");
+
+            lastFailure = WithRoute(direct, "direct");
+            attemptLogs.Add(FormatAttemptLog("direct", direct));
+
+            if (!IsProxyFallbackCandidate(direct))
+                return lastFailure;
+
+            _logger.LogWarning(
+                "Prepare-for-publish {Asin} failed on VPS/direct host ({Error}); falling back to ISP proxies",
+                asin, direct.Error);
+
+            var proxyProbe = _ispProxy.GetEndpoint();
+            if (!proxyProbe.UseProxy)
+            {
+                return lastFailure ?? Fail(
+                    "فشل تجهيز المنتج للنشر.",
+                    "ISP proxies disabled or empty; no fallback route.");
+            }
+
+            var triedKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var proxiesTried = 0;
+
+            while (proxiesTried < MaxProxyAttempts)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var batchSize = Math.Min(ProxyParallelism, MaxProxyAttempts - proxiesTried);
+                var batch = TakeDistinctProxies(batchSize, triedKeys);
+                if (batch.Count == 0)
+                    break;
+
+                proxiesTried += batch.Count;
+                _logger.LogInformation(
+                    "Prepare-for-publish {Asin}: proxy wave of {Count} (tried {Tried}/{Max})",
+                    asin, batch.Count, proxiesTried, MaxProxyAttempts);
+
+                var (winner, waveFailures) = await RaceProxyBatchAsync(
+                    asin, alertPrice, productUrl, batch, cancellationToken);
+
+                foreach (var failure in waveFailures)
+                {
+                    attemptLogs.Add(FormatAttemptLog(failure.Route ?? "proxy", failure));
+                    lastFailure = failure;
+                    if (IsFatalPrepareFailure(failure))
+                    {
+                        return Fail(
+                            failure.Error ?? "فشل تجهيز المنتج للنشر.",
+                            string.Join("\n", attemptLogs),
+                            failure.Route);
+                    }
+                }
+
+                if (winner is { Success: true })
+                {
+                    _logger.LogInformation(
+                        "Prepare-for-publish {Asin} succeeded via proxy {Proxy}",
+                        asin, winner.Route);
+                    return winner;
+                }
+            }
+
+            var detail = string.Join("\n", attemptLogs);
+            if (lastFailure is null)
+                return Fail("فشل تجهيز المنتج للنشر.", detail);
+
+            return Fail(
+                lastFailure.Error ?? "فشل تجهيز المنتج للنشر.",
+                detail,
+                lastFailure.Route);
+        }
+
+        /// <summary>
+        /// Runs up to <see cref="ProxyParallelism"/> captures together; cancels siblings when one wins.
+        /// Does not ReportFailure/Success — publish must not block proxies used by ASIN recheck.
+        /// </summary>
+        private async Task<(PrepareForPublishResult? Winner, List<PrepareForPublishResult> Failures)> RaceProxyBatchAsync(
+            string asin,
+            decimal? alertPrice,
+            string productUrl,
+            IReadOnlyList<IspProxyEndpoint> batch,
+            CancellationToken cancellationToken)
+        {
+            using var waveCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            var waveToken = waveCts.Token;
+            var failures = new List<PrepareForPublishResult>();
+
+            var tasks = batch.Select(async endpoint =>
+            {
+                try
+                {
+                    if (!await ProbeProxyReachableAsync(endpoint, waveToken))
+                    {
+                        return Fail(
+                            "فشل تجهيز المنتج للنشر.",
+                            "HTTP probe failed",
+                            endpoint.Describe());
+                    }
+
+                    var result = await TryCaptureOnceAsync(
+                        asin, alertPrice, productUrl, endpoint, waveToken);
+
+                    if (result.Success)
+                    {
+                        try { waveCts.Cancel(); } catch (ObjectDisposedException) { /* ignore */ }
+                        return WithRoute(result, endpoint.Describe());
+                    }
+
+                    return WithRoute(result, endpoint.Describe());
+                }
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                {
+                    return Fail(
+                        "ألغي بعد نجاح بروكسي آخر.",
+                        "Cancelled after sibling proxy succeeded",
+                        endpoint.Describe());
+                }
+            }).ToArray();
+
+            var results = await Task.WhenAll(tasks);
+            PrepareForPublishResult? winner = null;
+            foreach (var result in results)
+            {
+                if (result.Success && winner is null)
+                    winner = result;
+                else if (!result.Success
+                         && !string.Equals(
+                             result.Detail,
+                             "Cancelled after sibling proxy succeeded",
+                             StringComparison.Ordinal))
+                    failures.Add(result);
+            }
+
+            return (winner, failures);
+        }
+
+        private List<IspProxyEndpoint> TakeDistinctProxies(int count, HashSet<string> alreadyTried)
+        {
+            var batch = new List<IspProxyEndpoint>(count);
+            var spins = 0;
+            var maxSpins = Math.Max(count * 15, 30);
+
+            while (batch.Count < count && spins++ < maxSpins)
+            {
+                var endpoint = _ispProxy.GetEndpoint();
+                if (!endpoint.UseProxy || endpoint.RouteThroughTranslate)
+                    continue;
+                if (!alreadyTried.Add(endpoint.Key))
+                    continue;
+                batch.Add(endpoint);
+            }
+
+            return batch;
+        }
+
+        private async Task<PrepareForPublishResult> TryCaptureOnceAsync(
+            string asin,
+            decimal? alertPrice,
+            string productUrl,
+            IspProxyEndpoint? proxy,
+            CancellationToken cancellationToken)
+        {
+            var route = proxy?.Describe() ?? "direct";
+            try
+            {
+                return await CaptureOnceAsync(asin, alertPrice, productUrl, proxy, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Prepare-for-publish attempt failed for {Asin} via {Route}", asin, route);
+                return Fail(DescribeFailure(ex), FormatExceptionDetail(ex), route);
+            }
+        }
+
+        private async Task<PrepareForPublishResult> CaptureOnceAsync(
+            string asin,
+            decimal? alertPrice,
+            string productUrl,
+            IspProxyEndpoint? proxy,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var route = proxy?.Describe() ?? "direct";
+
+            // Chromium cannot auth SOCKS5; bridge local no-auth SOCKS5 → upstream Webshare SOCKS5.
+            LocalSocks5Bridge? socksBridge = null;
+            Proxy? playwrightProxy = null;
+            if (proxy is { UseProxy: true } && !string.IsNullOrWhiteSpace(proxy.Host))
+            {
+                socksBridge = LocalSocks5Bridge.Start(
+                    proxy.Host!, proxy.Port, proxy.Username, proxy.Password);
+                playwrightProxy = new Proxy { Server = socksBridge.PlaywrightServer };
+            }
+
+            await using (socksBridge)
+            {
             using var playwright = await Playwright.CreateAsync();
             IBrowser browser;
             try
@@ -145,7 +362,8 @@ namespace Affiliate.Services
                     ExtraHTTPHeaders = new Dictionary<string, string>
                     {
                         ["Accept-Language"] = "ar-AE,ar;q=0.9,en-AE;q=0.5,en;q=0.4"
-                    }
+                    },
+                    Proxy = playwrightProxy
                 });
 
                 await context.AddCookiesAsync(
@@ -180,15 +398,18 @@ namespace Affiliate.Services
 
                 if (await LooksBlockedAsync(page))
                 {
-                    return Fail("أمازون طلب تحقق (captcha) — أعد المحاولة لاحقاً.");
+                    return Fail(
+                        "أمازون طلب تحقق (captcha) — أعد المحاولة لاحقاً.",
+                        $"Captcha/robot check via {route}",
+                        route);
                 }
 
                 var productName = await ReadProductTitleAsync(page) ?? asin;
                 var pagePrice = await ReadDesktopPriceAsync(page);
 
                 _logger.LogInformation(
-                    "Prepare-for-publish {Asin}: pagePrice={PagePrice}, alertPrice={AlertPrice}, lang={Lang}",
-                    asin, pagePrice, alertPrice, await ReadHtmlLangAsync(page));
+                    "Prepare-for-publish {Asin} via {Route}: pagePrice={PagePrice}, alertPrice={AlertPrice}, lang={Lang}",
+                    asin, route, pagePrice, alertPrice, await ReadHtmlLangAsync(page));
 
                 var pricesMatch = alertPrice is null
                     || (pagePrice.HasValue && PricesMatch(pagePrice.Value, alertPrice.Value));
@@ -208,23 +429,22 @@ namespace Affiliate.Services
                     {
                         await AddToCartAndOpenCartAsync(page, asin, cancellationToken);
                         usedCart = true;
-                        screenshot = await CaptureMobileCartItemAsync(browser, context, asin);
+                        screenshot = await CaptureMobileCartItemAsync(
+                            browser, context, asin, playwrightProxy);
                     }
                     catch (Exception cartEx)
                     {
                         // Cart often fails (interstitial / soft block). Fall back to highlighted DP.
                         _logger.LogWarning(cartEx,
-                            "Prepare-for-publish cart path failed for {Asin}; falling back to DP screenshot",
-                            asin);
+                            "Prepare-for-publish cart path failed for {Asin} via {Route}; falling back to DP screenshot",
+                            asin, route);
 
                         await page.GotoAsync(productUrl, new PageGotoOptions
                         {
                             WaitUntil = WaitUntilState.DOMContentLoaded,
                             Timeout = 45_000
                         });
-                        await page.WaitForSelectorAsync(
-                            "#productTitle, #add-to-cart-button, #corePrice_feature_div",
-                            new PageWaitForSelectorOptions { Timeout = 30_000 });
+                        await WaitForVisibleProductSignalAsync(page);
 
                         await UseNarrowPublishLayoutAsync(page);
                         await HighlightDesktopPublishTargetsAsync(page);
@@ -235,6 +455,7 @@ namespace Affiliate.Services
                 return new PrepareForPublishResult
                 {
                     Success = true,
+                    Route = route,
                     ProductName = productName,
                     ProductUrl = productUrl,
                     ProductPrice = usedCart ? (alertPrice ?? pagePrice) : (pagePrice ?? alertPrice),
@@ -242,7 +463,82 @@ namespace Affiliate.Services
                     UsedCartScreenshot = usedCart
                 };
             }
+            } // socksBridge
         }
+
+        /// <summary>
+        /// Cheap HTTP check before launching Chromium — skips dead/blocked proxies quickly.
+        /// Uses the same SOCKS5 client stack as the scraper.
+        /// </summary>
+        private async Task<bool> ProbeProxyReachableAsync(
+            IspProxyEndpoint endpoint,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                using var client = _ispProxy.CreateClient(endpoint);
+                using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                cts.CancelAfter(TimeSpan.FromSeconds(20));
+                using var response = await client.GetAsync(
+                    "https://www.amazon.eg/robots.txt", cts.Token);
+                var ok = (int)response.StatusCode is >= 200 and < 500;
+                _logger.LogDebug(
+                    "Prepare-for-publish proxy probe {Proxy} => {Status}",
+                    endpoint.Describe(), (int)response.StatusCode);
+                return ok;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+            {
+                _logger.LogDebug(ex, "Prepare-for-publish proxy probe failed for {Proxy}", endpoint.Describe());
+                return false;
+            }
+        }
+
+        private static bool IsProxyFallbackCandidate(PrepareForPublishResult result)
+        {
+            if (result.Success || IsFatalPrepareFailure(result))
+                return false;
+
+            var error = result.Error ?? "";
+            var detail = result.Detail ?? "";
+            return error.Contains("مهلة", StringComparison.OrdinalIgnoreCase)
+                   || error.Contains("captcha", StringComparison.OrdinalIgnoreCase)
+                   || error.Contains("تحقق", StringComparison.OrdinalIgnoreCase)
+                   || detail.Contains("Timeout", StringComparison.OrdinalIgnoreCase)
+                   || detail.Contains("Captcha", StringComparison.OrdinalIgnoreCase)
+                   || detail.Contains("net::", StringComparison.OrdinalIgnoreCase)
+                   || error.Contains("فشل تجهيز", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsFatalPrepareFailure(PrepareForPublishResult result)
+        {
+            var error = result.Error ?? "";
+            var detail = result.Detail ?? "";
+            return error.Contains("Chromium غير مثبت", StringComparison.OrdinalIgnoreCase)
+                   || detail.Contains("Executable doesn't exist", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string FormatAttemptLog(string route, PrepareForPublishResult result)
+        {
+            var error = result.Error ?? "failed";
+            return string.IsNullOrWhiteSpace(result.Detail)
+                ? $"{route}: {error}"
+                : $"{route}: {error} | {result.Detail}";
+        }
+
+        private static PrepareForPublishResult WithRoute(PrepareForPublishResult result, string route) =>
+            new()
+            {
+                Success = result.Success,
+                Error = result.Error,
+                Detail = result.Detail,
+                Route = route,
+                ProductName = result.ProductName,
+                ProductUrl = result.ProductUrl,
+                ProductPrice = result.ProductPrice,
+                ScreenshotPng = result.ScreenshotPng,
+                UsedCartScreenshot = result.UsedCartScreenshot
+            };
 
         /// <summary>
         /// language=ar_AE alone is unreliable — also set cookies/headers/locale,
@@ -261,8 +557,7 @@ namespace Affiliate.Services
                 Timeout = 45_000
             });
 
-            await page.WaitForSelectorAsync("#productTitle, #add-to-cart-button, #corePrice_feature_div",
-                new PageWaitForSelectorOptions { Timeout = 30_000 });
+            await WaitForVisibleProductSignalAsync(page);
 
             if (await IsArabicUiAsync(page))
                 return;
@@ -273,8 +568,24 @@ namespace Affiliate.Services
                 WaitUntil = WaitUntilState.DOMContentLoaded,
                 Timeout = 45_000
             });
-            await page.WaitForSelectorAsync("#productTitle, #add-to-cart-button, #corePrice_feature_div",
-                new PageWaitForSelectorOptions { Timeout = 30_000 });
+            await WaitForVisibleProductSignalAsync(page);
+        }
+
+        /// <summary>
+        /// Amazon often has multiple matching nodes (e.g. hidden duplicate #corePrice_feature_div).
+        /// WaitForSelector on a comma list waits for the first DOM match to be visible — which can
+        /// stay hidden forever while a later match is already visible. Prefer any visible signal.
+        /// </summary>
+        private static async Task WaitForVisibleProductSignalAsync(IPage page, float timeoutMs = 30_000)
+        {
+            await page.Locator("#productTitle, #add-to-cart-button, #corePrice_feature_div")
+                .Locator("visible=true")
+                .First
+                .WaitForAsync(new LocatorWaitForOptions
+                {
+                    State = WaitForSelectorState.Visible,
+                    Timeout = timeoutMs
+                });
         }
 
         private static async Task<bool> LooksBlockedAsync(IPage page)
@@ -511,7 +822,8 @@ namespace Affiliate.Services
         private static async Task<byte[]> CaptureMobileCartItemAsync(
             IBrowser browser,
             IBrowserContext desktopContext,
-            string asin)
+            string asin,
+            Proxy? proxy)
         {
             await using var mobile = await browser.NewContextAsync(new BrowserNewContextOptions
             {
@@ -527,7 +839,8 @@ namespace Affiliate.Services
                 ExtraHTTPHeaders = new Dictionary<string, string>
                 {
                     ["Accept-Language"] = "ar-AE,ar;q=0.9,en-AE;q=0.5,en;q=0.4"
-                }
+                },
+                Proxy = proxy
             });
 
             var page = await mobile.NewPageAsync();
@@ -745,7 +1058,27 @@ namespace Affiliate.Services
             return "فشل تجهيز المنتج للنشر.";
         }
 
-        private static PrepareForPublishResult Fail(string error) =>
-            new() { Success = false, Error = error };
+        private static string FormatExceptionDetail(Exception ex)
+        {
+            var type = ex.GetType().Name;
+            var msg = (ex.Message ?? "").Trim();
+            if (msg.Length > 1_200)
+                msg = msg[..1_200] + "…";
+
+            var inner = ex.InnerException?.Message?.Trim();
+            if (string.IsNullOrWhiteSpace(inner))
+                return $"{type}: {msg}";
+
+            if (inner.Length > 400)
+                inner = inner[..400] + "…";
+
+            return $"{type}: {msg}\nInner: {inner}";
+        }
+
+        private static PrepareForPublishResult Fail(
+            string error,
+            string? detail = null,
+            string? route = null) =>
+            new() { Success = false, Error = error, Detail = detail, Route = route };
     }
 }

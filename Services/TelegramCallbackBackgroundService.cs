@@ -148,11 +148,7 @@ namespace Affiliate.Services
             var result = await prepare.PrepareAsync(asin, knownPrice, ct);
             if (!result.Success || result.ScreenshotPng is null)
             {
-                await telegram.SendPlainTextAsync(
-                    chatId,
-                    result.Error ?? "فشل تجهيز المنتج للنشر.",
-                    callback.Message?.MessageId,
-                    ct);
+                await NotifyPrepareFailureAsync(telegram, chatId, asin, result, callback.Message?.MessageId, ct);
                 return;
             }
 
@@ -204,11 +200,7 @@ namespace Affiliate.Services
             var result = await prepare.PrepareAsync(asin, alertPrice, ct);
             if (!result.Success || result.ScreenshotPng is null)
             {
-                await telegram.SendPlainTextAsync(
-                    chatId,
-                    result.Error ?? "فشل تجهيز المنتج للنشر.",
-                    callback.Message?.MessageId,
-                    ct);
+                await NotifyPrepareFailureAsync(telegram, chatId, asin, result, callback.Message?.MessageId, ct);
                 return;
             }
 
@@ -244,6 +236,52 @@ namespace Affiliate.Services
             }
 
             return true;
+        }
+
+        private async Task NotifyPrepareFailureAsync(
+            ITelegramNotifier telegram,
+            string publishChatId,
+            string asin,
+            PrepareForPublishResult result,
+            int? replyToMessageId,
+            CancellationToken ct)
+        {
+            // Publish chat: one fixed user-facing line only.
+            await telegram.SendPlainTextAsync(
+                publishChatId,
+                "انتهت مهلة تحميل صفحة أمازون — أعد المحاولة.",
+                replyToMessageId,
+                ct);
+
+            var logChatId = _options.Value.PublishLogChatId?.Trim() ?? "";
+            if (logChatId.Length == 0)
+                return;
+
+            await telegram.SendPlainTextAsync(
+                logChatId,
+                FormatPrepareFailureLogMessage(asin, result),
+                replyToMessageId: null,
+                ct);
+        }
+
+        private static string FormatPrepareFailureLogMessage(string asin, PrepareForPublishResult result)
+        {
+            var error = string.IsNullOrWhiteSpace(result.Error)
+                ? "فشل تجهيز المنتج للنشر."
+                : result.Error.Trim();
+
+            var route = string.IsNullOrWhiteSpace(result.Route) ? null : result.Route.Trim();
+            var header = route is null
+                ? $"{error}\nASIN: {asin}"
+                : $"{error}\nASIN: {asin}\nRoute: {route}";
+
+            var text = string.IsNullOrWhiteSpace(result.Detail)
+                ? header
+                : $"{header}\n\nLog:\n{result.Detail.Trim()}";
+
+            // Telegram text limit is 4096; keep headroom for HTML escaping.
+            const int maxLen = 3500;
+            return text.Length <= maxLen ? text : text[..maxLen] + "…";
         }
 
         private async Task TryDeleteWebhookAsync(string botToken, CancellationToken ct)
