@@ -36,7 +36,16 @@ builder.Services.Configure<IspProxyOptions>(
 builder.Services.Configure<KeepAliveOptions>(
     builder.Configuration.GetSection(KeepAliveOptions.SectionName));
 
+builder.Services.Configure<AdminAccessOptions>(
+    builder.Configuration.GetSection(AdminAccessOptions.SectionName));
+
 builder.Services.Configure<AdminSeedOptions>(_ => { });
+
+var adminAccess = builder.Configuration
+    .GetSection(AdminAccessOptions.SectionName)
+    .Get<AdminAccessOptions>() ?? new AdminAccessOptions();
+var secretLoginPath = NormalizeAppPath(adminAccess.SecretLoginPath);
+
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
                        ?? "Server=(localdb)\\mssqllocaldb;Database=AffiliateDb;Trusted_Connection=true;";
 
@@ -61,11 +70,22 @@ builder.Services
 
 builder.Services.ConfigureApplicationCookie(options =>
 {
-    options.LoginPath = "/Account/Login";
+    options.LoginPath = secretLoginPath;
     options.LogoutPath = "/Account/Logout";
-    options.AccessDeniedPath = "/Account/AccessDenied";
+    options.AccessDeniedPath = secretLoginPath;
     options.SlidingExpiration = true;
     options.ExpireTimeSpan = TimeSpan.FromDays(14);
+    // Do not reveal that a login page exists.
+    options.Events.OnRedirectToLogin = context =>
+    {
+        context.Response.StatusCode = StatusCodes.Status404NotFound;
+        return Task.CompletedTask;
+    };
+    options.Events.OnRedirectToAccessDenied = context =>
+    {
+        context.Response.StatusCode = StatusCodes.Status404NotFound;
+        return Task.CompletedTask;
+    };
 });
 
 builder.Services.AddHttpClient(TelegramNotifier.HttpClientName, client =>
@@ -83,6 +103,7 @@ builder.Services.AddSingleton<KeepAliveUrlStore>();
 builder.Services.AddSingleton<IAsinRecheckPollCache, AsinRecheckPollCache>();
 builder.Services.AddSingleton<IScraperRunCoordinator, ScraperRunCoordinator>();
 builder.Services.AddSingleton<IIspProxyService, IspProxyService>();
+builder.Services.AddSingleton<AsinLinkCodec>();
 builder.Services.AddScoped<ITelegramNotifier, TelegramNotifier>();
 builder.Services.AddScoped<IPrepareForPublishService, PrepareForPublishService>();
 builder.Services.AddScoped<IAmazonScraperService, AmazonScraperService>();
@@ -127,7 +148,23 @@ app.MapGet("/health", () => Results.Text("Healthy", "text/plain"))
     .DisableAntiforgery();
 
 app.MapControllerRoute(
+    name: "secret-login",
+    pattern: secretLoginPath.TrimStart('/'),
+    defaults: new { controller = "Account", action = "Login" });
+
+app.MapControllerRoute(
     name: "default",
     pattern: "{controller=Home}/{action=Index}/{id?}");
 
 app.Run();
+
+static string NormalizeAppPath(string? path)
+{
+    if (string.IsNullOrWhiteSpace(path))
+        return "/a9f2c7e1/login";
+
+    path = path.Trim();
+    if (!path.StartsWith('/'))
+        path = "/" + path;
+    return path.TrimEnd('/') is { Length: > 0 } normalized ? normalized : "/a9f2c7e1/login";
+}

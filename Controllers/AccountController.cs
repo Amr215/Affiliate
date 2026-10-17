@@ -1,7 +1,9 @@
+using Affiliate.Options;
 using Affiliate.ViewModels;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 
 namespace Affiliate.Controllers
 {
@@ -9,19 +11,25 @@ namespace Affiliate.Controllers
     {
         private readonly SignInManager<IdentityUser> _signInManager;
         private readonly UserManager<IdentityUser> _userManager;
+        private readonly AdminAccessOptions _adminAccess;
 
         public AccountController(
             SignInManager<IdentityUser> signInManager,
-            UserManager<IdentityUser> userManager)
+            UserManager<IdentityUser> userManager,
+            IOptions<AdminAccessOptions> adminAccess)
         {
             _signInManager = signInManager;
             _userManager = userManager;
+            _adminAccess = adminAccess.Value;
         }
 
         [AllowAnonymous]
         [HttpGet]
         public IActionResult Login(string? returnUrl = null)
         {
+            if (!IsSecretLoginPath())
+                return NotFound();
+
             if (User.Identity?.IsAuthenticated == true)
                 return RedirectToLocal(returnUrl);
 
@@ -34,6 +42,9 @@ namespace Affiliate.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> Login(LoginViewModel model, string? returnUrl = null)
         {
+            if (!IsSecretLoginPath())
+                return NotFound();
+
             ViewData["ReturnUrl"] = returnUrl;
 
             if (!ModelState.IsValid)
@@ -70,14 +81,29 @@ namespace Affiliate.Controllers
         public async Task<IActionResult> Logout()
         {
             await _signInManager.SignOutAsync();
-            return RedirectToAction(nameof(Login));
+            return Redirect(NormalizePath(_adminAccess.SecretLoginPath));
         }
 
         [AllowAnonymous]
         [HttpGet]
-        public IActionResult AccessDenied()
+        public IActionResult AccessDenied() => NotFound();
+
+        private bool IsSecretLoginPath()
         {
-            return View();
+            var expected = NormalizePath(_adminAccess.SecretLoginPath);
+            var actual = NormalizePath(Request.Path.Value);
+            return string.Equals(expected, actual, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string NormalizePath(string? path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+                return "/";
+
+            path = path.Trim();
+            if (!path.StartsWith('/'))
+                path = "/" + path;
+            return path.TrimEnd('/').Length == 0 ? "/" : path.TrimEnd('/');
         }
 
         private IActionResult RedirectToLocal(string? returnUrl)

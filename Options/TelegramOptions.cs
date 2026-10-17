@@ -47,10 +47,22 @@ namespace Affiliate.Options
         public string PublishChannelId { get; set; } = string.Empty;
 
         /// <summary>
-        /// Amazon Associates tracking id appended as <c>?tag=…</c> on product links
-        /// in publish posts (group + channel).
+        /// Amazon Associates tracking id applied by the public <c>/{code}</c> redirect
+        /// (not shown in publish captions).
         /// </summary>
         public string AffiliateTag { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Public site base used in publish captions (e.g. <c>https://el-sindbad.com</c>).
+        /// Captions link to <c>{PublishLinkBaseUrl}/{code}</c>, which redirects to Amazon with <see cref="AffiliateTag"/>.
+        /// </summary>
+        public string PublishLinkBaseUrl { get; set; } = "https://el-sindbad.com";
+
+        /// <summary>
+        /// Secret used to encode ASINs into short opaque link codes.
+        /// Changing it invalidates previously published links.
+        /// </summary>
+        public string LinkCodeSecret { get; set; } = string.Empty;
 
         /// <summary>First configured chat; used for the test message and setup checks.</summary>
         public string? PrimaryChatId =>

@@ -115,15 +115,18 @@ namespace Affiliate.Services
 
         private readonly TelegramOptions _options;
         private readonly IHttpClientFactory _httpClientFactory;
+        private readonly AsinLinkCodec _asinLinkCodec;
         private readonly ILogger<TelegramNotifier> _logger;
 
         public TelegramNotifier(
             IOptions<TelegramOptions> options,
             IHttpClientFactory httpClientFactory,
+            AsinLinkCodec asinLinkCodec,
             ILogger<TelegramNotifier> logger)
         {
             _options = options.Value;
             _httpClientFactory = httpClientFactory;
+            _asinLinkCodec = asinLinkCodec;
             _logger = logger;
         }
 
@@ -541,21 +544,21 @@ namespace Affiliate.Services
         }
 
         /// <summary>
-        /// Short Amazon link with Associates tag for publish posts, e.g.
-        /// <c>amazon.eg/dp/ASIN?tag=speed00a-21</c>.
+        /// Site redirect link for publish posts, e.g. <c>https://el-sindbad.com/xK9mPq2Ab</c>
+        /// (opaque code; Amazon tag is applied by the root short-link endpoint, not in the caption).
         /// </summary>
         private string BuildAffiliateProductUrl(string url)
         {
-            var shortUrl = ShortenProductUrl(url);
-            var tag = _options.AffiliateTag?.Trim();
-            if (string.IsNullOrEmpty(tag))
-                return shortUrl;
+            var match = DpAsinRegex.Match(url);
+            if (!match.Success)
+                return ShortenProductUrl(url);
 
-            if (shortUrl.Contains("tag=", StringComparison.OrdinalIgnoreCase))
-                return shortUrl;
+            var baseUrl = (_options.PublishLinkBaseUrl ?? "https://el-sindbad.com").Trim().TrimEnd('/');
+            if (baseUrl.Length == 0)
+                baseUrl = "https://el-sindbad.com";
 
-            var separator = shortUrl.Contains('?') ? '&' : '?';
-            return $"{shortUrl}{separator}tag={Uri.EscapeDataString(tag)}";
+            var code = _asinLinkCodec.Encode(match.Groups[1].Value);
+            return $"{baseUrl}/{code}";
         }
 
         /// <summary>
