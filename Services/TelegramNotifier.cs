@@ -183,7 +183,7 @@ namespace Affiliate.Services
             if (alert.DropPercent > MegaDealDropPercent && NullIfBlank(_options.MegaDealsChatId) is { } megaChatId)
                 sent |= await SendMessageAsync(megaChatId.Trim(), text, replyMarkup, replyToMessageId: null, cancellationToken);
 
-            if (alert.LowestPriceDays >= LowestPriceGroupMinDays && NullIfBlank(_options.LowestPriceChatId) is { } lowestChatId)
+            if (QualifiesForLowestPriceGroup(alert) && NullIfBlank(_options.LowestPriceChatId) is { } lowestChatId)
                 sent |= await SendMessageAsync(lowestChatId.Trim(), text, replyMarkup, replyToMessageId: null, cancellationToken);
 
             if (sent)
@@ -214,6 +214,14 @@ namespace Affiliate.Services
             var replyMarkup = BuildAlertReplyMarkupJson(product.Name, product.Url, null, alert.CurrentPrice, "🛒 فتح نون");
 
             var sent = await SendMessageAsync(chatId.Trim(), text, replyMarkup, replyToMessageId: null, cancellationToken);
+
+            // Same criteria as Amazon: >50% → mega deals; lowest-ever or lowest for ≥N days → lowest-price group.
+            if (alert.DropPercent > MegaDealDropPercent && NullIfBlank(_options.NoonMegaDealsChatId) is { } megaChatId)
+                sent |= await SendMessageAsync(megaChatId.Trim(), text, replyMarkup, replyToMessageId: null, cancellationToken);
+
+            if (QualifiesForLowestPriceGroup(alert) && NullIfBlank(_options.NoonLowestPriceChatId) is { } lowestChatId)
+                sent |= await SendMessageAsync(lowestChatId.Trim(), text, replyMarkup, replyToMessageId: null, cancellationToken);
+
             _logger.Log(
                 sent ? LogLevel.Information : LogLevel.Warning,
                 "Telegram Noon drop alert {Result} for {Sku} ({Percent}%)",
@@ -499,8 +507,18 @@ namespace Affiliate.Services
         /// <summary>Discounts strictly above this % use the premium Mega Deal image card.</summary>
         private const decimal MegaDealDropPercent = 50m;
 
-        /// <summary>Drops that are the lowest price for at least this many days also go to the lowest-price group.</summary>
+        /// <summary>
+        /// Drops that are the lowest price for at least this many days also go to the lowest-price group.
+        /// Newer products (tracked fewer days) still qualify when the price is the lowest ever.
+        /// </summary>
         private const int LowestPriceGroupMinDays = 30;
+
+        /// <summary>
+        /// Lowest for ≥ <see cref="LowestPriceGroupMinDays"/> days, or lowest for the product's
+        /// entire history when it is younger than that window.
+        /// </summary>
+        private static bool QualifiesForLowestPriceGroup(PriceDropAlert alert) =>
+            alert.IsLowestEver || alert.LowestPriceDays >= LowestPriceGroupMinDays;
 
         /// <summary>Telegram <c>copy_text</c> button payload max length.</summary>
         private const int TelegramCopyTextMaxLength = 256;

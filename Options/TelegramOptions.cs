@@ -28,11 +28,17 @@ namespace Affiliate.Options
         /// <summary>Chat that also receives every drop above 50%, whatever the category.</summary>
         public string MegaDealsChatId { get; set; } = string.Empty;
 
-        /// <summary>Chat that also receives every drop to the lowest price in at least 30 days.</summary>
+        /// <summary>Chat that also receives every drop to the lowest price in at least 30 days (or lowest ever if newer).</summary>
         public string LowestPriceChatId { get; set; } = string.Empty;
 
         /// <summary>Chat that receives every Noon price drop.</summary>
         public string NoonChatId { get; set; } = string.Empty;
+
+        /// <summary>Chat that also receives every Noon drop above 50%.</summary>
+        public string NoonMegaDealsChatId { get; set; } = string.Empty;
+
+        /// <summary>Chat that also receives every Noon drop to the lowest price in at least 30 days (or lowest ever if newer).</summary>
+        public string NoonLowestPriceChatId { get; set; } = string.Empty;
 
         /// <summary>Group where posted Amazon links get «نشر عرض / نشر عرض ممتاز / نشر لقطة / نشر ببلاش» buttons.</summary>
         public string PublishChatId { get; set; } = string.Empty;
