@@ -46,6 +46,9 @@
                 @(Model.Category is { } category ? category.DisplayName() : "بدون تصنيف — لا تُرسل تنبيهات")
             </dd>
 
+            <dt class="col-sm-3">حد التنبيه %</dt>
+            <dd class="col-sm-9 num">@Model.DropAlertPercent</dd>
+
             <dt class="col-sm-3">النطاق</dt>
             <dd class="col-sm-9 ltr">@Model.Domain</dd>
 

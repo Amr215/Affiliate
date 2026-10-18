@@ -25,7 +25,7 @@ namespace Affiliate.Noon.Controllers
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> Create(
-            [Bind(nameof(NoonBrandUrl.Name), nameof(NoonBrandUrl.Url), nameof(NoonBrandUrl.IsEnabled))] NoonBrandUrl brand,
+            [Bind(nameof(NoonBrandUrl.Name), nameof(NoonBrandUrl.Url), nameof(NoonBrandUrl.IsEnabled), nameof(NoonBrandUrl.DropAlertPercent))] NoonBrandUrl brand,
             CancellationToken cancellationToken)
         {
             Validate(brand);
@@ -53,7 +53,7 @@ namespace Affiliate.Noon.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> Edit(
             int id,
-            [Bind(nameof(NoonBrandUrl.Name), nameof(NoonBrandUrl.Url), nameof(NoonBrandUrl.IsEnabled))] NoonBrandUrl input)
+            [Bind(nameof(NoonBrandUrl.Name), nameof(NoonBrandUrl.Url), nameof(NoonBrandUrl.IsEnabled), nameof(NoonBrandUrl.DropAlertPercent))] NoonBrandUrl input)
         {
             var brand = await context.NoonBrandUrls.FindAsync(id);
             if (brand is null)
@@ -67,6 +67,7 @@ namespace Affiliate.Noon.Controllers
             brand.Name = input.Name;
             brand.Url = input.Url;
             brand.IsEnabled = input.IsEnabled;
+            brand.DropAlertPercent = input.DropAlertPercent;
             await context.SaveChangesAsync();
             TempData["StatusMessage"] = $"تم تحديث \"{brand.Name}\".";
             return RedirectToAction(nameof(Index));
@@ -98,6 +99,31 @@ namespace Affiliate.Noon.Controllers
             return count == 0
                 ? BadRequest(new { success = false, message = "لم يتم تحديد أي روابط." })
                 : Ok(new { success = true });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SaveDropAlertPercents([FromBody] SaveDropAlertPercentsRequest request)
+        {
+            if (request.Items is not { Length: > 0 })
+                return BadRequest(new { success = false, message = "لا توجد تغييرات للحفظ." });
+
+            if (request.Items.Any(i => i.DropAlertPercent is < 1 or > 100))
+                return BadRequest(new { success = false, message = "حد التنبيه يجب أن يكون بين 1 و 100." });
+
+            var byId = request.Items.ToDictionary(i => i.Id, i => i.DropAlertPercent);
+            var items = await context.NoonBrandUrls
+                .Where(b => byId.Keys.Contains(b.Id))
+                .ToListAsync();
+
+            if (items.Count == 0)
+                return BadRequest(new { success = false, message = "لم يتم العثور على الروابط." });
+
+            foreach (var item in items)
+                item.DropAlertPercent = byId[item.Id];
+
+            await context.SaveChangesAsync();
+            return Ok(new { success = true, message = $"تم حفظ حد التنبيه لـ {items.Count} رابط." });
         }
 
         [HttpPost]

@@ -76,6 +76,12 @@ namespace Affiliate.Services
         /// <summary>Percent drop of the current price versus the previous recorded price.</summary>
         public required decimal DropPercent { get; init; }
 
+        /// <summary>
+        /// Min drop % from the owning scrape URL / brand; also used as the below-average gate
+        /// for drops under 10%.
+        /// </summary>
+        public decimal AlertThresholdPercent { get; init; } = PriceDropRules.PriceDropAlertThresholdPercent;
+
         /// <summary>Linked product in the other store, when one is linked.</summary>
         public LinkedOffer? Linked { get; set; }
 

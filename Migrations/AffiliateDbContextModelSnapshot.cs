@@ -274,6 +274,10 @@ namespace Affiliate.Migrations
                         .HasMaxLength(16)
                         .HasColumnType("nvarchar(16)");
 
+                    b.Property<decimal>("DropAlertPercent")
+                        .HasPrecision(5, 2)
+                        .HasColumnType("decimal(5,2)");
+
                     b.Property<int>("IntervalSeconds")
                         .HasColumnType("int");
 
@@ -317,6 +321,10 @@ namespace Affiliate.Migrations
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
+
+                    b.Property<decimal>("DropAlertPercent")
+                        .HasPrecision(5, 2)
+                        .HasColumnType("decimal(5,2)");
 
                     b.Property<bool>("IsEnabled")
                         .HasColumnType("bit");

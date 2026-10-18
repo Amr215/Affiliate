@@ -57,6 +57,14 @@ namespace Affiliate.Models
         [Display(Name = "التصنيف")]
         public ScraperCategory? Category { get; set; }
 
+        /// <summary>
+        /// Min drop % vs the previous price to send a Telegram alert. The same value is required
+        /// below the average price when the drop is under 10%.
+        /// </summary>
+        [Range(1, 100)]
+        [Display(Name = "حد التنبيه %")]
+        public decimal DropAlertPercent { get; set; } = 3m;
+
         /// <summary>First results page to fetch (appended/replaced as <c>page</c> on <see cref="Url"/>).</summary>
         public int StartPage { get; set; } = 1;
 

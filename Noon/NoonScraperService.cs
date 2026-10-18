@@ -215,7 +215,7 @@ namespace Affiliate.Noon
                             CheckedAt = now
                         });
 
-                    TrackPrice(product, previousPrice, isNew, alerts);
+                    TrackPrice(product, previousPrice, isNew, alerts, brandRow.DropAlertPercent);
                 }
 
                 if (error is null)
@@ -287,7 +287,12 @@ namespace Affiliate.Noon
         }
 
         /// <summary>Same tracking as Amazon products: baseline drop %, lowest/highest, and a drop alert vs the previous price.</summary>
-        private static void TrackPrice(NoonProduct product, decimal? previousPrice, bool isNew, List<NoonDropAlert> alerts)
+        private static void TrackPrice(
+            NoonProduct product,
+            decimal? previousPrice,
+            bool isNew,
+            List<NoonDropAlert> alerts,
+            decimal thresholdPercent)
         {
             product.DropPercent = null;
             if (product.CurrentPrice is not { } price || price <= 0)
@@ -300,8 +305,15 @@ namespace Affiliate.Noon
             if (TryPercentOff(product.DropBaselinePrice.Value, price, out var fromBaseline))
                 product.DropPercent = RoundPct(fromBaseline);
 
-            if (!isNew && AlertDropPercent(previousPrice, price) is { } drop)
-                alerts.Add(new NoonDropAlert { Product = product, DropPercent = drop, BaselinePrice = previousPrice, CurrentPrice = price });
+            if (!isNew && AlertDropPercent(previousPrice, price, thresholdPercent) is { } drop)
+                alerts.Add(new NoonDropAlert
+                {
+                    Product = product,
+                    DropPercent = drop,
+                    AlertThresholdPercent = thresholdPercent,
+                    BaselinePrice = previousPrice,
+                    CurrentPrice = price
+                });
         }
 
         private async Task SendAlertsAsync(List<NoonDropAlert> alerts, CancellationToken ct)

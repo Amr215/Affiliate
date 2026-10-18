@@ -32,6 +32,7 @@ namespace Affiliate.Data
                 entity.Property(s => s.Name).HasMaxLength(200);
                 entity.Property(s => s.Url).HasMaxLength(4000);
                 entity.Property(s => s.Domain).HasMaxLength(16);
+                entity.Property(s => s.DropAlertPercent).HasPrecision(5, 2);
             });
 
             modelBuilder.Entity<Product>(entity =>
@@ -86,6 +87,7 @@ namespace Affiliate.Data
             {
                 entity.Property(b => b.Name).HasMaxLength(200);
                 entity.Property(b => b.Url).HasMaxLength(4000);
+                entity.Property(b => b.DropAlertPercent).HasPrecision(5, 2);
             });
 
             modelBuilder.Entity<NoonProduct>(entity =>

@@ -1266,6 +1266,7 @@ namespace Affiliate.Services
 
                 var checkedAt = DateTime.UtcNow;
                 var alerts = new List<ProductDropAlert>();
+                var thresholds = await LoadDropAlertThresholdsAsync(existing.Values, scraperUrlId, ct);
 
                 var saved = 0;
                 foreach (var (asin, org) in byAsin)
@@ -1296,7 +1297,10 @@ namespace Affiliate.Services
                     if (!priceUnchanged)
                         product!.PriceHistory.Add(CreatePriceHistory(org, checkedAt));
 
-                    ApplyPriceTracking(product!, org.Price, previousPrice, isNew, alerts);
+                    var threshold = product!.ScraperUrlId is int urlId && thresholds.TryGetValue(urlId, out var pct)
+                        ? pct
+                        : PriceDropAlertThresholdPercent;
+                    ApplyPriceTracking(product, org.Price, previousPrice, isNew, alerts, threshold);
                     saved++;
                 }
 
@@ -1321,6 +1325,21 @@ namespace Affiliate.Services
             {
                 _dbGate.Release();
             }
+        }
+
+        /// <summary>Loads per-URL drop thresholds for the scrape URLs involved in this save.</summary>
+        private async Task<Dictionary<int, decimal>> LoadDropAlertThresholdsAsync(
+            IEnumerable<Product> products, int? scraperUrlId, CancellationToken ct)
+        {
+            var urlIds = products.Select(p => p.ScraperUrlId).OfType<int>().ToHashSet();
+            if (scraperUrlId is int id)
+                urlIds.Add(id);
+            if (urlIds.Count == 0)
+                return new Dictionary<int, decimal>();
+
+            return await _db.ScraperUrls.AsNoTracking()
+                .Where(s => urlIds.Contains(s.Id))
+                .ToDictionaryAsync(s => s.Id, s => s.DropAlertPercent, ct);
         }
 
         /// <summary>
@@ -1379,7 +1398,12 @@ namespace Affiliate.Services
         }
 
         private static void ApplyPriceTracking(
-            Product product, decimal? newPrice, decimal? previousPrice, bool isNew, List<ProductDropAlert> alerts)
+            Product product,
+            decimal? newPrice,
+            decimal? previousPrice,
+            bool isNew,
+            List<ProductDropAlert> alerts,
+            decimal thresholdPercent)
         {
             product.DropPercent = null;
 
@@ -1403,13 +1427,14 @@ namespace Affiliate.Services
                 return;
 
             var drop = RoundPct(dropFromLast);
-            if (drop < PriceDropAlertThresholdPercent)
+            if (drop < thresholdPercent)
                 return;
 
             alerts.Add(new ProductDropAlert
             {
                 Product = product,
                 DropPercent = drop,
+                AlertThresholdPercent = thresholdPercent,
                 BaselinePrice = previousPrice,
                 CurrentPrice = newPrice
             });
@@ -1425,7 +1450,7 @@ namespace Affiliate.Services
                     _logger.LogDebug(
                         "Drop alert skipped for {Asin} ({Percent}%) — price {Price} is not at least {Gate}% below the average {Average}",
                         alert.Product.Asin, alert.DropPercent, alert.CurrentPrice,
-                        MinimumBelowAveragePercent, alert.AveragePrice);
+                        alert.AlertThresholdPercent, alert.AveragePrice);
                     continue;
                 }
 

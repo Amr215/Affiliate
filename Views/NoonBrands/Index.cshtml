@@ -35,6 +35,9 @@
         <button type="button" class="btn btn-sm btn-outline-secondary" id="bulkDisable" disabled>
             <i class="bi bi-toggle-off"></i> تعطيل
         </button>
+        <button type="button" class="btn btn-sm btn-primary" id="saveDropAlertPercents" disabled>
+            <i class="bi bi-save"></i> حفظ حد التنبيه
+        </button>
     </div>
 }
 
@@ -50,6 +53,7 @@
                         }
                     </th>
                     <th>الاسم</th>
+                    <th>حد التنبيه %</th>
                     <th>المنتجات</th>
                     <th>مفعّل</th>
                     <th>آخر تشغيل (UTC)</th>
@@ -65,6 +69,12 @@
                     </td>
                     <td>
                         <a asp-action="Details" asp-route-id="@item.Id" class="fw-semibold arabic-text">@item.Name</a>
+                    </td>
+                    <td style="width:6.5rem">
+                        <input type="number" class="form-control form-control-sm ltr drop-alert-input"
+                               data-id="@item.Id" data-original="@item.DropAlertPercent"
+                               value="@item.DropAlertPercent" min="1" max="100" step="0.1"
+                               aria-label="حد التنبيه لـ @item.Name" />
                     </td>
                     <td class="num">
                         @if (item.LastRunProductCount.HasValue)
@@ -128,9 +138,17 @@
     const countEl = document.getElementById('bulkSelectedCount');
     const enableBtn = document.getElementById('bulkEnable');
     const disableBtn = document.getElementById('bulkDisable');
+    const saveDropAlertBtn = document.getElementById('saveDropAlertPercents');
+    const dropAlertInputs = () => [...document.querySelectorAll('.drop-alert-input')];
 
     function selectedIds() {
         return boxes().filter(b => b.checked).map(b => Number(b.value));
+    }
+
+    function changedDropAlerts() {
+        return dropAlertInputs()
+            .map(el => ({ id: Number(el.dataset.id), dropAlertPercent: Number(el.value), original: Number(el.dataset.original) }))
+            .filter(x => Number.isFinite(x.dropAlertPercent) && x.dropAlertPercent !== x.original);
     }
 
     function refresh() {
@@ -138,6 +156,7 @@
         if (countEl) countEl.textContent = n === 0 ? 'لم يتم تحديد روابط' : `تم تحديد ${n}`;
         if (enableBtn) enableBtn.disabled = n === 0;
         if (disableBtn) disableBtn.disabled = n === 0;
+        if (saveDropAlertBtn) saveDropAlertBtn.disabled = changedDropAlerts().length === 0;
         if (selectAll) {
             const all = boxes();
             selectAll.checked = all.length > 0 && all.every(b => b.checked);
@@ -150,7 +169,11 @@
         refresh();
     });
     document.getElementById('brandsTable')?.addEventListener('change', e => {
-        if (e.target.classList.contains('brand-select')) refresh();
+        if (e.target.classList.contains('brand-select') || e.target.classList.contains('drop-alert-input'))
+            refresh();
+    });
+    document.getElementById('brandsTable')?.addEventListener('input', e => {
+        if (e.target.classList.contains('drop-alert-input')) refresh();
     });
 
     async function setEnabled(isEnabled) {
@@ -171,6 +194,25 @@
 
     enableBtn?.addEventListener('click', () => setEnabled(true));
     disableBtn?.addEventListener('click', () => setEnabled(false));
+    saveDropAlertBtn?.addEventListener('click', async () => {
+        const items = changedDropAlerts();
+        if (!items.length || !token) return;
+        if (items.some(i => i.dropAlertPercent < 1 || i.dropAlertPercent > 100)) {
+            alert('حد التنبيه يجب أن يكون بين 1 و 100.');
+            return;
+        }
+        const res = await fetch('@Url.Action("SaveDropAlertPercents")', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+            body: JSON.stringify({ items: items.map(i => ({ id: i.id, dropAlertPercent: i.dropAlertPercent })) })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.success) {
+            alert(data.message || 'فشل التحديث');
+            return;
+        }
+        location.reload();
+    });
     refresh();
 })();
 </script>

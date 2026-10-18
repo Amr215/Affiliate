@@ -20,13 +20,15 @@ namespace Affiliate.Controllers
         }
 
         public async Task<IActionResult> Index(
-            string? search, bool? hasCategory, bool? isEnabled, bool? isAsinRecheckEnabled, string? sort)
+            string? search, string? category, bool? isEnabled, bool? isAsinRecheckEnabled, string? sort)
         {
             var query = _context.ScraperUrls.AsQueryable();
             if (!string.IsNullOrWhiteSpace(search))
                 query = query.Where(s => s.Name.Contains(search.Trim()));
-            if (hasCategory.HasValue)
-                query = query.Where(s => (s.Category != null) == hasCategory.Value);
+            if (string.Equals(category, "none", StringComparison.OrdinalIgnoreCase))
+                query = query.Where(s => s.Category == null);
+            else if (Enum.TryParse<ScraperCategory>(category, ignoreCase: true, out var cat) && Enum.IsDefined(cat))
+                query = query.Where(s => s.Category == cat);
             if (isEnabled.HasValue)
                 query = query.Where(s => s.IsEnabled == isEnabled.Value);
             if (isAsinRecheckEnabled.HasValue)
@@ -42,7 +44,7 @@ namespace Affiliate.Controllers
             };
 
             ViewData["Search"] = search;
-            ViewData["HasCategory"] = hasCategory;
+            ViewData["Category"] = category;
             ViewData["IsEnabled"] = isEnabled;
             ViewData["IsAsinRecheckEnabled"] = isAsinRecheckEnabled;
             ViewData["Sort"] = sort;
@@ -50,6 +52,25 @@ namespace Affiliate.Controllers
                 .OrderBy(s => s.Name)
                 .Select(s => s.Name)
                 .ToListAsync();
+            ViewData["ProductCounts"] = await _context.Products.AsNoTracking()
+                .Where(p => p.ScraperUrlId != null)
+                .GroupBy(p => p.ScraperUrlId!.Value)
+                .Select(g => new { Id = g.Key, Count = g.Count() })
+                .ToDictionaryAsync(x => x.Id, x => x.Count);
+
+            // Dictionary cannot use null keys, so uncategorized is kept separate.
+            var categoryRows = await _context.Products.AsNoTracking()
+                .Select(p => p.ScraperUrl != null ? p.ScraperUrl.Category : null)
+                .GroupBy(c => c)
+                .Select(g => new { Category = g.Key, Count = g.Count() })
+                .ToListAsync();
+            ViewData["CategoryProductCounts"] = categoryRows
+                .Where(r => r.Category != null)
+                .ToDictionary(r => r.Category!.Value, r => r.Count);
+            ViewData["UncategorizedProductCount"] = categoryRows
+                .Where(r => r.Category == null)
+                .Select(r => r.Count)
+                .FirstOrDefault();
 
             return View(await query.ToListAsync());
         }
@@ -78,7 +99,7 @@ namespace Affiliate.Controllers
                 nameof(ScraperUrl.Name), nameof(ScraperUrl.Url), nameof(ScraperUrl.Domain),
                 nameof(ScraperUrl.StartPage), nameof(ScraperUrl.IntervalSeconds),
                 nameof(ScraperUrl.IsEnabled), nameof(ScraperUrl.IsAsinRecheckEnabled),
-                nameof(ScraperUrl.Category))] ScraperUrl scraperUrl)
+                nameof(ScraperUrl.Category), nameof(ScraperUrl.DropAlertPercent))] ScraperUrl scraperUrl)
         {
             Normalize(scraperUrl);
             if (!ModelState.IsValid)
@@ -111,7 +132,8 @@ namespace Affiliate.Controllers
                 nameof(ScraperUrl.Id), nameof(ScraperUrl.Name), nameof(ScraperUrl.Url),
                 nameof(ScraperUrl.Domain), nameof(ScraperUrl.StartPage),
                 nameof(ScraperUrl.IntervalSeconds), nameof(ScraperUrl.IsEnabled),
-                nameof(ScraperUrl.IsAsinRecheckEnabled), nameof(ScraperUrl.Category))] ScraperUrl scraperUrl)
+                nameof(ScraperUrl.IsAsinRecheckEnabled), nameof(ScraperUrl.Category),
+                nameof(ScraperUrl.DropAlertPercent))] ScraperUrl scraperUrl)
         {
             if (id != scraperUrl.Id)
                 return NotFound();
@@ -255,6 +277,33 @@ namespace Affiliate.Controllers
 
         [HttpPost]
         [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SaveDropAlertPercents(
+            [FromBody] SaveDropAlertPercentsRequest request,
+            CancellationToken cancellationToken)
+        {
+            if (request.Items is not { Length: > 0 })
+                return BadRequest(new { success = false, message = "لا توجد تغييرات للحفظ." });
+
+            if (request.Items.Any(i => i.DropAlertPercent is < 1 or > 100))
+                return BadRequest(new { success = false, message = "حد التنبيه يجب أن يكون بين 1 و 100." });
+
+            var byId = request.Items.ToDictionary(i => i.Id, i => i.DropAlertPercent);
+            var items = await _context.ScraperUrls
+                .Where(s => byId.Keys.Contains(s.Id))
+                .ToListAsync(cancellationToken);
+
+            if (items.Count == 0)
+                return BadRequest(new { success = false, message = "لم يتم العثور على الروابط." });
+
+            foreach (var item in items)
+                item.DropAlertPercent = byId[item.Id];
+
+            await _context.SaveChangesAsync(cancellationToken);
+            return Ok(new { success = true, message = $"تم حفظ حد التنبيه لـ {items.Count} رابط." });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
         public async Task<IActionResult> RunNow(int id, CancellationToken cancellationToken)
         {
             var item = await _context.ScraperUrls.FindAsync(id);
@@ -317,5 +366,16 @@ namespace Affiliate.Controllers
 
         /// <summary>Null clears the category, which stops Telegram alerts for these URLs.</summary>
         public ScraperCategory? Category { get; set; }
+    }
+
+    public class SaveDropAlertPercentsRequest
+    {
+        public DropAlertPercentItem[] Items { get; set; } = [];
+    }
+
+    public class DropAlertPercentItem
+    {
+        public int Id { get; set; }
+        public decimal DropAlertPercent { get; set; }
     }
 }

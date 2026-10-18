@@ -44,6 +44,9 @@
                 <a class="ltr text-break" href="@Model.Url" target="_blank" rel="noopener">@Model.Url</a>
             </dd>
 
+            <dt class="col-sm-3">حد التنبيه %</dt>
+            <dd class="col-sm-9 num">@Model.DropAlertPercent</dd>
+
             <dt class="col-sm-3">منتجات آخر تشغيل</dt>
             <dd class="col-sm-9 num">@(Model.LastRunProductCount?.ToString() ?? "—")</dd>
 

@@ -18,6 +18,14 @@ namespace Affiliate.Noon.Models
         [StringLength(4000)]
         public string Url { get; set; } = string.Empty;
 
+        /// <summary>
+        /// Min drop % vs the previous price to send a Telegram alert. The same value is required
+        /// below the average price when the drop is under 10%.
+        /// </summary>
+        [Range(1, 100)]
+        [Display(Name = "حد التنبيه %")]
+        public decimal DropAlertPercent { get; set; } = 3m;
+
         public bool IsEnabled { get; set; } = true;
 
         public DateTime? LastRunAt { get; set; }

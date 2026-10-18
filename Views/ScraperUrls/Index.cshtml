@@ -2,12 +2,17 @@
 @{
     ViewData["Title"] = "روابط السكرابر";
     var search = ViewData["Search"] as string;
-    var hasCategory = ViewData["HasCategory"] as bool?;
+    var category = ViewData["Category"] as string;
     var isEnabled = ViewData["IsEnabled"] as bool?;
     var isAsinRecheckEnabled = ViewData["IsAsinRecheckEnabled"] as bool?;
     var sort = ViewData["Sort"] as string;
     var allNames = ViewData["AllNames"] as List<string> ?? [];
-    var isFiltered = !string.IsNullOrWhiteSpace(search) || hasCategory.HasValue || isEnabled.HasValue || isAsinRecheckEnabled.HasValue;
+    var productCounts = ViewData["ProductCounts"] as Dictionary<int, int> ?? new();
+    var categoryProductCounts = ViewData["CategoryProductCounts"] as Dictionary<ScraperCategory, int> ?? new();
+    var uncategorizedProductCount = ViewData["UncategorizedProductCount"] as int? ?? 0;
+    var isFiltered = !string.IsNullOrWhiteSpace(search) || !string.IsNullOrWhiteSpace(category)
+        || isEnabled.HasValue || isAsinRecheckEnabled.HasValue;
+    var totalProducts = categoryProductCounts.Values.Sum() + uncategorizedProductCount;
 }
 
 <div class="page-toolbar">
@@ -16,6 +21,17 @@
         <p class="text-muted mb-0">
             تُجلب صفحات أمازون عبر ISP proxy، ثم تُحلَّل المنتجات من HTML. يُنفَّذ كل رابط مفعّل حسب فاصله الزمني.
         </p>
+        <div class="stat-pills mt-2">
+            <span class="stat-pill"><i class="bi bi-box-seam"></i> @totalProducts منتج</span>
+            @foreach (var cat in Enum.GetValues<ScraperCategory>())
+            {
+                <span class="stat-pill">@cat.DisplayName(): <span class="num">@categoryProductCounts.GetValueOrDefault(cat)</span></span>
+            }
+            @if (uncategorizedProductCount > 0)
+            {
+                <span class="stat-pill">بدون تصنيف: <span class="num">@uncategorizedProductCount</span></span>
+            }
+        </div>
     </div>
     <div class="d-flex flex-wrap gap-2">
         <a asp-action="Create" class="btn btn-primary"><i class="bi bi-plus-lg"></i> إضافة رابط</a>
@@ -31,10 +47,13 @@
             <option value="@name"></option>
         }
     </datalist>
-    <select name="hasCategory" class="form-select w-auto arabic-text" aria-label="تصفية حسب التصنيف" onchange="this.form.submit()">
-        <option value="" selected="@(hasCategory is null)">كل التصنيفات</option>
-        <option value="true" selected="@(hasCategory == true)">لها تصنيف</option>
-        <option value="false" selected="@(hasCategory == false)">بدون تصنيف</option>
+    <select name="category" class="form-select w-auto arabic-text" aria-label="تصفية حسب التصنيف" onchange="this.form.submit()">
+        <option value="" selected="@(string.IsNullOrEmpty(category))">كل التصنيفات</option>
+        <option value="none" selected="@(string.Equals(category, "none", StringComparison.OrdinalIgnoreCase))">بدون تصنيف</option>
+        @foreach (var option in Html.GetEnumSelectList<ScraperCategory>())
+        {
+            <option value="@option.Value" selected="@(string.Equals(category, option.Value, StringComparison.OrdinalIgnoreCase))">@option.Text</option>
+        }
     </select>
     <select name="isEnabled" class="form-select w-auto arabic-text" aria-label="تصفية حسب التفعيل" onchange="this.form.submit()">
         <option value="" selected="@(isEnabled is null)">كل الحالات</option>
@@ -95,6 +114,9 @@
         <button type="button" class="btn btn-sm btn-outline-primary" id="bulkAssignCategory" disabled>
             <i class="bi bi-tag"></i> تعيين التصنيف
         </button>
+        <button type="button" class="btn btn-sm btn-primary" id="saveDropAlertPercents" disabled>
+            <i class="bi bi-save"></i> حفظ حد التنبيه
+        </button>
     </div>
 }
 
@@ -111,6 +133,8 @@
                     </th>
                     <th>الاسم</th>
                     <th>التصنيف</th>
+                    <th>المنتجات</th>
+                    <th>حد التنبيه %</th>
                     <th>النطاق</th>
                     <th>الفاصل</th>
                     <th>مفعّل</th>
@@ -122,6 +146,7 @@
             <tbody>
             @foreach (var item in Model)
             {
+                var productCount = productCounts.GetValueOrDefault(item.Id);
                 <tr class="search-row @(item.IsEnabled ? "" : "table-secondary")" data-search-id="@item.Id">
                     <td>
                         <input type="checkbox" class="form-check-input search-select" value="@item.Id" aria-label="تحديد @item.Name" />
@@ -130,14 +155,23 @@
                         <a asp-action="Details" asp-route-id="@item.Id" class="fw-semibold arabic-text">@item.Name</a>
                     </td>
                     <td>
-                        @if (item.Category is { } category)
+                        @if (item.Category is { } itemCategory)
                         {
-                            <span class="badge text-bg-light arabic-text">@category.DisplayName()</span>
+                            <span class="badge text-bg-light arabic-text">@itemCategory.DisplayName()</span>
                         }
                         else
                         {
                             <span class="badge text-bg-warning">بدون تصنيف</span>
                         }
+                    </td>
+                    <td class="num">
+                        <a asp-controller="Products" asp-action="Index" asp-route-ScraperUrlId="@item.Id">@productCount</a>
+                    </td>
+                    <td style="width:6.5rem">
+                        <input type="number" class="form-control form-control-sm ltr drop-alert-input"
+                               data-id="@item.Id" data-original="@item.DropAlertPercent"
+                               value="@item.DropAlertPercent" min="1" max="100" step="0.1"
+                               aria-label="حد التنبيه لـ @item.Name" />
                     </td>
                     <td class="ltr">@item.Domain</td>
                     <td class="num">@item.IntervalSeconds ث</td>
@@ -214,9 +248,17 @@ else if (!Model.Any())
     const disableRecheckBtn = document.getElementById('bulkDisableRecheck');
     const categorySelect = document.getElementById('bulkCategory');
     const categoryBtn = document.getElementById('bulkAssignCategory');
+    const saveDropAlertBtn = document.getElementById('saveDropAlertPercents');
+    const dropAlertInputs = () => [...document.querySelectorAll('.drop-alert-input')];
 
     function selectedIds() {
         return boxes().filter(b => b.checked).map(b => Number(b.value));
+    }
+
+    function changedDropAlerts() {
+        return dropAlertInputs()
+            .map(el => ({ id: Number(el.dataset.id), dropAlertPercent: Number(el.value), original: Number(el.dataset.original), el }))
+            .filter(x => Number.isFinite(x.dropAlertPercent) && x.dropAlertPercent !== x.original);
     }
 
     function refresh() {
@@ -229,6 +271,7 @@ else if (!Model.Any())
         if (disableRecheckBtn) disableRecheckBtn.disabled = n === 0;
         if (categorySelect) categorySelect.disabled = n === 0;
         if (categoryBtn) categoryBtn.disabled = n === 0;
+        if (saveDropAlertBtn) saveDropAlertBtn.disabled = changedDropAlerts().length === 0;
         if (selectAll) {
             const all = boxes();
             selectAll.checked = all.length > 0 && all.every(b => b.checked);
@@ -241,7 +284,11 @@ else if (!Model.Any())
         refresh();
     });
     document.getElementById('searchesTable')?.addEventListener('change', e => {
-        if (e.target.classList.contains('search-select')) refresh();
+        if (e.target.classList.contains('search-select') || e.target.classList.contains('drop-alert-input'))
+            refresh();
+    });
+    document.getElementById('searchesTable')?.addEventListener('input', e => {
+        if (e.target.classList.contains('drop-alert-input')) refresh();
     });
 
     async function bulk(url, payload) {
@@ -272,6 +319,25 @@ else if (!Model.Any())
     categoryBtn?.addEventListener('click', () => bulk('@Url.Action("BulkAssignCategory")', {
         category: categorySelect.value === '' ? null : Number(categorySelect.value)
     }));
+    saveDropAlertBtn?.addEventListener('click', async () => {
+        const items = changedDropAlerts();
+        if (!items.length || !token) return;
+        if (items.some(i => i.dropAlertPercent < 1 || i.dropAlertPercent > 100)) {
+            alert('حد التنبيه يجب أن يكون بين 1 و 100.');
+            return;
+        }
+        const res = await fetch('@Url.Action("SaveDropAlertPercents")', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+            body: JSON.stringify({ items: items.map(i => ({ id: i.id, dropAlertPercent: i.dropAlertPercent })) })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.success) {
+            alert(data.message || 'فشل التحديث');
+            return;
+        }
+        location.reload();
+    });
     refresh();
 })();
 </script>

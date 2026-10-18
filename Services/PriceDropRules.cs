@@ -3,13 +3,11 @@ namespace Affiliate.Services
     /// <summary>Drop-alert criteria shared by the Amazon and Noon scrapers.</summary>
     public static class PriceDropRules
     {
+        /// <summary>Default min drop % (also used as the below-average gate) when a URL has no override.</summary>
         public const decimal PriceDropAlertThresholdPercent = 3m;
 
         /// <summary>Below this drop %, an alert also requires the new price to beat the average price.</summary>
         public const decimal AveragePriceGateBelowPercent = 10m;
-
-        /// <summary>How far below the average price the new price must sit to pass the gate.</summary>
-        public const decimal MinimumBelowAveragePercent = 3m;
 
         private const int HistoryEnds = 5;
 
@@ -25,20 +23,24 @@ namespace Affiliate.Services
         public static decimal RoundPct(decimal percent) =>
             Math.Round(percent, 2, MidpointRounding.AwayFromZero);
 
-        /// <summary>Drop % vs the previous price when it reaches the alert threshold, otherwise null.</summary>
-        public static decimal? AlertDropPercent(decimal? previousPrice, decimal? newPrice)
+        /// <summary>Drop % vs the previous price when it reaches <paramref name="thresholdPercent"/>, otherwise null.</summary>
+        public static decimal? AlertDropPercent(
+            decimal? previousPrice,
+            decimal? newPrice,
+            decimal thresholdPercent = PriceDropAlertThresholdPercent)
         {
             if (previousPrice is not > 0 || newPrice is not > 0 ||
                 !TryPercentOff(previousPrice.Value, newPrice.Value, out var drop))
                 return null;
 
             drop = RoundPct(drop);
-            return drop >= PriceDropAlertThresholdPercent ? drop : null;
+            return drop >= thresholdPercent ? drop : null;
         }
 
         /// <summary>
         /// Drops of 10% or more always alert. Smaller drops alert only when the new price is also
-        /// at least 3% below the product's average recorded price, so noise around a high baseline is skipped.
+        /// at least <see cref="PriceDropAlert.AlertThresholdPercent"/> below the product's average
+        /// recorded price, so noise around a high baseline is skipped.
         /// Requires <see cref="ApplyHistory"/> to have run first.
         /// </summary>
         public static bool QualifiesForAlert(PriceDropAlert alert)
@@ -49,7 +51,7 @@ namespace Affiliate.Services
             return alert.AveragePrice is > 0
                 && alert.CurrentPrice is > 0
                 && TryPercentOff(alert.AveragePrice.Value, alert.CurrentPrice.Value, out var belowAverage)
-                && RoundPct(belowAverage) >= MinimumBelowAveragePercent;
+                && RoundPct(belowAverage) >= alert.AlertThresholdPercent;
         }
 
         /// <summary>Fills the history, average, lowest and lowest-since fields from a product's recorded prices (oldest first).</summary>
