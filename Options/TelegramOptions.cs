@@ -28,10 +28,10 @@ namespace Affiliate.Options
         /// <summary>Chat that also receives every drop above 50%, whatever the category.</summary>
         public string MegaDealsChatId { get; set; } = string.Empty;
 
-        /// <summary>Chat that also receives every drop to the lowest price in at least 30 days (or lowest ever if newer).</summary>
+        /// <summary>Chat for Amazon lowest-price drops (≥30 days or lowest ever) that are not a unique lowest-ever.</summary>
         public string LowestPriceChatId { get; set; } = string.Empty;
 
-        /// <summary>Chat that also receives every Amazon drop that is a unique lowest-ever price.</summary>
+        /// <summary>Chat for Amazon unique lowest-ever drops only (not also sent to <see cref="LowestPriceChatId"/>).</summary>
         public string UniqueLowestPriceChatId { get; set; } = string.Empty;
 
         /// <summary>Chat that receives every Noon price drop.</summary>
@@ -40,10 +40,10 @@ namespace Affiliate.Options
         /// <summary>Chat that also receives every Noon drop above 50%.</summary>
         public string NoonMegaDealsChatId { get; set; } = string.Empty;
 
-        /// <summary>Chat that also receives every Noon drop to the lowest price in at least 30 days (or lowest ever if newer).</summary>
+        /// <summary>Chat for Noon lowest-price drops (≥30 days or lowest ever) that are not a unique lowest-ever.</summary>
         public string NoonLowestPriceChatId { get; set; } = string.Empty;
 
-        /// <summary>Chat that also receives every Noon drop that is a unique lowest-ever price.</summary>
+        /// <summary>Chat for Noon unique lowest-ever drops only (not also sent to <see cref="NoonLowestPriceChatId"/>).</summary>
         public string NoonUniqueLowestPriceChatId { get; set; } = string.Empty;
 
         /// <summary>Group where posted Amazon links get «نشر عرض / نشر عرض ممتاز / نشر لقطة / نشر ببلاش» buttons.</summary>

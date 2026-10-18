@@ -195,11 +195,11 @@ namespace Affiliate.Services
             if (alert.DropPercent > MegaDealDropPercent && NullIfBlank(_options.MegaDealsChatId) is { } megaChatId)
                 sent |= await SendMessageAsync(megaChatId.Trim(), text, replyMarkup, replyToMessageId: null, cancellationToken);
 
-            if (QualifiesForLowestPriceGroup(alert) && NullIfBlank(_options.LowestPriceChatId) is { } lowestChatId)
-                sent |= await SendMessageAsync(lowestChatId.Trim(), text, replyMarkup, replyToMessageId: null, cancellationToken);
-
+            // Unique lowest-ever goes only to the unique chat (not also the lowest-price chat).
             if (alert.IsUniqueLowestEver && NullIfBlank(_options.UniqueLowestPriceChatId) is { } uniqueLowestChatId)
                 sent |= await SendMessageAsync(uniqueLowestChatId.Trim(), text, replyMarkup, replyToMessageId: null, cancellationToken);
+            else if (QualifiesForLowestPriceGroup(alert) && NullIfBlank(_options.LowestPriceChatId) is { } lowestChatId)
+                sent |= await SendMessageAsync(lowestChatId.Trim(), text, replyMarkup, replyToMessageId: null, cancellationToken);
 
             if (sent)
                 _logger.LogInformation(
@@ -234,11 +234,11 @@ namespace Affiliate.Services
             if (alert.DropPercent > MegaDealDropPercent && NullIfBlank(_options.NoonMegaDealsChatId) is { } megaChatId)
                 sent |= await SendMessageAsync(megaChatId.Trim(), text, replyMarkup, replyToMessageId: null, cancellationToken);
 
-            if (QualifiesForLowestPriceGroup(alert) && NullIfBlank(_options.NoonLowestPriceChatId) is { } lowestChatId)
-                sent |= await SendMessageAsync(lowestChatId.Trim(), text, replyMarkup, replyToMessageId: null, cancellationToken);
-
+            // Unique lowest-ever goes only to the unique chat (not also the lowest-price chat).
             if (alert.IsUniqueLowestEver && NullIfBlank(_options.NoonUniqueLowestPriceChatId) is { } uniqueLowestChatId)
                 sent |= await SendMessageAsync(uniqueLowestChatId.Trim(), text, replyMarkup, replyToMessageId: null, cancellationToken);
+            else if (QualifiesForLowestPriceGroup(alert) && NullIfBlank(_options.NoonLowestPriceChatId) is { } lowestChatId)
+                sent |= await SendMessageAsync(lowestChatId.Trim(), text, replyMarkup, replyToMessageId: null, cancellationToken);
 
             _logger.Log(
                 sent ? LogLevel.Information : LogLevel.Warning,
