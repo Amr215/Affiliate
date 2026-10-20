@@ -790,6 +790,19 @@ namespace Affiliate.Services
                     add(document.querySelector('#corePrice_feature_div'));
                     add(document.querySelector('#imgTagWrapperId'));
                     add(document.querySelector('#landingImage'));
+                    // Include automatic checkout discount (وفر X% عند الدفع) only — not bank coupons.
+                    const promoItems = document.querySelectorAll(
+                      '.promoPriceBlockMessage [data-csa-c-owner="PromotionsDiscovery"], [data-csa-c-owner="PromotionsDiscovery"]');
+                    for (const item of promoItems) {
+                      const alert = item.querySelector('.a-alert-inline-success');
+                      if (!alert) continue;
+                      const text = (alert.innerText || '').replace(/\s+/g, ' ');
+                      if (text.includes('عند الدفع') ||
+                          item.querySelector('a.cxcwEmphasisLink[href*="/promotion/psp/"], #emphasisLink')) {
+                        add(item.closest('div[style*="padding"]') || alert);
+                        break;
+                      }
+                    }
                   }
                   return bottoms.length ? Math.max(...bottoms) : window.innerHeight;
                 }
@@ -893,9 +906,10 @@ namespace Affiliate.Services
                 """
                 () => {
                   const highlightColor = '#2E75B6';
-                  const outline = (el) => {
+                  const checkoutDiscountColor = '#C00000';
+                  const outline = (el, color = highlightColor) => {
                     if (!el) return false;
-                    el.style.outline = `2px solid ${highlightColor}`;
+                    el.style.outline = `2px solid ${color}`;
                     el.style.outlineOffset = '2px';
                     el.style.boxShadow = 'none';
                     return true;
@@ -946,15 +960,36 @@ namespace Affiliate.Services
 
                   outline(seller);
 
-                  // Keep title + buybox in view; only nudge if shipper is below the fold.
-                  if (seller) {
-                    const sr = seller.getBoundingClientRect();
+                  // Automatic checkout discount only (وفر X% عند الدفع) — not bank coupons / login coupons.
+                  let checkoutDiscount = null;
+                  const promoItems = document.querySelectorAll(
+                    '.promoPriceBlockMessage [data-csa-c-owner="PromotionsDiscovery"], [data-csa-c-owner="PromotionsDiscovery"]');
+                  for (const item of promoItems) {
+                    const alert = item.querySelector('.a-alert-inline-success');
+                    if (!alert) continue;
+                    const text = (alert.innerText || '').replace(/\s+/g, ' ');
+                    const isAutoCheckout =
+                      text.includes('عند الدفع') ||
+                      !!item.querySelector('a.cxcwEmphasisLink[href*="/promotion/psp/"], #emphasisLink');
+                    if (!isAutoCheckout) continue;
+                    checkoutDiscount =
+                      item.closest('div[style*="padding"]') ||
+                      alert.closest('.a-alert-inline') ||
+                      alert;
+                    break;
+                  }
+                  outline(checkoutDiscount, checkoutDiscountColor);
+
+                  // Keep title + buybox in view; only nudge if shipper/promo is below the fold.
+                  const scrollTarget = checkoutDiscount || seller;
+                  if (scrollTarget) {
+                    const sr = scrollTarget.getBoundingClientRect();
                     if (sr.bottom > window.innerHeight - 20 || sr.top < 0) {
                       const box = document.querySelector('#desktop_buybox, #buybox, #qualifiedBuybox');
                       if (box) {
                         box.scrollIntoView({ block: 'start', inline: 'nearest' });
                       } else {
-                        seller.scrollIntoView({ block: 'end', inline: 'nearest' });
+                        scrollTarget.scrollIntoView({ block: 'end', inline: 'nearest' });
                       }
                     }
                   }
