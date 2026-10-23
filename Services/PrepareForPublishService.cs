@@ -7,9 +7,10 @@ namespace Affiliate.Services
     public interface IPrepareForPublishService
     {
         /// <summary>
-        /// Opens Amazon.eg (direct host first), ensures Arabic UI, and returns a publish screenshot:
-        /// highlighted DP when <paramref name="alertPrice"/> is null or matches the page price;
-        /// otherwise adds to cart and returns a plain cart screenshot.
+        /// Opens Amazon.eg (direct host first), ensures Arabic UI, and returns a publish screenshot.
+        /// Products with an automatic checkout discount or Amazon promo-code coupon use a mobile
+        /// cart screenshot with an injected discount row (Amazon hides that until login).
+        /// Otherwise: highlighted DP when prices match; cart when they do not.
         /// On direct-host timeout/captcha/block, retries via ISP SOCKS5 proxies.
         /// </summary>
         Task<PrepareForPublishResult> PrepareAsync(
@@ -31,7 +32,19 @@ namespace Affiliate.Services
         public decimal? ProductPrice { get; init; }
         public byte[]? ScreenshotPng { get; init; }
         public bool UsedCartScreenshot { get; init; }
+        /// <summary>
+        /// Arabic note(s) for Telegram captions (checkout discount and/or stale product-page price);
+        /// null otherwise. Shown before the product URL; multiple notes are newline-separated.
+        /// </summary>
+        public string? CaptionNote { get; init; }
     }
+
+    /// <summary>
+    /// Discount detected on the DP to fake in the logged-out cart summary.
+    /// <see cref="Kind"/> is <c>auto</c> (عند الدفع → "Extra N% OFF") or
+    /// <c>promo</c> (رمز العرض → "Save N%").
+    /// </summary>
+    internal sealed record CheckoutDiscountInfo(string Kind, int Percent, string Label);
 
     public sealed class PrepareForPublishService : IPrepareForPublishService
     {
@@ -414,10 +427,22 @@ namespace Affiliate.Services
                 var pricesMatch = alertPrice is null
                     || (pagePrice.HasValue && PricesMatch(pagePrice.Value, alertPrice.Value));
 
+                var checkoutDiscount = await DetectCheckoutDiscountAsync(page);
+                if (checkoutDiscount is not null)
+                {
+                    _logger.LogInformation(
+                        "Prepare-for-publish {Asin}: checkout discount {Kind} {Percent}% → cart with injected summary",
+                        asin, checkoutDiscount.Kind, checkoutDiscount.Percent);
+                }
+
+                // Auto/promo discounts: always cart + drawn summary (not shown until login).
+                var useCart = checkoutDiscount is not null || !pricesMatch;
+
                 byte[] screenshot;
                 var usedCart = false;
+                decimal? resultPrice = pagePrice ?? alertPrice;
 
-                if (pricesMatch)
+                if (!useCart)
                 {
                     await UseNarrowPublishLayoutAsync(page);
                     await HighlightDesktopPublishTargetsAsync(page);
@@ -430,7 +455,11 @@ namespace Affiliate.Services
                         await AddToCartAndOpenCartAsync(page, asin, cancellationToken);
                         usedCart = true;
                         screenshot = await CaptureMobileCartItemAsync(
-                            browser, context, asin, playwrightProxy);
+                            browser, context, asin, playwrightProxy, checkoutDiscount, pagePrice);
+                        if (checkoutDiscount is not null && pagePrice is { } listPrice)
+                            resultPrice = ApplyCheckoutDiscount(listPrice, checkoutDiscount.Percent);
+                        else
+                            resultPrice = alertPrice ?? pagePrice;
                     }
                     catch (Exception cartEx)
                     {
@@ -449,6 +478,8 @@ namespace Affiliate.Services
                         await UseNarrowPublishLayoutAsync(page);
                         await HighlightDesktopPublishTargetsAsync(page);
                         screenshot = await CapturePublishScreenshotAsync(page, cart: false);
+                        usedCart = false;
+                        resultPrice = pagePrice ?? alertPrice;
                     }
                 }
 
@@ -458,9 +489,10 @@ namespace Affiliate.Services
                     Route = route,
                     ProductName = productName,
                     ProductUrl = productUrl,
-                    ProductPrice = usedCart ? (alertPrice ?? pagePrice) : (pagePrice ?? alertPrice),
+                    ProductPrice = resultPrice,
                     ScreenshotPng = screenshot,
-                    UsedCartScreenshot = usedCart
+                    UsedCartScreenshot = usedCart,
+                    CaptionNote = FormatPublishCaptionNotes(checkoutDiscount, priceMismatch: !pricesMatch)
                 };
             }
             } // socksBridge
@@ -537,8 +569,31 @@ namespace Affiliate.Services
                 ProductUrl = result.ProductUrl,
                 ProductPrice = result.ProductPrice,
                 ScreenshotPng = result.ScreenshotPng,
-                UsedCartScreenshot = result.UsedCartScreenshot
+                UsedCartScreenshot = result.UsedCartScreenshot,
+                CaptionNote = result.CaptionNote
             };
+
+        /// <summary>Telegram caption lines placed before the URL (discount and/or cart price hint).</summary>
+        internal static string? FormatPublishCaptionNotes(
+            CheckoutDiscountInfo? discount,
+            bool priceMismatch)
+        {
+            var lines = new List<string>(2);
+
+            if (discount is { Percent: > 0 })
+            {
+                lines.Add(discount.Kind.Equals("auto", StringComparison.OrdinalIgnoreCase)
+                    ? $"ملحوظة: حط السعر في السلة وهتلاقي خصم تلقائي عند الدفع ({discount.Percent}%)"
+                    : "ملحوظة: يوجد كود خصم للتحصيل عند الشراء هتلاقية تحت المنتج");
+            }
+
+            if (priceMismatch)
+            {
+                lines.Add("ملحوظة: السعر ممكن يكون لسه متحدثش في صفحة المنتج حط في السلة هيتحدث");
+            }
+
+            return lines.Count == 0 ? null : string.Join("\n", lines);
+        }
 
         /// <summary>
         /// language=ar_AE alone is unreliable — also set cookies/headers/locale,
@@ -790,19 +845,38 @@ namespace Affiliate.Services
                     add(document.querySelector('#corePrice_feature_div'));
                     add(document.querySelector('#imgTagWrapperId'));
                     add(document.querySelector('#landingImage'));
-                    // Include automatic checkout discount (وفر X% عند الدفع) only — not bank coupons.
-                    const promoItems = document.querySelectorAll(
-                      '.promoPriceBlockMessage [data-csa-c-owner="PromotionsDiscovery"], [data-csa-c-owner="PromotionsDiscovery"]');
-                    for (const item of promoItems) {
-                      const alert = item.querySelector('.a-alert-inline-success');
-                      if (!alert) continue;
-                      const text = (alert.innerText || '').replace(/\s+/g, ' ');
-                      if (text.includes('عند الدفع') ||
-                          item.querySelector('a.cxcwEmphasisLink[href*="/promotion/psp/"], #emphasisLink')) {
-                        add(item.closest('div[style*="padding"]') || alert);
-                        break;
+                    // Auto checkout + Amazon promo code coupons only — not bank Visa/NBE/ABC.
+                    const seenPromo = new Set();
+                    const promoRow = (el) => {
+                      let node = el;
+                      while (node && node !== document.body) {
+                        const style = (node.getAttribute && node.getAttribute('style')) || '';
+                        if (/padding\s*:\s*5px/i.test(style)) return node;
+                        if (node.getAttribute?.('data-csa-c-owner') === 'PromotionsDiscovery')
+                          return node;
+                        node = node.parentElement;
                       }
-                    }
+                      return el;
+                    };
+                    const isCheckoutPromoRow = (row) => {
+                      if (!row) return false;
+                      const text = (row.innerText || '').replace(/\s+/g, ' ');
+                      const hasPspLink = !!row.querySelector(
+                        'a.cxcwEmphasisLink[href*="/promotion/psp/"], a[href*="/promotion/psp/"], a#emphasisLink, #emphasisLink');
+                      if (text.includes('عند الدفع')) return true;
+                      if (text.includes('رمز العرض الترويجي')) return true;
+                      if (row.querySelector('.a-alert-inline-success') && hasPspLink) return true;
+                      if (row.querySelector('[id^="promoMessageCXCW"]') && hasPspLink) return true;
+                      return false;
+                    };
+                    document.querySelectorAll(
+                      '[id^="promoMessageCXCW"], [id^="doneMessage"], [id^="greenBadge"], [id^="clickMe"], [data-csa-c-action="clipPromotion"], .promoPriceBlockMessage [data-csa-c-owner="PromotionsDiscovery"], [data-csa-c-owner="PromotionsDiscovery"], .a-alert-inline-success')
+                      .forEach((el) => {
+                        const target = promoRow(el);
+                        if (!target || seenPromo.has(target) || !isCheckoutPromoRow(target)) return;
+                        seenPromo.add(target);
+                        add(target);
+                      });
                   }
                   return bottoms.length ? Math.max(...bottoms) : window.innerHeight;
                 }
@@ -829,14 +903,17 @@ namespace Affiliate.Services
         }
 
         /// <summary>
-        /// Reopens the cart as a phone (same session/cookies) and captures only the product's
-        /// cart card — a compact image instead of the wide desktop cart.
+        /// Reopens the cart as a phone (same session/cookies) and captures the product card.
+        /// When <paramref name="discount"/> is set, injects a fake order-summary discount row
+        /// (Amazon only shows it after login) and captures item + summary together.
         /// </summary>
         private static async Task<byte[]> CaptureMobileCartItemAsync(
             IBrowser browser,
             IBrowserContext desktopContext,
             string asin,
-            Proxy? proxy)
+            Proxy? proxy,
+            CheckoutDiscountInfo? discount,
+            decimal? itemPrice)
         {
             await using var mobile = await browser.NewContextAsync(new BrowserNewContextOptions
             {
@@ -863,7 +940,260 @@ namespace Affiliate.Services
 
             var item = page.Locator($".sc-list-item[data-asin='{asin}'], [data-asin='{asin}'][data-itemtype='active']").First;
             await item.WaitForAsync(new LocatorWaitForOptions { State = WaitForSelectorState.Visible, Timeout = 30_000 });
-            return await item.ScreenshotAsync(new LocatorScreenshotOptions { Type = ScreenshotType.Png });
+
+            if (discount is null || itemPrice is null || discount.Percent <= 0)
+                return await item.ScreenshotAsync(new LocatorScreenshotOptions { Type = ScreenshotType.Png });
+
+            await InjectCartCheckoutDiscountAsync(page, asin, itemPrice.Value, discount);
+
+            await page.EvaluateAsync(
+                """
+                (asin) => {
+                  const hide = (el) => {
+                    if (!el) return;
+                    el.style.setProperty('display', 'none', 'important');
+                    el.style.setProperty('visibility', 'hidden', 'important');
+                  };
+                  for (const sel of [
+                    '#sc-buy-box', '#sc-proceed-to-checkout', '#sc-buy-box-ptc',
+                    '[name="proceedToRetailCheckout"]', '#sc-active-cart .sc-proceed-to-checkout',
+                    '#nav-main', '#navbar', '#nav-belt', '#nav-subnav',
+                    '#nav-progressive-subnav', 'header', '#huc-v2-order-row-with-divider'
+                  ]) {
+                    document.querySelectorAll(sel).forEach(hide);
+                  }
+                  document.querySelectorAll('input, button, a, span, .a-button').forEach((el) => {
+                    const t = ((el.value || el.innerText || el.textContent || '') + '').replace(/\s+/g, ' ');
+                    if (!t.includes('تابع لإتمام') && !t.includes('إتمام عملية الشراء') &&
+                        !t.includes('Proceed to checkout'))
+                      return;
+                    hide(el.closest('.a-button, form, .sc-buy-box, [data-feature-id]') || el);
+                  });
+                  const item = document.querySelector(
+                    `.sc-list-item[data-asin='${asin}'], [data-asin='${asin}'][data-itemtype='active']`);
+                  item?.scrollIntoView({ block: 'start', inline: 'nearest' });
+                  window.scrollBy(0, -24);
+                }
+                """,
+                asin);
+            await page.WaitForTimeoutAsync(250);
+
+            var clip = await page.EvaluateAsync<CartCaptureClip?>(
+                """
+                (asin) => {
+                  const item = document.querySelector(
+                    `.sc-list-item[data-asin='${asin}'], [data-asin='${asin}'][data-itemtype='active']`);
+                  const summary = document.getElementById('affiliate-injected-cart-summary');
+                  if (!item || !summary) return null;
+                  const a = item.getBoundingClientRect();
+                  const b = summary.getBoundingClientRect();
+                  const top = Math.min(a.top, b.top);
+                  const bottom = Math.max(a.bottom, b.bottom);
+                  const pad = 24;
+                  const y = Math.max(0, top - pad);
+                  const height = Math.min(window.innerHeight - y, bottom - top + pad * 2);
+                  if (height < 50) return null;
+                  return { x: 0, y, width: window.innerWidth, height };
+                }
+                """,
+                asin);
+
+            if (clip is null)
+                return await item.ScreenshotAsync(new LocatorScreenshotOptions { Type = ScreenshotType.Png });
+
+            return await page.ScreenshotAsync(new PageScreenshotOptions
+            {
+                Type = ScreenshotType.Png,
+                FullPage = false,
+                Clip = new Clip
+                {
+                    X = clip.X,
+                    Y = clip.Y,
+                    Width = clip.Width,
+                    Height = clip.Height
+                }
+            });
+        }
+
+        private sealed class CartCaptureClip
+        {
+            public float X { get; set; }
+            public float Y { get; set; }
+            public float Width { get; set; }
+            public float Height { get; set; }
+        }
+
+        internal static decimal ApplyCheckoutDiscount(decimal listPrice, int percent)
+        {
+            var discount = Math.Round(listPrice * percent / 100m, 2, MidpointRounding.AwayFromZero);
+            return Math.Max(0, listPrice - discount);
+        }
+
+        private static string FormatCartMoney(decimal amount) =>
+            amount.ToString("0.00", CultureInfo.InvariantCulture) + " جنيه";
+
+        /// <summary>
+        /// Reads automatic checkout / Amazon promo-code coupons from the DP (not bank cards).
+        /// </summary>
+        private static async Task<CheckoutDiscountInfo?> DetectCheckoutDiscountAsync(IPage page)
+        {
+            var dto = await page.EvaluateAsync<CheckoutDiscountDto?>(
+                """
+                () => {
+                  const promoRow = (el) => {
+                    let node = el;
+                    while (node && node !== document.body) {
+                      const style = (node.getAttribute && node.getAttribute('style')) || '';
+                      if (/padding\s*:\s*5px/i.test(style)) return node;
+                      if (node.getAttribute?.('data-csa-c-owner') === 'PromotionsDiscovery')
+                        return node;
+                      node = node.parentElement;
+                    }
+                    return el;
+                  };
+                  const parsePercent = (text) => {
+                    const m = (text || '').match(/وف[ِّ]?ر\s*(\d+)\s*%/i)
+                      || (text || '').match(/Extra\s*(\d+)\s*%/i)
+                      || (text || '').match(/(\d+)\s*%/);
+                    return m ? parseInt(m[1], 10) : 0;
+                  };
+                  const seen = new Set();
+                  const rows = [];
+                  document.querySelectorAll(
+                    '[id^="promoMessageCXCW"], [id^="doneMessage"], [id^="greenBadge"], [id^="clickMe"], [data-csa-c-action="clipPromotion"], .promoPriceBlockMessage [data-csa-c-owner="PromotionsDiscovery"], [data-csa-c-owner="PromotionsDiscovery"], .a-alert-inline-success')
+                    .forEach((el) => {
+                      const row = promoRow(el);
+                      if (!row || seen.has(row)) return;
+                      seen.add(row);
+                      rows.push(row);
+                    });
+
+                  let best = null;
+                  for (const row of rows) {
+                    const text = (row.innerText || '').replace(/\s+/g, ' ');
+                    const hasPspLink = !!row.querySelector(
+                      'a.cxcwEmphasisLink[href*="/promotion/psp/"], a[href*="/promotion/psp/"], a#emphasisLink, #emphasisLink');
+                    const isAuto = text.includes('عند الدفع');
+                    const isPromo =
+                      text.includes('رمز العرض الترويجي') ||
+                      (!!row.querySelector('[id^="promoMessageCXCW"]') && hasPspLink) ||
+                      (!!row.querySelector('.a-alert-inline-success') && hasPspLink && !isAuto);
+                    if (!isAuto && !isPromo) continue;
+
+                    const badge = row.querySelector('[id^="greenBadge"]');
+                    const percent = parsePercent(badge?.innerText || '') || parsePercent(text);
+                    if (percent <= 0 || percent > 90) continue;
+
+                    const kind = isAuto ? 'auto' : 'promo';
+                    const label = kind === 'auto'
+                      ? `Extra ${percent}% OFF`
+                      : `Save ${percent}%`;
+                    // Prefer auto over promo if both somehow match; otherwise first hit.
+                    if (best && best.kind === 'auto' && kind === 'promo') continue;
+                    best = { kind, percent, label };
+                    if (kind === 'auto') break;
+                  }
+                  return best;
+                }
+                """);
+
+            if (dto is null || dto.Percent <= 0 || string.IsNullOrWhiteSpace(dto.Kind))
+                return null;
+
+            var kind = dto.Kind.Equals("auto", StringComparison.OrdinalIgnoreCase) ? "auto" : "promo";
+            var label = string.IsNullOrWhiteSpace(dto.Label)
+                ? (kind == "auto" ? $"Extra {dto.Percent}% OFF" : $"Save {dto.Percent}%")
+                : dto.Label.Trim();
+
+            return new CheckoutDiscountInfo(kind, dto.Percent, label);
+        }
+
+        private sealed class CheckoutDiscountDto
+        {
+            public string? Kind { get; set; }
+            public int Percent { get; set; }
+            public string? Label { get; set; }
+        }
+
+        /// <summary>
+        /// Draws an Amazon-like cart summary with the discount line that only appears after login.
+        /// </summary>
+        private static async Task InjectCartCheckoutDiscountAsync(
+            IPage page,
+            string asin,
+            decimal itemPrice,
+            CheckoutDiscountInfo discount)
+        {
+            var discountAmount = Math.Round(
+                itemPrice * discount.Percent / 100m, 2, MidpointRounding.AwayFromZero);
+            var orderTotal = Math.Max(0, itemPrice - discountAmount);
+
+            await page.EvaluateAsync(
+                """
+                ({ asin, itemPriceText, shipText, totalText, discountLabel, discountText, orderTotalText }) => {
+                  document.getElementById('affiliate-injected-cart-summary')?.remove();
+
+                  const item = document.querySelector(
+                    `.sc-list-item[data-asin='${asin}'], [data-asin='${asin}'][data-itemtype='active']`);
+                  if (!item) return;
+
+                  const row = (label, value, opts = {}) => {
+                    const div = document.createElement('div');
+                    div.style.cssText = [
+                      'display:flex',
+                      'justify-content:space-between',
+                      'align-items:baseline',
+                      'gap:12px',
+                      'padding:3px 0',
+                      'font-size:14px',
+                      'line-height:1.35',
+                      opts.bold ? 'font-weight:700' : 'font-weight:400',
+                      opts.green ? 'color:#067D62' : 'color:#0F1111'
+                    ].join(';');
+                    const lab = document.createElement('span');
+                    lab.textContent = label;
+                    lab.style.cssText = opts.green ? 'color:#0F1111' : '';
+                    const val = document.createElement('span');
+                    val.textContent = value;
+                    if (opts.green) val.style.color = '#067D62';
+                    if (opts.bold) val.style.fontWeight = '700';
+                    div.appendChild(lab);
+                    div.appendChild(val);
+                    return div;
+                  };
+
+                  const box = document.createElement('div');
+                  box.id = 'affiliate-injected-cart-summary';
+                  box.dir = 'rtl';
+                  box.style.cssText = [
+                    'margin:0',
+                    'padding:12px 14px 14px',
+                    'background:#fff',
+                    'border-top:1px solid #D5D9D9',
+                    'font-family:Arial,"Amazon Ember",sans-serif',
+                    'color:#0F1111'
+                  ].join(';');
+
+                  box.appendChild(row('السلع', itemPriceText));
+                  box.appendChild(row('الشحن والتسليم', shipText));
+                  box.appendChild(row('الإجمالي', totalText));
+                  box.appendChild(row(discountLabel, discountText, { green: true }));
+                  box.appendChild(row('إجمالي الطلب', orderTotalText, { bold: true }));
+
+                  // Place after the cart item so the publish clip includes product + summary.
+                  item.after(box);
+                }
+                """,
+                new
+                {
+                    asin,
+                    itemPriceText = FormatCartMoney(itemPrice),
+                    shipText = FormatCartMoney(0m),
+                    totalText = FormatCartMoney(itemPrice),
+                    discountLabel = discount.Label,
+                    discountText = "-" + FormatCartMoney(discountAmount),
+                    orderTotalText = FormatCartMoney(orderTotal)
+                });
         }
 
         /// <summary>
@@ -960,25 +1290,45 @@ namespace Affiliate.Services
 
                   outline(seller);
 
-                  // Automatic checkout discount only (وفر X% عند الدفع) — not bank coupons / login coupons.
+                  // Auto checkout (عند الدفع) + Amazon promo code coupons (رمز العرض الترويجي / GLAM10).
+                  // Do NOT match bank Visa/NBE/ABC coupons.
                   let checkoutDiscount = null;
-                  const promoItems = document.querySelectorAll(
-                    '.promoPriceBlockMessage [data-csa-c-owner="PromotionsDiscovery"], [data-csa-c-owner="PromotionsDiscovery"]');
-                  for (const item of promoItems) {
-                    const alert = item.querySelector('.a-alert-inline-success');
-                    if (!alert) continue;
-                    const text = (alert.innerText || '').replace(/\s+/g, ' ');
-                    const isAutoCheckout =
-                      text.includes('عند الدفع') ||
-                      !!item.querySelector('a.cxcwEmphasisLink[href*="/promotion/psp/"], #emphasisLink');
-                    if (!isAutoCheckout) continue;
-                    checkoutDiscount =
-                      item.closest('div[style*="padding"]') ||
-                      alert.closest('.a-alert-inline') ||
-                      alert;
-                    break;
-                  }
-                  outline(checkoutDiscount, checkoutDiscountColor);
+                  const seenPromo = new Set();
+                  const promoRow = (el) => {
+                    let node = el;
+                    while (node && node !== document.body) {
+                      const style = (node.getAttribute && node.getAttribute('style')) || '';
+                      // Amazon clip-coupon row wrapper: padding:5px 0px 5px 0px
+                      if (/padding\s*:\s*5px/i.test(style)) return node;
+                      if (node.getAttribute?.('data-csa-c-owner') === 'PromotionsDiscovery')
+                        return node;
+                      node = node.parentElement;
+                    }
+                    return el;
+                  };
+                  const isCheckoutPromoRow = (row) => {
+                    if (!row) return false;
+                    const text = (row.innerText || '').replace(/\s+/g, ' ');
+                    const hasPspLink = !!row.querySelector(
+                      'a.cxcwEmphasisLink[href*="/promotion/psp/"], a[href*="/promotion/psp/"], a#emphasisLink, #emphasisLink');
+                    // Strict Amazon-promo signals only (bank coupons use different wording).
+                    if (text.includes('عند الدفع')) return true;
+                    if (text.includes('رمز العرض الترويجي')) return true;
+                    if (row.querySelector('.a-alert-inline-success') && hasPspLink) return true;
+                    // Clippable Amazon coupon row: CXCW promo message + PSP shop link.
+                    if (row.querySelector('[id^="promoMessageCXCW"]') && hasPspLink) return true;
+                    return false;
+                  };
+                  const markPromo = (el) => {
+                    const target = promoRow(el);
+                    if (!target || seenPromo.has(target) || !isCheckoutPromoRow(target)) return;
+                    seenPromo.add(target);
+                    if (outline(target, checkoutDiscountColor))
+                      checkoutDiscount = target;
+                  };
+                  document.querySelectorAll(
+                    '[id^="promoMessageCXCW"], [id^="doneMessage"], [id^="greenBadge"], [id^="clickMe"], [data-csa-c-action="clipPromotion"], .promoPriceBlockMessage [data-csa-c-owner="PromotionsDiscovery"], [data-csa-c-owner="PromotionsDiscovery"], .a-alert-inline-success')
+                    .forEach(markPromo);
 
                   // Keep title + buybox in view; only nudge if shipper/promo is below the fold.
                   const scrollTarget = checkoutDiscount || seller;

@@ -33,6 +33,7 @@ namespace Affiliate.Services
             string productName,
             string productUrl,
             byte[] screenshotPng,
+            string? captionNote = null,
             int? replyToMessageId = null,
             CancellationToken cancellationToken = default);
 
@@ -51,6 +52,7 @@ namespace Affiliate.Services
             string productUrl,
             decimal? productPrice,
             byte[] screenshotPng,
+            string? captionNote = null,
             int? replyToMessageId = null,
             CancellationToken cancellationToken = default);
     }
@@ -279,16 +281,22 @@ namespace Affiliate.Services
             string productName,
             string productUrl,
             byte[] screenshotPng,
+            string? captionNote = null,
             int? replyToMessageId = null,
             CancellationToken cancellationToken = default)
         {
             var name = productName?.Trim() ?? "";
             var url = ShortenProductUrl(productUrl?.Trim() ?? "");
-            var caption = $"{Html(name)}\n{Html(url)}";
+            var note = captionNote?.Trim() ?? "";
+            var caption = string.IsNullOrEmpty(note)
+                ? $"{Html(name)}\n{Html(url)}"
+                : $"{Html(name)}\n{Html(note)}\n{Html(url)}";
             if (caption.Length > 1024)
                 caption = caption[..1021] + "…";
 
-            var copyPayload = $"{name}\n{url}".Trim();
+            var copyPayload = string.IsNullOrEmpty(note)
+                ? $"{name}\n{url}".Trim()
+                : $"{name}\n{note}\n{url}".Trim();
             if (copyPayload.Length > TelegramCopyTextMaxLength)
                 copyPayload = copyPayload[..TelegramCopyTextMaxLength];
 
@@ -351,6 +359,7 @@ namespace Affiliate.Services
             string productUrl,
             decimal? productPrice,
             byte[] screenshotPng,
+            string? captionNote = null,
             int? replyToMessageId = null,
             CancellationToken cancellationToken = default)
         {
@@ -358,12 +367,14 @@ namespace Affiliate.Services
             if (productPrice.HasValue)
                 name += $" بسعر {Math.Truncate(productPrice.Value):0} جنية";
             var url = BuildAffiliateProductUrl(productUrl.Trim());
+            var note = captionNote?.Trim() ?? "";
+            var beforeUrl = string.IsNullOrEmpty(note) ? "" : $"\n\n{note}";
             var caption = kind switch
             {
-                "offer" => $"عرض على {name}\n\n{url}",
-                "greatoffer" => $"عرض ممتاز على {name}\n\n{url}",
-                "snap" => $"لقطة\n\n{name}\n\n{url}",
-                "free" => $"ببلاش\n\n{name}\n\n{url}",
+                "offer" => $"عرض على {name}{beforeUrl}\n\n{url}",
+                "greatoffer" => $"عرض ممتاز على {name}{beforeUrl}\n\n{url}",
+                "snap" => $"لقطة\n\n{name}{beforeUrl}\n\n{url}",
+                "free" => $"ببلاش\n\n{name}{beforeUrl}\n\n{url}",
                 _ => null
             };
             if (caption is null)
