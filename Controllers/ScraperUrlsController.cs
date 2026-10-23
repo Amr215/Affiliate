@@ -99,6 +99,7 @@ namespace Affiliate.Controllers
                 nameof(ScraperUrl.Name), nameof(ScraperUrl.Url), nameof(ScraperUrl.Domain),
                 nameof(ScraperUrl.StartPage), nameof(ScraperUrl.IntervalSeconds),
                 nameof(ScraperUrl.IsEnabled), nameof(ScraperUrl.IsAsinRecheckEnabled),
+                nameof(ScraperUrl.LongUnavailableRecheckIntervalMinutes),
                 nameof(ScraperUrl.Category), nameof(ScraperUrl.DropAlertPercent))] ScraperUrl scraperUrl)
         {
             Normalize(scraperUrl);
@@ -132,7 +133,9 @@ namespace Affiliate.Controllers
                 nameof(ScraperUrl.Id), nameof(ScraperUrl.Name), nameof(ScraperUrl.Url),
                 nameof(ScraperUrl.Domain), nameof(ScraperUrl.StartPage),
                 nameof(ScraperUrl.IntervalSeconds), nameof(ScraperUrl.IsEnabled),
-                nameof(ScraperUrl.IsAsinRecheckEnabled), nameof(ScraperUrl.Category),
+                nameof(ScraperUrl.IsAsinRecheckEnabled),
+                nameof(ScraperUrl.LongUnavailableRecheckIntervalMinutes),
+                nameof(ScraperUrl.Category),
                 nameof(ScraperUrl.DropAlertPercent))] ScraperUrl scraperUrl)
         {
             if (id != scraperUrl.Id)
@@ -304,6 +307,27 @@ namespace Affiliate.Controllers
 
         [HttpPost]
         [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SaveLongUnavailableRecheckInterval(
+            [FromBody] SaveLongUnavailableRecheckIntervalRequest request,
+            CancellationToken cancellationToken)
+        {
+            if (request.Minutes is < 1 or > 10080)
+                return BadRequest(new { success = false, message = "الفاصل يجب أن يكون بين 1 و 10080 دقيقة." });
+
+            var updated = await _context.ScraperUrls
+                .Where(s => s.Id == request.Id)
+                .ExecuteUpdateAsync(
+                    s => s.SetProperty(x => x.LongUnavailableRecheckIntervalMinutes, request.Minutes),
+                    cancellationToken);
+
+            if (updated == 0)
+                return BadRequest(new { success = false, message = "لم يتم العثور على الرابط." });
+
+            return Ok(new { success = true, minutes = request.Minutes });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
         public async Task<IActionResult> RunNow(int id, CancellationToken cancellationToken)
         {
             var item = await _context.ScraperUrls.FindAsync(id);
@@ -377,5 +401,11 @@ namespace Affiliate.Controllers
     {
         public int Id { get; set; }
         public decimal DropAlertPercent { get; set; }
+    }
+
+    public class SaveLongUnavailableRecheckIntervalRequest
+    {
+        public int Id { get; set; }
+        public int Minutes { get; set; }
     }
 }

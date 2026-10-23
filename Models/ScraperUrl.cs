@@ -78,6 +78,14 @@ namespace Affiliate.Models
         /// <summary>When false, products scraped from this URL are skipped by the ASIN recheck.</summary>
         public bool IsAsinRecheckEnabled { get; set; } = true;
 
+        /// <summary>
+        /// After a product has been unavailable longer than the global long-unavailable window,
+        /// minimum minutes between ASIN rechecks for this URL's products.
+        /// </summary>
+        [Range(1, 10080)]
+        [Display(Name = "فاصل إعادة فحص غير المتوفر (دقيقة)")]
+        public int LongUnavailableRecheckIntervalMinutes { get; set; } = 180;
+
         public DateTime? LastRunAt { get; set; }
         public string? LastRunError { get; set; }
 

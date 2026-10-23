@@ -41,6 +41,12 @@
         <div class="form-text">انخفاض من السعر السابق، وأقل من المتوسط بنفس النسبة (تحت 10%).</div>
     </div>
     <div class="col-md-3">
+        <label asp-for="LongUnavailableRecheckIntervalMinutes" class="form-label">فاصل غير المتوفر (دقيقة)</label>
+        <input asp-for="LongUnavailableRecheckIntervalMinutes" class="form-control ltr" type="number" min="1" max="10080" />
+        <span asp-validation-for="LongUnavailableRecheckIntervalMinutes" class="text-danger"></span>
+        <div class="form-text">بعد 24 ساعة عدم توفر: أقل فاصل بين إعادة فحص ASIN (افتراضي 180).</div>
+    </div>
+    <div class="col-md-3">
         <label asp-for="Category" class="form-label">التصنيف</label>
         <select asp-for="Category" asp-items="Html.GetEnumSelectList<ScraperCategory>()" class="form-select arabic-text">
             <option value="">بدون تصنيف</option>

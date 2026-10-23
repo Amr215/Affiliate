@@ -123,14 +123,14 @@ namespace Affiliate.Services
 
             var now = DateTime.UtcNow;
             var longUnavailableSince = now.AddHours(-_asinRecheck.LongUnavailableAfterHours);
-            var longUnavailableRecheckBefore = now.AddHours(-_asinRecheck.LongUnavailableRecheckIntervalHours);
 
             var asins = await _db.Products
                 .Where(p => p.IsAvailable && p.IsBlocked != true && p.Asin != null && p.Asin != "")
                 .Where(p => p.ScraperUrl == null || p.ScraperUrl.IsAsinRecheckEnabled)
                 .Where(p => p.NotAvailableDate == null
                     || p.NotAvailableDate > longUnavailableSince
-                    || p.LastCheckedAt < longUnavailableRecheckBefore)
+                    || EF.Functions.DateDiffMinute(p.LastCheckedAt, now) >=
+                        (p.ScraperUrl != null ? p.ScraperUrl.LongUnavailableRecheckIntervalMinutes : 180))
                 .OrderBy(p => p.LastCheckedAt)
                 .ThenBy(p => p.Id)
                 .Take(asinsPerPoll)

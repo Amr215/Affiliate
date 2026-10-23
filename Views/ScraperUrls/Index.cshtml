@@ -135,6 +135,7 @@
                     <th>التصنيف</th>
                     <th>المنتجات</th>
                     <th>حد التنبيه %</th>
+                    <th>فاصل غير المتوفر</th>
                     <th>النطاق</th>
                     <th>الفاصل</th>
                     <th>مفعّل</th>
@@ -172,6 +173,19 @@
                                data-id="@item.Id" data-original="@item.DropAlertPercent"
                                value="@item.DropAlertPercent" min="1" max="100" step="0.1"
                                aria-label="حد التنبيه لـ @item.Name" />
+                    </td>
+                    <td style="width:11rem">
+                        <div class="d-flex gap-1 align-items-center">
+                            <input type="number" class="form-control form-control-sm ltr long-unavailable-interval-input"
+                                   data-id="@item.Id" data-original="@item.LongUnavailableRecheckIntervalMinutes"
+                                   value="@item.LongUnavailableRecheckIntervalMinutes" min="1" max="10080"
+                                   aria-label="فاصل غير المتوفر لـ @item.Name" style="width:4.5rem" />
+                            <span class="small text-muted">د</span>
+                            <button type="button" class="btn btn-sm btn-outline-primary save-long-unavailable-interval"
+                                    data-id="@item.Id" disabled title="حفظ">
+                                <i class="bi bi-save"></i>
+                            </button>
+                        </div>
                     </td>
                     <td class="ltr">@item.Domain</td>
                     <td class="num">@item.IntervalSeconds ث</td>
@@ -337,6 +351,43 @@ else if (!Model.Any())
             return;
         }
         location.reload();
+    });
+
+    const saveIntervalUrl = '@Url.Action("SaveLongUnavailableRecheckInterval")';
+    function syncIntervalSaveBtn(input) {
+        const btn = input.closest('td')?.querySelector('.save-long-unavailable-interval');
+        if (!btn) return;
+        const minutes = Number(input.value);
+        btn.disabled = !Number.isFinite(minutes) || minutes === Number(input.dataset.original);
+    }
+    document.getElementById('searchesTable')?.addEventListener('input', e => {
+        if (e.target.classList.contains('long-unavailable-interval-input'))
+            syncIntervalSaveBtn(e.target);
+    });
+    document.getElementById('searchesTable')?.addEventListener('click', async e => {
+        const btn = e.target.closest('.save-long-unavailable-interval');
+        if (!btn || !token) return;
+        const input = btn.closest('td')?.querySelector('.long-unavailable-interval-input');
+        if (!input) return;
+        const minutes = Number(input.value);
+        if (!Number.isFinite(minutes) || minutes < 1 || minutes > 10080) {
+            alert('الفاصل يجب أن يكون بين 1 و 10080 دقيقة.');
+            return;
+        }
+        btn.disabled = true;
+        const res = await fetch(saveIntervalUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+            body: JSON.stringify({ id: Number(btn.dataset.id), minutes })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.success) {
+            alert(data.message || 'فشل التحديث');
+            syncIntervalSaveBtn(input);
+            return;
+        }
+        input.dataset.original = String(data.minutes ?? minutes);
+        syncIntervalSaveBtn(input);
     });
     refresh();
 })();

@@ -50,13 +50,10 @@ namespace Affiliate.Options
         public int MaxAttemptsPerBatch { get; set; } = 30;
 
         /// <summary>
-        /// Products not available for longer than this many hours are only rechecked once
-        /// every <see cref="LongUnavailableRecheckIntervalHours"/>.
+        /// Products not available for longer than this many hours are only rechecked at the
+        /// per-URL interval (<see cref="Affiliate.Models.ScraperUrl.LongUnavailableRecheckIntervalMinutes"/>).
         /// </summary>
         public int LongUnavailableAfterHours { get; set; } = 24;
-
-        /// <summary>Minimum hours between rechecks of long-unavailable products.</summary>
-        public int LongUnavailableRecheckIntervalHours { get; set; } = 3;
 
         /// <summary>Amazon TLD used in search URLs (e.g. eg).</summary>
         public string Domain { get; set; } = "eg";

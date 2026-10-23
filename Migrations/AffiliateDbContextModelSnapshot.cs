@@ -293,6 +293,9 @@ namespace Affiliate.Migrations
                     b.Property<string>("LastRunError")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<int>("LongUnavailableRecheckIntervalMinutes")
+                        .HasColumnType("int");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(200)
