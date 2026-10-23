@@ -35,6 +35,7 @@ namespace Affiliate.Services
             byte[] screenshotPng,
             string? captionNote = null,
             int? replyToMessageId = null,
+            bool cartScreenshot = false,
             CancellationToken cancellationToken = default);
 
         /// <summary>Replies to a posted Amazon link with the publish template buttons.</summary>
@@ -54,6 +55,7 @@ namespace Affiliate.Services
             byte[] screenshotPng,
             string? captionNote = null,
             int? replyToMessageId = null,
+            bool cartScreenshot = false,
             CancellationToken cancellationToken = default);
     }
 
@@ -283,6 +285,7 @@ namespace Affiliate.Services
             byte[] screenshotPng,
             string? captionNote = null,
             int? replyToMessageId = null,
+            bool cartScreenshot = false,
             CancellationToken cancellationToken = default)
         {
             var name = productName?.Trim() ?? "";
@@ -326,6 +329,7 @@ namespace Affiliate.Services
                 replyMarkup,
                 replyToMessageId: replyToMessageId,
                 photoFileName: "prepare-publish.png",
+                cartScreenshot: cartScreenshot,
                 cancellationToken: cancellationToken);
         }
 
@@ -361,6 +365,7 @@ namespace Affiliate.Services
             byte[] screenshotPng,
             string? captionNote = null,
             int? replyToMessageId = null,
+            bool cartScreenshot = false,
             CancellationToken cancellationToken = default)
         {
             var name = productName.Trim();
@@ -391,6 +396,7 @@ namespace Affiliate.Services
                 replyMarkupJson: null,
                 replyToMessageId: replyToMessageId,
                 photoFileName: "publish.png",
+                cartScreenshot: cartScreenshot,
                 cancellationToken: cancellationToken);
         }
 
@@ -480,10 +486,13 @@ namespace Affiliate.Services
             string? replyMarkupJson,
             int? replyToMessageId = null,
             string photoFileName = "mega-deal.png",
+            bool cartScreenshot = false,
             CancellationToken cancellationToken = default)
         {
             try
             {
+                pngBytes = ImageLogoOverlay.Apply(pngBytes, cartScreenshot);
+
                 var client = _httpClientFactory.CreateClient(HttpClientName);
                 var url = $"https://api.telegram.org/bot{_options.BotToken.Trim()}/sendPhoto";
 

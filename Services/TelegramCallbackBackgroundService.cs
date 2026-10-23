@@ -159,13 +159,13 @@ namespace Affiliate.Services
 
             await telegram.SendPublishPostAsync(
                 chatId, kind, productName, productUrl, productPrice, result.ScreenshotPng,
-                result.CaptionNote, callback.Message?.MessageId, ct);
+                result.CaptionNote, callback.Message?.MessageId, result.UsedCartScreenshot, ct);
 
             var channelId = _options.Value.PublishChannelId.Trim();
             if (channelId.Length > 0)
                 await telegram.SendPublishPostAsync(
                     channelId, kind, productName, productUrl, productPrice, result.ScreenshotPng,
-                    result.CaptionNote, cancellationToken: ct);
+                    result.CaptionNote, cartScreenshot: result.UsedCartScreenshot, cancellationToken: ct);
         }
 
         private async Task HandleCallbackAsync(TelegramCallbackQuery callback, CancellationToken ct)
@@ -213,6 +213,7 @@ namespace Affiliate.Services
                 result.ScreenshotPng,
                 result.CaptionNote,
                 callback.Message?.MessageId,
+                result.UsedCartScreenshot,
                 ct);
         }
 
