@@ -11,7 +11,7 @@ namespace Affiliate.Options
         /// <summary>
         /// Webshare proxy list file (relative to wwwroot), one entry per line as <c>host:port:username:password</c>.
         /// </summary>
-        public string ProxiesFile { get; set; } = "Webshare 100 proxies.txt";
+        public string ProxiesFile { get; set; } = "Webshare 500 proxies.txt";
 
         /// <summary>Retries on the same connection for a dropped request before failing.</summary>
         public int TransportRetriesPerIp { get; set; } = 2;
