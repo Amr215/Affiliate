@@ -7,33 +7,49 @@ using Microsoft.Extensions.Options;
 namespace Affiliate.Controllers
 {
     /// <summary>
-    /// Public Amazon redirect: <c>/{code}</c> → amazon.eg with the configured Associates tag.
-    /// The path uses a short opaque code (not the ASIN) so channel posts do not leak product ids.
-    /// Constrained to 9 base62 chars so it does not steal controller routes.
+    /// Public Amazon redirects:
+    /// <c>/{code}</c> → product ASIN with Associates tag;
+    /// <c>/u/{code}</c> → stored non-product Amazon.eg URL with Associates tag.
     /// </summary>
     [AllowAnonymous]
     public class GoController(
         IOptions<TelegramOptions> options,
-        AsinLinkCodec codec) : Controller
+        AsinLinkCodec codec,
+        AmazonShortLinkService shortLinks) : Controller
     {
         [HttpGet("/{code:regex(^[[0-9A-Za-z]]{{9}}$)}")]
-        public IActionResult Go(string code) => RedirectToAmazon(code);
+        public IActionResult Go(string code) => RedirectToProduct(code);
 
         /// <summary>Keeps older <c>/go/…</c> channel links working.</summary>
         [HttpGet("/go/{code:regex(^[[0-9A-Za-z]]{{9}}$)}")]
-        public IActionResult GoLegacy(string code) => RedirectToAmazon(code);
+        public IActionResult GoLegacy(string code) => RedirectToProduct(code);
 
-        private IActionResult RedirectToAmazon(string code)
+        [HttpGet("/u/{code:regex(^[[0-9A-Za-z]]{{8}}$)}")]
+        public async Task<IActionResult> GoUniversal(string code, CancellationToken cancellationToken)
+        {
+            var destination = await shortLinks.ResolveDestinationAsync(code, cancellationToken);
+            if (string.IsNullOrWhiteSpace(destination))
+                return NotFound();
+
+            return Redirect(AppendTag(destination));
+        }
+
+        private IActionResult RedirectToProduct(string code)
         {
             if (!codec.TryDecode(code, out var asin))
                 return NotFound();
 
-            var tag = options.Value.AffiliateTag?.Trim();
-            var destination = string.IsNullOrEmpty(tag)
-                ? $"https://www.amazon.eg/dp/{asin}"
-                : $"https://www.amazon.eg/dp/{asin}?tag={Uri.EscapeDataString(tag)}";
+            return Redirect(AppendTag($"https://www.amazon.eg/dp/{asin}"));
+        }
 
-            return Redirect(destination);
+        private string AppendTag(string destination)
+        {
+            var tag = options.Value.AffiliateTag?.Trim();
+            if (string.IsNullOrEmpty(tag))
+                return destination;
+
+            var sep = destination.Contains('?', StringComparison.Ordinal) ? '&' : '?';
+            return $"{destination}{sep}tag={Uri.EscapeDataString(tag)}";
         }
     }
 }

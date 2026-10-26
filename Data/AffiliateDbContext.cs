@@ -21,6 +21,7 @@ namespace Affiliate.Data
         public DbSet<NoonPriceHistory> NoonPriceHistories { get; set; }
         public DbSet<NoonRequestLog> NoonRequestLogs { get; set; }
         public DbSet<ProductLink> ProductLinks { get; set; }
+        public DbSet<AmazonShortLink> AmazonShortLinks { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -143,6 +144,13 @@ namespace Affiliate.Data
                     .WithMany()
                     .HasForeignKey(l => l.NoonProductId)
                     .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            modelBuilder.Entity<AmazonShortLink>(entity =>
+            {
+                entity.Property(l => l.Code).HasMaxLength(16);
+                entity.Property(l => l.DestinationUrl).HasMaxLength(4000);
+                entity.HasIndex(l => l.Code).IsUnique();
             });
         }
     }

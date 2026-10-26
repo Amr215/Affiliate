@@ -21,6 +21,10 @@ namespace Affiliate.Services
             @"amazon\.[^\s]*?/(?:dp|gp/product|gp/aw/d)/([A-Z0-9]{10})",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+        private static readonly Regex AmazonEgUrl = new(
+            @"https?://(?:www\.)?amazon\.eg[^\s<>]+",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly IOptions<TelegramOptions> _options;
         private readonly IHttpClientFactory _httpClientFactory;
@@ -112,13 +116,30 @@ namespace Affiliate.Services
             if (chatId is null || chatId != _options.Value.PublishChatId.Trim())
                 return;
 
-            var match = AsinInUrl.Match(message.Text ?? "");
-            if (!match.Success)
+            var text = message.Text ?? "";
+            var asinMatch = AsinInUrl.Match(text);
+            if (asinMatch.Success)
+            {
+                using var scope = _scopeFactory.CreateScope();
+                var telegram = scope.ServiceProvider.GetRequiredService<ITelegramNotifier>();
+                await telegram.SendPublishOptionsAsync(
+                    chatId, asinMatch.Groups[1].Value.ToUpperInvariant(), message.MessageId, ct);
+                return;
+            }
+
+            var urlMatch = AmazonEgUrl.Match(text);
+            if (!urlMatch.Success)
                 return;
 
-            using var scope = _scopeFactory.CreateScope();
-            var telegram = scope.ServiceProvider.GetRequiredService<ITelegramNotifier>();
-            await telegram.SendPublishOptionsAsync(chatId, match.Groups[1].Value.ToUpperInvariant(), message.MessageId, ct);
+            using var genericScope = _scopeFactory.CreateScope();
+            var shortLinks = genericScope.ServiceProvider.GetRequiredService<AmazonShortLinkService>();
+            var telegramGeneric = genericScope.ServiceProvider.GetRequiredService<ITelegramNotifier>();
+
+            var publicUrl = await shortLinks.CreatePublicUrlAsync(urlMatch.Value, ct);
+            if (publicUrl is null)
+                return;
+
+            await telegramGeneric.SendPlainTextAsync(chatId, publicUrl, message.MessageId, ct);
         }
 
         private async Task HandlePublishCallbackAsync(TelegramCallbackQuery callback, string data, CancellationToken ct)

@@ -38,21 +38,27 @@ namespace Affiliate.Services
             bool cartScreenshot = false,
             CancellationToken cancellationToken = default);
 
-        /// <summary>Replies to a posted Amazon link with the publish template buttons.</summary>
+        /// <summary>
+        /// Replies to a posted Amazon link with the publish template buttons.
+        /// <paramref name="target"/> is an ASIN or <c>u:CODE</c> for a generic short link.
+        /// </summary>
         Task<bool> SendPublishOptionsAsync(
             string chatId,
-            string asin,
+            string target,
             int replyToMessageId,
             CancellationToken cancellationToken = default);
 
-        /// <summary>Publish photo captioned with the template of <paramref name="kind"/> (offer / greatoffer / snap / free).</summary>
+        /// <summary>
+        /// Publish captioned with the template of <paramref name="kind"/> (offer / greatoffer / snap / free).
+        /// Sends a photo when <paramref name="screenshotPng"/> is set; otherwise a text message.
+        /// </summary>
         Task<bool> SendPublishPostAsync(
             string chatId,
             string kind,
             string productName,
             string productUrl,
             decimal? productPrice,
-            byte[] screenshotPng,
+            byte[]? screenshotPng,
             string? captionNote = null,
             int? replyToMessageId = null,
             bool cartScreenshot = false,
@@ -335,7 +341,7 @@ namespace Affiliate.Services
 
         public Task<bool> SendPublishOptionsAsync(
             string chatId,
-            string asin,
+            string target,
             int replyToMessageId,
             CancellationToken cancellationToken = default)
         {
@@ -344,7 +350,7 @@ namespace Affiliate.Services
                 new Dictionary<string, object>
                 {
                     ["text"] = text,
-                    ["callback_data"] = $"{TelegramCallbackBackgroundService.PublishCallbackPrefix}{kind}:{asin}"
+                    ["callback_data"] = $"{TelegramCallbackBackgroundService.PublishCallbackPrefix}{kind}:{target}"
                 }
             };
 
@@ -353,7 +359,7 @@ namespace Affiliate.Services
                 inline_keyboard = new[] { Button("نشر عرض", "offer"), Button("نشر عرض ممتاز", "greatoffer"), Button("نشر لقطة", "snap"), Button("نشر ببلاش", "free") }
             });
 
-            return SendMessageAsync(chatId, Html($"اختر قالب النشر ({asin}):"), replyMarkup, replyToMessageId, cancellationToken);
+            return SendMessageAsync(chatId, Html($"اختر قالب النشر ({target}):"), replyMarkup, replyToMessageId, cancellationToken);
         }
 
         public async Task<bool> SendPublishPostAsync(
@@ -362,7 +368,7 @@ namespace Affiliate.Services
             string productName,
             string productUrl,
             decimal? productPrice,
-            byte[] screenshotPng,
+            byte[]? screenshotPng,
             string? captionNote = null,
             int? replyToMessageId = null,
             bool cartScreenshot = false,
@@ -388,6 +394,12 @@ namespace Affiliate.Services
             caption = Html(caption);
             if (caption.Length > 1024)
                 caption = caption[..1021] + "…";
+
+            if (screenshotPng is not { Length: > 0 })
+            {
+                return await SendMessageAsync(
+                    chatId, caption, replyMarkupJson: null, replyToMessageId, cancellationToken);
+            }
 
             return await SendPhotoAsync(
                 chatId,
@@ -580,10 +592,14 @@ namespace Affiliate.Services
 
         /// <summary>
         /// Site redirect link for publish posts, e.g. <c>https://el-sindbad.com/xK9mPq2Ab</c>
-        /// (opaque code; Amazon tag is applied by the root short-link endpoint, not in the caption).
+        /// (opaque code; Amazon tag is applied by the short-link endpoint, not in the caption).
+        /// Already-short <c>/u/…</c> links are returned unchanged.
         /// </summary>
         private string BuildAffiliateProductUrl(string url)
         {
+            if (url.Contains("/u/", StringComparison.OrdinalIgnoreCase))
+                return url;
+
             var match = DpAsinRegex.Match(url);
             if (!match.Success)
                 return ShortenProductUrl(url);
