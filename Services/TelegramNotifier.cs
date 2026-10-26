@@ -63,6 +63,47 @@ namespace Affiliate.Services
             int? replyToMessageId = null,
             bool cartScreenshot = false,
             CancellationToken cancellationToken = default);
+
+        /// <summary>HTML caption for a publish template, or null when <paramref name="kind"/> is unknown.</summary>
+        string? BuildPublishCaptionHtml(
+            string kind,
+            string productName,
+            string productUrl,
+            decimal? productPrice,
+            string? captionNote = null);
+
+        /// <summary>Preview photo with confirm/cancel buttons; returns Telegram message_id when sent.</summary>
+        Task<int?> SendPublishPreviewAsync(
+            string chatId,
+            string captionHtml,
+            byte[] screenshotPng,
+            string token,
+            bool cartScreenshot = false,
+            int? replyToMessageId = null,
+            CancellationToken cancellationToken = default);
+
+        /// <summary>Final publish using a ready caption; photo when <paramref name="screenshotPng"/> is set.</summary>
+        Task<bool> SendPublishCaptionAsync(
+            string chatId,
+            string captionHtml,
+            byte[]? screenshotPng = null,
+            bool cartScreenshot = false,
+            int? replyToMessageId = null,
+            CancellationToken cancellationToken = default);
+
+        Task<bool> EditMessageCaptionAsync(
+            string chatId,
+            int messageId,
+            string captionHtml,
+            string? replyMarkupJson = null,
+            CancellationToken cancellationToken = default);
+
+        Task<bool> ClearMessageReplyMarkupAsync(
+            string chatId,
+            int messageId,
+            CancellationToken cancellationToken = default);
+
+        string BuildPublishConfirmKeyboardJson(string token);
     }
 
     public sealed class ProductDropAlert : PriceDropAlert
@@ -328,7 +369,7 @@ namespace Affiliate.Services
                 });
             }
 
-            return await SendPhotoAsync(
+            var (ok, _) = await SendPhotoAsync(
                 chatId,
                 screenshotPng,
                 caption,
@@ -337,6 +378,7 @@ namespace Affiliate.Services
                 photoFileName: "prepare-publish.png",
                 cartScreenshot: cartScreenshot,
                 cancellationToken: cancellationToken);
+            return ok;
         }
 
         public Task<bool> SendPublishOptionsAsync(
@@ -362,17 +404,14 @@ namespace Affiliate.Services
             return SendMessageAsync(chatId, Html($"اختر قالب النشر ({target}):"), replyMarkup, replyToMessageId, cancellationToken);
         }
 
-        public async Task<bool> SendPublishPostAsync(
-            string chatId,
+        public const string PublishEditHint = "للتعديل: رد على هذه الرسالة";
+
+        public string? BuildPublishCaptionHtml(
             string kind,
             string productName,
             string productUrl,
             decimal? productPrice,
-            byte[]? screenshotPng,
-            string? captionNote = null,
-            int? replyToMessageId = null,
-            bool cartScreenshot = false,
-            CancellationToken cancellationToken = default)
+            string? captionNote = null)
         {
             var name = productName.Trim();
             if (productPrice.HasValue)
@@ -389,28 +428,165 @@ namespace Affiliate.Services
                 _ => null
             };
             if (caption is null)
-                return false;
+                return null;
 
             caption = Html(caption);
-            if (caption.Length > 1024)
-                caption = caption[..1021] + "…";
+            return caption.Length > 1024 ? caption[..1021] + "…" : caption;
+        }
 
-            if (screenshotPng is not { Length: > 0 })
+        public string BuildPublishConfirmKeyboardJson(string token)
+        {
+            object Row(string text, string prefix) => new[]
             {
-                return await SendMessageAsync(
-                    chatId, caption, replyMarkupJson: null, replyToMessageId, cancellationToken);
-            }
+                new Dictionary<string, object>
+                {
+                    ["text"] = text,
+                    ["callback_data"] = prefix + token
+                }
+            };
 
-            return await SendPhotoAsync(
+            return System.Text.Json.JsonSerializer.Serialize(new
+            {
+                inline_keyboard = new[]
+                {
+                    Row("تأكيد مع صورة", TelegramCallbackBackgroundService.PublishConfirmPrefix),
+                    Row("تأكيد بدون صورة", TelegramCallbackBackgroundService.PublishConfirmTextPrefix),
+                    Row("إلغاء", TelegramCallbackBackgroundService.PublishCancelPrefix)
+                }
+            });
+        }
+
+        public async Task<int?> SendPublishPreviewAsync(
+            string chatId,
+            string captionHtml,
+            byte[] screenshotPng,
+            string token,
+            bool cartScreenshot = false,
+            int? replyToMessageId = null,
+            CancellationToken cancellationToken = default)
+        {
+            var previewCaption = AppendPublishEditHint(captionHtml);
+            var (_, messageId) = await SendPhotoAsync(
                 chatId,
                 screenshotPng,
-                caption,
-                replyMarkupJson: null,
-                replyToMessageId: replyToMessageId,
-                photoFileName: "publish.png",
+                previewCaption,
+                BuildPublishConfirmKeyboardJson(token),
+                replyToMessageId,
+                photoFileName: "publish-preview.png",
                 cartScreenshot: cartScreenshot,
                 cancellationToken: cancellationToken);
+            return messageId;
         }
+
+        public async Task<bool> SendPublishCaptionAsync(
+            string chatId,
+            string captionHtml,
+            byte[]? screenshotPng = null,
+            bool cartScreenshot = false,
+            int? replyToMessageId = null,
+            CancellationToken cancellationToken = default)
+        {
+            if (screenshotPng is not { Length: > 0 })
+                return await SendMessageAsync(chatId, captionHtml, null, replyToMessageId, cancellationToken);
+
+            var (ok, _) = await SendPhotoAsync(
+                chatId,
+                screenshotPng,
+                captionHtml,
+                replyMarkupJson: null,
+                replyToMessageId,
+                photoFileName: "publish.png",
+                cartScreenshot,
+                cancellationToken);
+            return ok;
+        }
+
+        public async Task<bool> SendPublishPostAsync(
+            string chatId,
+            string kind,
+            string productName,
+            string productUrl,
+            decimal? productPrice,
+            byte[]? screenshotPng,
+            string? captionNote = null,
+            int? replyToMessageId = null,
+            bool cartScreenshot = false,
+            CancellationToken cancellationToken = default)
+        {
+            var caption = BuildPublishCaptionHtml(kind, productName, productUrl, productPrice, captionNote);
+            if (caption is null)
+                return false;
+
+            return await SendPublishCaptionAsync(
+                chatId, caption, screenshotPng, cartScreenshot, replyToMessageId, cancellationToken);
+        }
+
+        public async Task<bool> EditMessageCaptionAsync(
+            string chatId,
+            int messageId,
+            string captionHtml,
+            string? replyMarkupJson = null,
+            CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                var client = _httpClientFactory.CreateClient(HttpClientName);
+                var url = $"https://api.telegram.org/bot{_options.BotToken.Trim()}/editMessageCaption";
+                var payload = new Dictionary<string, object?>
+                {
+                    ["chat_id"] = chatId,
+                    ["message_id"] = messageId,
+                    ["caption"] = AppendPublishEditHint(captionHtml),
+                    ["parse_mode"] = "HTML"
+                };
+                if (!string.IsNullOrWhiteSpace(replyMarkupJson))
+                    payload["reply_markup"] = ParseReplyMarkup(replyMarkupJson);
+
+                using var response = await client.PostAsJsonAsync(url, payload, cancellationToken);
+                return response.IsSuccessStatusCode;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogError(ex, "Telegram editMessageCaption threw (chat {ChatId})", chatId);
+                return false;
+            }
+        }
+
+        public async Task<bool> ClearMessageReplyMarkupAsync(
+            string chatId,
+            int messageId,
+            CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                var client = _httpClientFactory.CreateClient(HttpClientName);
+                var url = $"https://api.telegram.org/bot{_options.BotToken.Trim()}/editMessageReplyMarkup";
+                var payload = new Dictionary<string, object?>
+                {
+                    ["chat_id"] = chatId,
+                    ["message_id"] = messageId,
+                    ["reply_markup"] = new { inline_keyboard = Array.Empty<object[]>() }
+                };
+                using var response = await client.PostAsJsonAsync(url, payload, cancellationToken);
+                return response.IsSuccessStatusCode;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogError(ex, "Telegram editMessageReplyMarkup threw (chat {ChatId})", chatId);
+                return false;
+            }
+        }
+
+        public static string AppendPublishEditHint(string captionHtml)
+        {
+            var withHint = string.IsNullOrEmpty(captionHtml)
+                ? PublishEditHint
+                : $"{captionHtml}\n\n{PublishEditHint}";
+            return withHint.Length > 1024 ? withHint[..1021] + "…" : withHint;
+        }
+
+        public static string ClampCaptionHtml(string captionHtml) =>
+            captionHtml.Length > 1024 ? captionHtml[..1021] + "…" : captionHtml;
 
         private bool IsConfigured(out string detail)
         {
@@ -491,7 +667,7 @@ namespace Affiliate.Services
             }
         }
 
-        private async Task<bool> SendPhotoAsync(
+        private async Task<(bool Ok, int? MessageId)> SendPhotoAsync(
             string chatId,
             byte[] pngBytes,
             string? captionHtml,
@@ -535,22 +711,22 @@ namespace Affiliate.Services
                     _logger.LogError(
                         "Telegram sendPhoto failed (chat {ChatId}): {StatusCode} {Body}",
                         chatId, (int)response.StatusCode, body);
-                    return false;
+                    return (false, null);
                 }
 
                 var result = System.Text.Json.JsonSerializer.Deserialize<TelegramApiResponse>(body);
                 if (result is not { Ok: true })
                 {
                     _logger.LogError("Telegram sendPhoto returned ok=false (chat {ChatId}): {Body}", chatId, body);
-                    return false;
+                    return (false, null);
                 }
 
-                return true;
+                return (true, result.Result?.MessageId);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 _logger.LogError(ex, "Telegram sendPhoto threw (chat {ChatId})", chatId);
-                return false;
+                return (false, null);
             }
         }
 
@@ -885,6 +1061,15 @@ namespace Affiliate.Services
         {
             [JsonPropertyName("ok")]
             public bool Ok { get; set; }
+
+            [JsonPropertyName("result")]
+            public TelegramMessageResult? Result { get; set; }
+        }
+
+        private sealed class TelegramMessageResult
+        {
+            [JsonPropertyName("message_id")]
+            public int MessageId { get; set; }
         }
     }
 }

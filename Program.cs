@@ -104,6 +104,7 @@ builder.Services.AddSingleton<IAsinRecheckPollCache, AsinRecheckPollCache>();
 builder.Services.AddSingleton<IScraperRunCoordinator, ScraperRunCoordinator>();
 builder.Services.AddSingleton<IIspProxyService, IspProxyService>();
 builder.Services.AddSingleton<AsinLinkCodec>();
+builder.Services.AddSingleton<PublishDraftCache>();
 builder.Services.AddScoped<AmazonShortLinkService>();
 builder.Services.AddScoped<ITelegramNotifier, TelegramNotifier>();
 builder.Services.AddScoped<IPrepareForPublishService, PrepareForPublishService>();

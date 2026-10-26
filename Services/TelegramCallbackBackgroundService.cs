@@ -16,6 +16,9 @@ namespace Affiliate.Services
     {
         public const string CallbackPrefix = "prep:";
         public const string PublishCallbackPrefix = "pub:";
+        public const string PublishConfirmPrefix = "pubok:";
+        public const string PublishConfirmTextPrefix = "pubtxt:";
+        public const string PublishCancelPrefix = "pubno:";
 
         private static readonly Regex AsinInUrl = new(
             @"amazon\.[^\s]*?/(?:dp|gp/product|gp/aw/d)/([A-Z0-9]{10})",
@@ -117,6 +120,29 @@ namespace Affiliate.Services
                 return;
 
             var text = message.Text ?? "";
+
+            // Reply to a publish preview → update caption (no re-screenshot).
+            if (message.ReplyToMessage is { MessageId: > 0 } reply
+                && !string.IsNullOrWhiteSpace(text))
+            {
+                using var editScope = _scopeFactory.CreateScope();
+                var drafts = editScope.ServiceProvider.GetRequiredService<PublishDraftCache>();
+                var telegramEdit = editScope.ServiceProvider.GetRequiredService<ITelegramNotifier>();
+                if (drafts.TryGetByPreviewMessage(chatId, reply.MessageId, out var draft) && draft is not null)
+                {
+                    var caption = TelegramNotifier.ClampCaptionHtml(
+                        System.Web.HttpUtility.HtmlEncode(text.Trim()));
+                    drafts.UpdateCaption(draft, caption);
+                    await telegramEdit.EditMessageCaptionAsync(
+                        chatId,
+                        draft.PreviewMessageId,
+                        caption,
+                        telegramEdit.BuildPublishConfirmKeyboardJson(draft.Token),
+                        ct);
+                    return;
+                }
+            }
+
             var asinMatch = AsinInUrl.Match(text);
             if (asinMatch.Success)
             {
@@ -159,6 +185,7 @@ namespace Affiliate.Services
             using var scope = _scopeFactory.CreateScope();
             var prepare = scope.ServiceProvider.GetRequiredService<IPrepareForPublishService>();
             var telegram = scope.ServiceProvider.GetRequiredService<ITelegramNotifier>();
+            var drafts = scope.ServiceProvider.GetRequiredService<PublishDraftCache>();
             var db = scope.ServiceProvider.GetRequiredService<AffiliateDbContext>();
 
             var knownPrice = await db.Products
@@ -175,23 +202,111 @@ namespace Affiliate.Services
 
             var productName = result.ProductName ?? asin;
             var productUrl = result.ProductUrl ?? PrepareForPublishService.BuildProductUrl(asin);
-
             var productPrice = result.ProductPrice ?? knownPrice;
 
-            await telegram.SendPublishPostAsync(
-                chatId, kind, productName, productUrl, productPrice, result.ScreenshotPng,
-                result.CaptionNote, callback.Message?.MessageId, result.UsedCartScreenshot, ct);
+            var caption = telegram.BuildPublishCaptionHtml(
+                kind, productName, productUrl, productPrice, result.CaptionNote);
+            if (caption is null)
+            {
+                await AnswerCallbackAsync(callback.Id, "قالب غير معروف", showAlert: true, ct);
+                return;
+            }
+
+            var draft = drafts.Create(
+                chatId, asin, caption, result.ScreenshotPng, result.UsedCartScreenshot);
+            var previewId = await telegram.SendPublishPreviewAsync(
+                chatId, caption, result.ScreenshotPng, draft.Token,
+                result.UsedCartScreenshot, callback.Message?.MessageId, ct);
+            if (previewId is > 0)
+                drafts.SetPreviewMessageId(draft, previewId.Value);
+        }
+
+        private async Task HandlePublishConfirmAsync(
+            TelegramCallbackQuery callback,
+            string token,
+            bool withPhoto,
+            CancellationToken ct)
+        {
+            var chatId = callback.Message?.Chat?.Id?.ToString();
+            if (string.IsNullOrWhiteSpace(chatId))
+            {
+                await AnswerCallbackAsync(callback.Id, "لا يمكن تحديد المحادثة", showAlert: true, ct);
+                return;
+            }
+
+            using var scope = _scopeFactory.CreateScope();
+            var drafts = scope.ServiceProvider.GetRequiredService<PublishDraftCache>();
+            var telegram = scope.ServiceProvider.GetRequiredService<ITelegramNotifier>();
+
+            if (!drafts.TryGet(token, out var draft) || draft is null)
+            {
+                await AnswerCallbackAsync(
+                    callback.Id,
+                    "انتهت صلاحية المعاينة — اختر القالب مرة أخرى.",
+                    showAlert: true,
+                    ct);
+                return;
+            }
+
+            await AnswerCallbackAsync(callback.Id, "جاري النشر…", showAlert: false, ct);
+
+            var png = withPhoto ? draft.ScreenshotPng : null;
+            await telegram.SendPublishCaptionAsync(
+                chatId, draft.CaptionHtml, png, draft.CartScreenshot, cancellationToken: ct);
 
             var channelId = _options.Value.PublishChannelId.Trim();
             if (channelId.Length > 0)
-                await telegram.SendPublishPostAsync(
-                    channelId, kind, productName, productUrl, productPrice, result.ScreenshotPng,
-                    result.CaptionNote, cartScreenshot: result.UsedCartScreenshot, cancellationToken: ct);
+                await telegram.SendPublishCaptionAsync(
+                    channelId, draft.CaptionHtml, png, draft.CartScreenshot, cancellationToken: ct);
+
+            if (draft.PreviewMessageId > 0)
+                await telegram.ClearMessageReplyMarkupAsync(chatId, draft.PreviewMessageId, ct);
+
+            drafts.Remove(token);
+        }
+
+        private async Task HandlePublishCancelAsync(
+            TelegramCallbackQuery callback,
+            string token,
+            CancellationToken ct)
+        {
+            var chatId = callback.Message?.Chat?.Id?.ToString();
+            using var scope = _scopeFactory.CreateScope();
+            var drafts = scope.ServiceProvider.GetRequiredService<PublishDraftCache>();
+            var telegram = scope.ServiceProvider.GetRequiredService<ITelegramNotifier>();
+
+            if (drafts.TryGet(token, out var draft) && draft is not null)
+            {
+                if (!string.IsNullOrWhiteSpace(chatId) && draft.PreviewMessageId > 0)
+                    await telegram.ClearMessageReplyMarkupAsync(chatId, draft.PreviewMessageId, ct);
+                drafts.Remove(token);
+            }
+
+            await AnswerCallbackAsync(callback.Id, "تم الإلغاء", showAlert: false, ct);
         }
 
         private async Task HandleCallbackAsync(TelegramCallbackQuery callback, CancellationToken ct)
         {
             var data = callback.Data?.Trim() ?? "";
+
+            if (data.StartsWith(PublishConfirmPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                await HandlePublishConfirmAsync(callback, data[PublishConfirmPrefix.Length..], withPhoto: true, ct);
+                return;
+            }
+
+            if (data.StartsWith(PublishConfirmTextPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                await HandlePublishConfirmAsync(callback, data[PublishConfirmTextPrefix.Length..], withPhoto: false, ct);
+                return;
+            }
+
+            if (data.StartsWith(PublishCancelPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                await HandlePublishCancelAsync(callback, data[PublishCancelPrefix.Length..], ct);
+                return;
+            }
+
             if (data.StartsWith(PublishCallbackPrefix, StringComparison.OrdinalIgnoreCase))
             {
                 await HandlePublishCallbackAsync(callback, data, ct);
@@ -418,6 +533,9 @@ namespace Affiliate.Services
 
             [System.Text.Json.Serialization.JsonPropertyName("text")]
             public string? Text { get; set; }
+
+            [System.Text.Json.Serialization.JsonPropertyName("reply_to_message")]
+            public TelegramCallbackMessage? ReplyToMessage { get; set; }
         }
 
         private sealed class TelegramChat
