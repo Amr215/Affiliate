@@ -12,8 +12,9 @@ namespace Affiliate.Services
         /// Opens Amazon.eg (direct host first), ensures Arabic UI, and returns a publish screenshot.
         /// Products with an automatic checkout discount or Amazon promo-code coupon use a mobile
         /// cart screenshot with an injected discount row (Amazon hides that until login).
-        /// Otherwise: highlighted DP when prices match; cart when they do not or DP hides the price (MAP).
-        /// On direct-host timeout/captcha/block, retries via ISP SOCKS5 proxies.
+        /// Otherwise: highlighted DP when prices match; cart when they do not.
+        /// If the DP price cannot be read, that attempt fails and the next route (proxy) is tried.
+        /// On direct-host timeout/captcha/block/null price, retries via ISP SOCKS5 proxies.
         /// </summary>
         Task<PrepareForPublishResult> PrepareAsync(
             string asin,
@@ -466,8 +467,19 @@ namespace Affiliate.Services
                     "Prepare-for-publish {Asin} via {Route}: pagePrice={PagePrice}, alertPrice={AlertPrice}, lang={Lang}",
                     asin, route, pagePrice, alertPrice, await ReadHtmlLangAsync(page));
 
+                // No DP price → fail this route so CaptureWithFallbackAsync tries proxies
+                // (do not force cart for MAP / unread price).
+                if (pagePrice is null)
+                {
+                    return Fail(
+                        "ما قدرناش نقرأ سعر صفحة المنتج — هنحاول مسار تاني.",
+                        "pagePrice=null; retry via proxy",
+                        route,
+                        correlationId);
+                }
+
                 var pricesMatch = alertPrice is null
-                    || (pagePrice.HasValue && PricesMatch(pagePrice.Value, alertPrice.Value));
+                    || PricesMatch(pagePrice.Value, alertPrice.Value);
 
                 var checkoutDiscount = await DetectCheckoutDiscountAsync(page);
                 if (checkoutDiscount is not null)
@@ -478,7 +490,7 @@ namespace Affiliate.Services
                 }
 
                 // Auto/promo discounts: always cart + drawn summary (not shown until login).
-                // No DP price (MAP / see-price-in-cart): cart shows the amount.
+                // Price mismatch vs DB: cart. Null page price is handled above (proxy retry).
                 var cartReasonAr = DescribeCartReasonAr(checkoutDiscount, pagePrice, alertPrice, pricesMatch);
                 var useCart = cartReasonAr is not null;
 
@@ -488,7 +500,9 @@ namespace Affiliate.Services
                 // Always store the path decision in Detail so publish logs show WHY cart/DP.
                 string? pathDetail = useCart
                     ? $"سبب السلة: {cartReasonAr}"
-                    : "سبب المسار: الأسعار متطابقة → صفحة المنتج";
+                    : alertPrice is null
+                        ? "سبب المسار: مفيش سعر محفوظ → صفحة المنتج"
+                        : "سبب المسار: الأسعار متطابقة → صفحة المنتج";
 
                 if (!useCart)
                 {
@@ -648,8 +662,10 @@ namespace Affiliate.Services
             return error.Contains("مهلة", StringComparison.OrdinalIgnoreCase)
                    || error.Contains("captcha", StringComparison.OrdinalIgnoreCase)
                    || error.Contains("تحقق", StringComparison.OrdinalIgnoreCase)
+                   || error.Contains("سعر صفحة المنتج", StringComparison.OrdinalIgnoreCase)
                    || detail.Contains("Timeout", StringComparison.OrdinalIgnoreCase)
                    || detail.Contains("Captcha", StringComparison.OrdinalIgnoreCase)
+                   || detail.Contains("pagePrice=null", StringComparison.OrdinalIgnoreCase)
                    || detail.Contains("net::", StringComparison.OrdinalIgnoreCase)
                    || error.Contains("فشل تجهيز", StringComparison.OrdinalIgnoreCase);
         }
@@ -811,91 +827,51 @@ namespace Affiliate.Services
 
         private static async Task<decimal?> ReadDesktopPriceAsync(IPage page)
         {
-            // Prefer data-csa-c-price-to-pay (.a-offscreen often empty). Soft retry — never WaitFor
-            // (timeout there was failing the whole publish attempt).
-            for (var attempt = 0; attempt < 4; attempt++)
+            // Locator GetAttribute — no Evaluate/WaitFor. Retry while apex hydrates.
+            for (var attempt = 0; attempt < 8; attempt++)
             {
                 try
                 {
-                    var fromAttr = await page.EvaluateAsync<string?>(
-                        """
-                        () => document.querySelector(
-                          '#corePriceDisplay_desktop_feature_div [data-csa-c-price-to-pay], [data-csa-c-price-to-pay]'
-                        )?.getAttribute('data-csa-c-price-to-pay') || null
-                        """);
-                    var attrPrice = ParsePrice(fromAttr);
-                    if (attrPrice is > 0)
-                        return attrPrice;
+                    var attrs = page.Locator("[data-csa-c-price-to-pay]");
+                    var n = await attrs.CountAsync();
+                    for (var i = 0; i < n; i++)
+                    {
+                        var parsed = ParsePrice(await attrs.Nth(i).GetAttributeAsync("data-csa-c-price-to-pay"));
+                        if (parsed is > 0)
+                            return parsed;
+                    }
+
+                    var a11y = page.Locator("#apex-pricetopay-accessibility-label");
+                    if (await a11y.CountAsync() > 0)
+                    {
+                        var parsed = ParsePrice(await a11y.First.TextContentAsync(
+                            new LocatorTextContentOptions { Timeout = 2_000 }));
+                        if (parsed is > 0)
+                            return parsed;
+                    }
+
+                    var whole = page.Locator(".a-price.priceToPay .a-price-whole");
+                    if (await whole.CountAsync() > 0)
+                    {
+                        // Whole text is "429.\u200E" (nested decimal + LRM); keep digits/commas only.
+                        var wholeText = Regex.Replace(await whole.First.TextContentAsync(
+                            new LocatorTextContentOptions { Timeout = 2_000 }) ?? "", @"[^\d,]", "");
+                        var fracLoc = page.Locator(".a-price.priceToPay .a-price-fraction");
+                        var frac = await fracLoc.CountAsync() > 0
+                            ? (await fracLoc.First.TextContentAsync(
+                                new LocatorTextContentOptions { Timeout = 1_000 }) ?? "00")
+                            : "00";
+                        var parsed = ParsePrice($"{wholeText}.{frac}");
+                        if (parsed is > 0)
+                            return parsed;
+                    }
                 }
                 catch (PlaywrightException)
                 {
-                    // fall through
+                    // retry
                 }
 
-                await Task.Delay(400);
-            }
-
-            string[] wholeSelectors =
-            [
-                "#corePriceDisplay_desktop_feature_div .a-price.priceToPay .a-price-whole",
-                "#corePrice_feature_div .a-price.priceToPay .a-price-whole",
-                "#apex_desktop .a-price.priceToPay .a-price-whole",
-                ".a-price.priceToPay .a-price-whole"
-            ];
-
-            foreach (var wholeSel in wholeSelectors)
-            {
-                var wholeLoc = page.Locator(wholeSel);
-                if (await wholeLoc.CountAsync() == 0)
-                    continue;
-
-                try
-                {
-                    // .a-price-whole text includes nested "."; don't append another before fraction.
-                    var wholeText = (await wholeLoc.First.TextContentAsync(
-                        new LocatorTextContentOptions { Timeout = 3_000 }) ?? "").Trim().TrimEnd('.');
-                    var root = wholeSel.Replace(" .a-price-whole", "");
-                    var fractionLoc = page.Locator($"{root} .a-price-fraction");
-                    var fractionText = await fractionLoc.CountAsync() > 0
-                        ? await fractionLoc.First.TextContentAsync(
-                            new LocatorTextContentOptions { Timeout = 2_000 }) ?? "00"
-                        : "00";
-                    var parsed = ParsePrice($"{wholeText}.{fractionText}");
-                    if (parsed is > 0)
-                        return parsed;
-                }
-                catch (PlaywrightException)
-                {
-                    // try next
-                }
-            }
-
-            string[] offscreenSelectors =
-            [
-                "#apex-pricetopay-accessibility-label",
-                "#corePriceDisplay_desktop_feature_div .a-price.priceToPay .a-offscreen",
-                "#corePrice_feature_div .a-price.priceToPay .a-offscreen",
-                "#apex_desktop .a-price.priceToPay .a-offscreen",
-                ".a-price.priceToPay .a-offscreen"
-            ];
-
-            foreach (var selector in offscreenSelectors)
-            {
-                var loc = page.Locator(selector);
-                if (await loc.CountAsync() == 0)
-                    continue;
-
-                try
-                {
-                    var text = await loc.First.TextContentAsync(new LocatorTextContentOptions { Timeout = 3_000 });
-                    var parsed = ParsePrice(text);
-                    if (parsed is > 0)
-                        return parsed;
-                }
-                catch (PlaywrightException)
-                {
-                    // try next selector
-                }
+                await Task.Delay(500);
             }
 
             return null;
@@ -1579,13 +1555,11 @@ namespace Affiliate.Services
                     : $"كود خصم أمازون {discount.Percent}% (رمز العرض)";
             }
 
-            if (pagePrice is null)
-                return $"ما قدرناش نقرأ سعر صفحة المنتج (page=null, db={alertPrice?.ToString(CultureInfo.InvariantCulture) ?? "null"})";
-
+            // Null pagePrice is handled earlier (fail attempt → try proxy), not cart.
             if (!pricesMatch)
             {
                 return
-                    $"السعر مختلف — صفحة المنتج={pagePrice.Value.ToString(CultureInfo.InvariantCulture)}، قاعدة البيانات={alertPrice?.ToString(CultureInfo.InvariantCulture) ?? "null"}";
+                    $"السعر مختلف — صفحة المنتج={pagePrice?.ToString(CultureInfo.InvariantCulture) ?? "null"}، قاعدة البيانات={alertPrice?.ToString(CultureInfo.InvariantCulture) ?? "null"}";
             }
 
             return null;
