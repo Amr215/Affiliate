@@ -96,7 +96,7 @@ namespace Affiliate.Services
             try
             {
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                cts.CancelAfter(TimeSpan.FromMinutes(3));
+                cts.CancelAfter(TimeSpan.FromMinutes(2));
 
                 var result = await CaptureWithFallbackAsync(asin, alertPrice, productUrl, corr, cts.Token);
                 // Duration lives only on Attempt rows; full session time is computed in the UI.
@@ -112,10 +112,10 @@ namespace Affiliate.Services
             {
                 _audit.Log(corr, asin, PublishAuditEvent.Failed,
                     success: false,
-                    detail: "Overall prepare timeout (3 minutes)");
+                    detail: "Overall prepare timeout (2 minutes)");
                 return Fail(
                     "انتهت مهلة تجهيز المنتج للنشر.",
-                    "Overall prepare timeout (3 minutes).",
+                    "Overall prepare timeout (2 minutes).",
                     correlationId: corr);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -763,7 +763,7 @@ namespace Affiliate.Services
         /// WaitForSelector on a comma list waits for the first DOM match to be visible — which can
         /// stay hidden forever while a later match is already visible. Prefer any visible signal.
         /// </summary>
-        private static async Task WaitForVisibleProductSignalAsync(IPage page, float timeoutMs = 30_000)
+        private static async Task WaitForVisibleProductSignalAsync(IPage page, float timeoutMs = 12_000)
         {
             await page.Locator("#productTitle, #add-to-cart-button, #corePrice_feature_div")
                 .Locator("visible=true")
