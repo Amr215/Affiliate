@@ -11,6 +11,7 @@ namespace Affiliate.Services
         public required string CaptionHtml { get; set; }
         public required byte[] ScreenshotPng { get; init; }
         public bool CartScreenshot { get; init; }
+        public Guid CorrelationId { get; init; }
         public int PreviewMessageId { get; set; }
         public DateTime CreatedAtUtc { get; init; } = DateTime.UtcNow;
     }
@@ -30,7 +31,8 @@ namespace Affiliate.Services
             string asin,
             string captionHtml,
             byte[] screenshotPng,
-            bool cartScreenshot)
+            bool cartScreenshot,
+            Guid correlationId = default)
         {
             Prune();
             var token = NewToken();
@@ -41,7 +43,8 @@ namespace Affiliate.Services
                 Asin = asin,
                 CaptionHtml = captionHtml,
                 ScreenshotPng = screenshotPng,
-                CartScreenshot = cartScreenshot
+                CartScreenshot = cartScreenshot,
+                CorrelationId = correlationId == default ? Guid.NewGuid() : correlationId
             };
             _byToken[token] = draft;
             return draft;

@@ -105,6 +105,8 @@ builder.Services.AddSingleton<IScraperRunCoordinator, ScraperRunCoordinator>();
 builder.Services.AddSingleton<IIspProxyService, IspProxyService>();
 builder.Services.AddSingleton<AsinLinkCodec>();
 builder.Services.AddSingleton<PublishDraftCache>();
+builder.Services.AddSingleton<PublishAuditLogger>();
+builder.Services.AddSingleton<IPublishAuditLogger>(sp => sp.GetRequiredService<PublishAuditLogger>());
 builder.Services.AddScoped<AmazonShortLinkService>();
 builder.Services.AddScoped<ITelegramNotifier, TelegramNotifier>();
 builder.Services.AddScoped<IPrepareForPublishService, PrepareForPublishService>();
@@ -113,6 +115,7 @@ builder.Services.AddHostedService<AmazonScraperBackgroundService>();
 builder.Services.AddHostedService<AsinRecheckBackgroundService>();
 builder.Services.AddHostedService<KeepAliveBackgroundService>();
 builder.Services.AddHostedService<OxylabsRequestLogCleanupService>();
+builder.Services.AddHostedService<PublishAuditFlushService>();
 builder.Services.AddHostedService<TelegramCallbackBackgroundService>();
 builder.Services.AddNoon(builder.Configuration);
 

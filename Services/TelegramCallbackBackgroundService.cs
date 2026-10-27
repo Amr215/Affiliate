@@ -2,6 +2,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Affiliate.Data;
+using Affiliate.Models;
 using Affiliate.Options;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -186,14 +187,19 @@ namespace Affiliate.Services
             var prepare = scope.ServiceProvider.GetRequiredService<IPrepareForPublishService>();
             var telegram = scope.ServiceProvider.GetRequiredService<ITelegramNotifier>();
             var drafts = scope.ServiceProvider.GetRequiredService<PublishDraftCache>();
+            var audit = scope.ServiceProvider.GetRequiredService<IPublishAuditLogger>();
             var db = scope.ServiceProvider.GetRequiredService<AffiliateDbContext>();
+
+            var correlationId = Guid.NewGuid();
+            audit.Log(correlationId, asin, PublishAuditEvent.Requested,
+                chatId: chatId, detail: $"template={kind}");
 
             var knownPrice = await db.Products
                 .Where(p => p.Asin == asin)
                 .Select(p => p.CurrentPrice)
                 .FirstOrDefaultAsync(ct);
 
-            var result = await prepare.PrepareAsync(asin, knownPrice, ct);
+            var result = await prepare.PrepareAsync(asin, knownPrice, correlationId, ct);
             if (!result.Success || result.ScreenshotPng is null)
             {
                 await NotifyPrepareFailureAsync(telegram, chatId, asin, result, callback.Message?.MessageId, ct);
@@ -213,12 +219,16 @@ namespace Affiliate.Services
             }
 
             var draft = drafts.Create(
-                chatId, asin, caption, result.ScreenshotPng, result.UsedCartScreenshot);
+                chatId, asin, caption, result.ScreenshotPng, result.UsedCartScreenshot, correlationId);
             var previewId = await telegram.SendPublishPreviewAsync(
                 chatId, caption, result.ScreenshotPng, draft.Token,
                 result.UsedCartScreenshot, callback.Message?.MessageId, ct);
             if (previewId is > 0)
                 drafts.SetPreviewMessageId(draft, previewId.Value);
+
+            audit.Log(correlationId, asin, PublishAuditEvent.PreviewSent,
+                pageKind: result.UsedCartScreenshot ? "Cart" : "Dp",
+                success: true, chatId: chatId, draftToken: draft.Token);
         }
 
         private async Task HandlePublishConfirmAsync(
@@ -237,6 +247,7 @@ namespace Affiliate.Services
             using var scope = _scopeFactory.CreateScope();
             var drafts = scope.ServiceProvider.GetRequiredService<PublishDraftCache>();
             var telegram = scope.ServiceProvider.GetRequiredService<ITelegramNotifier>();
+            var audit = scope.ServiceProvider.GetRequiredService<IPublishAuditLogger>();
 
             if (!drafts.TryGet(token, out var draft) || draft is null)
             {
@@ -262,6 +273,11 @@ namespace Affiliate.Services
             if (draft.PreviewMessageId > 0)
                 await telegram.ClearMessageReplyMarkupAsync(chatId, draft.PreviewMessageId, ct);
 
+            audit.Log(draft.CorrelationId, draft.Asin, PublishAuditEvent.Confirmed,
+                pageKind: draft.CartScreenshot ? "Cart" : "Dp",
+                success: true, chatId: chatId, draftToken: token,
+                detail: withPhoto ? "with photo" : "text only");
+
             drafts.Remove(token);
         }
 
@@ -274,11 +290,14 @@ namespace Affiliate.Services
             using var scope = _scopeFactory.CreateScope();
             var drafts = scope.ServiceProvider.GetRequiredService<PublishDraftCache>();
             var telegram = scope.ServiceProvider.GetRequiredService<ITelegramNotifier>();
+            var audit = scope.ServiceProvider.GetRequiredService<IPublishAuditLogger>();
 
             if (drafts.TryGet(token, out var draft) && draft is not null)
             {
                 if (!string.IsNullOrWhiteSpace(chatId) && draft.PreviewMessageId > 0)
                     await telegram.ClearMessageReplyMarkupAsync(chatId, draft.PreviewMessageId, ct);
+                audit.Log(draft.CorrelationId, draft.Asin, PublishAuditEvent.Cancelled,
+                    chatId: chatId, draftToken: token);
                 drafts.Remove(token);
             }
 
@@ -334,8 +353,12 @@ namespace Affiliate.Services
             using var scope = _scopeFactory.CreateScope();
             var prepare = scope.ServiceProvider.GetRequiredService<IPrepareForPublishService>();
             var telegram = scope.ServiceProvider.GetRequiredService<ITelegramNotifier>();
+            var audit = scope.ServiceProvider.GetRequiredService<IPublishAuditLogger>();
 
-            var result = await prepare.PrepareAsync(asin, alertPrice, ct);
+            var correlationId = Guid.NewGuid();
+            audit.Log(correlationId, asin, PublishAuditEvent.Requested, chatId: chatId, detail: "prep");
+
+            var result = await prepare.PrepareAsync(asin, alertPrice, correlationId, ct);
             if (!result.Success || result.ScreenshotPng is null)
             {
                 await NotifyPrepareFailureAsync(telegram, chatId, asin, result, callback.Message?.MessageId, ct);
@@ -351,6 +374,10 @@ namespace Affiliate.Services
                 callback.Message?.MessageId,
                 result.UsedCartScreenshot,
                 ct);
+
+            audit.Log(correlationId, asin, PublishAuditEvent.PreviewSent,
+                pageKind: result.UsedCartScreenshot ? "Cart" : "Dp",
+                success: true, chatId: chatId);
         }
 
         internal static bool TryParsePrepCallback(string data, out string asin, out decimal? alertPrice)

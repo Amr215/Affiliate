@@ -1,5 +1,7 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Text.RegularExpressions;
+using Affiliate.Models;
 using Microsoft.Playwright;
 
 namespace Affiliate.Services
@@ -10,16 +12,17 @@ namespace Affiliate.Services
         /// Opens Amazon.eg (direct host first), ensures Arabic UI, and returns a publish screenshot.
         /// Products with an automatic checkout discount or Amazon promo-code coupon use a mobile
         /// cart screenshot with an injected discount row (Amazon hides that until login).
-        /// Otherwise: highlighted DP when prices match; cart when they do not.
+        /// Otherwise: highlighted DP when prices match; cart when they do not or DP hides the price (MAP).
         /// On direct-host timeout/captcha/block, retries via ISP SOCKS5 proxies.
         /// </summary>
         Task<PrepareForPublishResult> PrepareAsync(
             string asin,
             decimal? alertPrice,
+            Guid? correlationId = null,
             CancellationToken cancellationToken = default);
     }
 
-    public sealed class PrepareForPublishResult
+    public sealed record PrepareForPublishResult
     {
         public bool Success { get; init; }
         public string? Error { get; init; }
@@ -32,6 +35,8 @@ namespace Affiliate.Services
         public decimal? ProductPrice { get; init; }
         public byte[]? ScreenshotPng { get; init; }
         public bool UsedCartScreenshot { get; init; }
+        /// <summary>Audit trail id shared with Telegram Requested/Preview/Confirm events.</summary>
+        public Guid CorrelationId { get; init; }
         /// <summary>
         /// Arabic note(s) for Telegram captions (checkout discount and/or stale product-page price);
         /// null otherwise. Shown before the product URL; multiple notes are newline-separated.
@@ -51,28 +56,36 @@ namespace Affiliate.Services
         private const int MaxProxyAttempts = 20;
         private const int ProxyParallelism = 5;
         private static readonly SemaphoreSlim BrowserGate = new(1, 1);
+        private static readonly SemaphoreSlim SharedBrowserLock = new(1, 1);
         private static int _browsersPathConfigured;
+        private static IPlaywright? _sharedPlaywright;
+        private static IBrowser? _sharedBrowser;
 
         private readonly IIspProxyService _ispProxy;
+        private readonly IPublishAuditLogger _audit;
         private readonly ILogger<PrepareForPublishService> _logger;
 
         public PrepareForPublishService(
             IIspProxyService ispProxy,
+            IPublishAuditLogger audit,
             ILogger<PrepareForPublishService> logger)
         {
             _ispProxy = ispProxy;
+            _audit = audit;
             _logger = logger;
         }
 
         public async Task<PrepareForPublishResult> PrepareAsync(
             string asin,
             decimal? alertPrice,
+            Guid? correlationId = null,
             CancellationToken cancellationToken = default)
         {
             asin = (asin ?? string.Empty).Trim().ToUpperInvariant();
+            var corr = correlationId ?? Guid.NewGuid();
             if (asin.Length is < 8 or > 16 || asin.Any(c => !(char.IsLetterOrDigit(c))))
             {
-                return Fail("ASIN غير صالح.");
+                return Fail("ASIN غير صالح.", correlationId: corr);
             }
 
             EnsureBrowsersPath();
@@ -84,18 +97,33 @@ namespace Affiliate.Services
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 cts.CancelAfter(TimeSpan.FromMinutes(3));
 
-                return await CaptureWithFallbackAsync(asin, alertPrice, productUrl, cts.Token);
+                var result = await CaptureWithFallbackAsync(asin, alertPrice, productUrl, corr, cts.Token);
+                // Duration lives only on Attempt rows; full session time is computed in the UI.
+                _audit.Log(corr, asin,
+                    result.Success ? PublishAuditEvent.Finished : PublishAuditEvent.Failed,
+                    route: result.Route,
+                    pageKind: result.UsedCartScreenshot ? "Cart" : (result.Success ? "Dp" : null),
+                    success: result.Success,
+                    detail: result.Success ? null : TruncateAudit(result.Detail ?? result.Error));
+                return result with { CorrelationId = corr };
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
+                _audit.Log(corr, asin, PublishAuditEvent.Failed,
+                    success: false,
+                    detail: "Overall prepare timeout (3 minutes)");
                 return Fail(
                     "انتهت مهلة تجهيز المنتج للنشر.",
-                    "Overall prepare timeout (3 minutes).");
+                    "Overall prepare timeout (3 minutes).",
+                    correlationId: corr);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 _logger.LogError(ex, "Prepare-for-publish failed for {Asin}", asin);
-                return Fail(DescribeFailure(ex), FormatExceptionDetail(ex));
+                _audit.Log(corr, asin, PublishAuditEvent.Failed,
+                    success: false,
+                    detail: TruncateAudit(FormatExceptionDetail(ex)));
+                return Fail(DescribeFailure(ex), FormatExceptionDetail(ex), correlationId: corr);
             }
             finally
             {
@@ -131,17 +159,18 @@ namespace Affiliate.Services
             string asin,
             decimal? alertPrice,
             string productUrl,
+            Guid correlationId,
             CancellationToken cancellationToken)
         {
             var attemptLogs = new List<string>();
             PrepareForPublishResult? lastFailure = null;
 
             var direct = await TryCaptureOnceAsync(
-                asin, alertPrice, productUrl, proxy: null, cancellationToken);
+                asin, alertPrice, productUrl, proxy: null, correlationId, cancellationToken);
             if (direct.Success)
-                return WithRoute(direct, "direct");
+                return WithRoute(direct, "direct", correlationId);
 
-            lastFailure = WithRoute(direct, "direct");
+            lastFailure = WithRoute(direct, "direct", correlationId);
             attemptLogs.Add(FormatAttemptLog("direct", direct));
 
             if (!IsProxyFallbackCandidate(direct))
@@ -156,7 +185,8 @@ namespace Affiliate.Services
             {
                 return lastFailure ?? Fail(
                     "فشل تجهيز المنتج للنشر.",
-                    "ISP proxies disabled or empty; no fallback route.");
+                    "ISP proxies disabled or empty; no fallback route.",
+                    correlationId: correlationId);
             }
 
             var triedKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -177,7 +207,7 @@ namespace Affiliate.Services
                     asin, batch.Count, proxiesTried, MaxProxyAttempts);
 
                 var (winner, waveFailures) = await RaceProxyBatchAsync(
-                    asin, alertPrice, productUrl, batch, cancellationToken);
+                    asin, alertPrice, productUrl, batch, correlationId, cancellationToken);
 
                 foreach (var failure in waveFailures)
                 {
@@ -188,7 +218,8 @@ namespace Affiliate.Services
                         return Fail(
                             failure.Error ?? "فشل تجهيز المنتج للنشر.",
                             string.Join("\n", attemptLogs),
-                            failure.Route);
+                            failure.Route,
+                            correlationId);
                     }
                 }
 
@@ -203,12 +234,13 @@ namespace Affiliate.Services
 
             var detail = string.Join("\n", attemptLogs);
             if (lastFailure is null)
-                return Fail("فشل تجهيز المنتج للنشر.", detail);
+                return Fail("فشل تجهيز المنتج للنشر.", detail, correlationId: correlationId);
 
             return Fail(
                 lastFailure.Error ?? "فشل تجهيز المنتج للنشر.",
                 detail,
-                lastFailure.Route);
+                lastFailure.Route,
+                correlationId);
         }
 
         /// <summary>
@@ -220,6 +252,7 @@ namespace Affiliate.Services
             decimal? alertPrice,
             string productUrl,
             IReadOnlyList<IspProxyEndpoint> batch,
+            Guid correlationId,
             CancellationToken cancellationToken)
         {
             using var waveCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -228,33 +261,39 @@ namespace Affiliate.Services
 
             var tasks = batch.Select(async endpoint =>
             {
+                var route = AuditRoute(endpoint);
                 try
                 {
                     if (!await ProbeProxyReachableAsync(endpoint, waveToken))
                     {
+                        _audit.Log(correlationId, asin, PublishAuditEvent.Attempt,
+                            route: route, proxyHost: endpoint.Host, proxyPort: endpoint.Port,
+                            success: false, detail: "HTTP probe failed");
                         return Fail(
                             "فشل تجهيز المنتج للنشر.",
                             "HTTP probe failed",
-                            endpoint.Describe());
+                            route,
+                            correlationId);
                     }
 
                     var result = await TryCaptureOnceAsync(
-                        asin, alertPrice, productUrl, endpoint, waveToken);
+                        asin, alertPrice, productUrl, endpoint, correlationId, waveToken);
 
                     if (result.Success)
                     {
                         try { waveCts.Cancel(); } catch (ObjectDisposedException) { /* ignore */ }
-                        return WithRoute(result, endpoint.Describe());
+                        return WithRoute(result, route, correlationId);
                     }
 
-                    return WithRoute(result, endpoint.Describe());
+                    return WithRoute(result, route, correlationId);
                 }
                 catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
                 {
                     return Fail(
                         "ألغي بعد نجاح بروكسي آخر.",
                         "Cancelled after sibling proxy succeeded",
-                        endpoint.Describe());
+                        route,
+                        correlationId);
                 }
             }).ToArray();
 
@@ -299,12 +338,30 @@ namespace Affiliate.Services
             decimal? alertPrice,
             string productUrl,
             IspProxyEndpoint? proxy,
+            Guid correlationId,
             CancellationToken cancellationToken)
         {
-            var route = proxy?.Describe() ?? "direct";
+            var route = AuditRoute(proxy);
+            var sw = Stopwatch.StartNew();
             try
             {
-                return await CaptureOnceAsync(asin, alertPrice, productUrl, proxy, cancellationToken);
+                var result = await CaptureOnceAsync(
+                    asin, alertPrice, productUrl, proxy, correlationId, cancellationToken);
+                _audit.Log(correlationId, asin, PublishAuditEvent.Attempt,
+                    route: route,
+                    proxyHost: proxy?.Host,
+                    proxyPort: proxy is { UseProxy: true } ? proxy.Port : null,
+                    pageKind: result.UsedCartScreenshot ? "Cart" : (result.Success ? "Dp" : null),
+                    success: result.Success,
+                    durationMs: (int)sw.ElapsedMilliseconds,
+                    detail: TruncateAudit(result.Detail ?? result.Error));
+                // Detail on success is path info for audit only — clear so Telegram failure logs stay clean.
+                return result with
+                {
+                    CorrelationId = correlationId,
+                    Route = route,
+                    Detail = result.Success ? null : result.Detail
+                };
             }
             catch (OperationCanceledException)
             {
@@ -313,7 +370,14 @@ namespace Affiliate.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Prepare-for-publish attempt failed for {Asin} via {Route}", asin, route);
-                return Fail(DescribeFailure(ex), FormatExceptionDetail(ex), route);
+                _audit.Log(correlationId, asin, PublishAuditEvent.Attempt,
+                    route: route,
+                    proxyHost: proxy?.Host,
+                    proxyPort: proxy is { UseProxy: true } ? proxy.Port : null,
+                    success: false,
+                    durationMs: (int)sw.ElapsedMilliseconds,
+                    detail: TruncateAudit(FormatExceptionDetail(ex)));
+                return Fail(DescribeFailure(ex), FormatExceptionDetail(ex), route, correlationId);
             }
         }
 
@@ -322,10 +386,11 @@ namespace Affiliate.Services
             decimal? alertPrice,
             string productUrl,
             IspProxyEndpoint? proxy,
+            Guid correlationId,
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var route = proxy?.Describe() ?? "direct";
+            var route = AuditRoute(proxy);
 
             // Chromium cannot auth SOCKS5; bridge local no-auth SOCKS5 → upstream Webshare SOCKS5.
             LocalSocks5Bridge? socksBridge = null;
@@ -339,32 +404,8 @@ namespace Affiliate.Services
 
             await using (socksBridge)
             {
-            using var playwright = await Playwright.CreateAsync();
-            IBrowser browser;
-            try
-            {
-                browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
-                {
-                    Headless = true,
-                    Args =
-                    [
-                        "--disable-blink-features=AutomationControlled",
-                        "--no-sandbox",
-                        "--disable-dev-shm-usage"
-                    ]
-                });
-            }
-            catch (PlaywrightException ex) when (ex.Message.Contains("Executable doesn't exist", StringComparison.OrdinalIgnoreCase))
-            {
-                throw new InvalidOperationException(
-                    "Chromium غير مثبت لـ Playwright. من مجلد المشروع نفّذ: " +
-                    "powershell -ExecutionPolicy Bypass -File bin\\Debug\\net8.0\\playwright.ps1 install chromium",
-                    ex);
-            }
-
-            await using (browser)
-            {
-                var context = await browser.NewContextAsync(new BrowserNewContextOptions
+                var browser = await GetSharedBrowserAsync();
+                await using var context = await browser.NewContextAsync(new BrowserNewContextOptions
                 {
                     ViewportSize = new ViewportSize { Width = 1000, Height = 1100 },
                     DeviceScaleFactor = 2,
@@ -414,7 +455,8 @@ namespace Affiliate.Services
                     return Fail(
                         "أمازون طلب تحقق (captcha) — أعد المحاولة لاحقاً.",
                         $"Captcha/robot check via {route}",
-                        route);
+                        route,
+                        correlationId);
                 }
 
                 var productName = await ReadProductTitleAsync(page) ?? asin;
@@ -436,11 +478,17 @@ namespace Affiliate.Services
                 }
 
                 // Auto/promo discounts: always cart + drawn summary (not shown until login).
-                var useCart = checkoutDiscount is not null || !pricesMatch;
+                // No DP price (MAP / see-price-in-cart): cart shows the amount.
+                var cartReasonAr = DescribeCartReasonAr(checkoutDiscount, pagePrice, alertPrice, pricesMatch);
+                var useCart = cartReasonAr is not null;
 
                 byte[] screenshot;
                 var usedCart = false;
                 decimal? resultPrice = pagePrice ?? alertPrice;
+                // Always store the path decision in Detail so publish logs show WHY cart/DP.
+                string? pathDetail = useCart
+                    ? $"سبب السلة: {cartReasonAr}"
+                    : "سبب المسار: الأسعار متطابقة → صفحة المنتج";
 
                 if (!useCart)
                 {
@@ -465,8 +513,18 @@ namespace Affiliate.Services
                     {
                         // Cart often fails (interstitial / soft block). Fall back to highlighted DP.
                         _logger.LogWarning(cartEx,
-                            "Prepare-for-publish cart path failed for {Asin} via {Route}; falling back to DP screenshot",
-                            asin, route);
+                            "Prepare-for-publish cart path failed for {Asin} via {Route} (reason={Reason}); falling back to DP screenshot",
+                            asin, route, cartReasonAr);
+
+                        var failShort = TruncateAudit(cartEx.Message) ?? "timeout/error";
+                        _audit.Log(correlationId, asin, PublishAuditEvent.CartFallback,
+                            route: route,
+                            proxyHost: proxy?.Host,
+                            proxyPort: proxy is { UseProxy: true } ? proxy.Port : null,
+                            pageKind: "Dp",
+                            success: true,
+                            detail: TruncateAudit(
+                                $"سبب اختيار السلة: {cartReasonAr} | فشل التنفيذ: {failShort}"));
 
                         await page.GotoAsync(productUrl, new PageGotoOptions
                         {
@@ -480,6 +538,8 @@ namespace Affiliate.Services
                         screenshot = await CapturePublishScreenshotAsync(page, cart: false);
                         usedCart = false;
                         resultPrice = pagePrice ?? alertPrice;
+                        pathDetail =
+                            $"سبب السلة: {cartReasonAr} | السلة فشلت فرجعنا لصفحة المنتج | {failShort}";
                     }
                 }
 
@@ -487,15 +547,67 @@ namespace Affiliate.Services
                 {
                     Success = true,
                     Route = route,
+                    CorrelationId = correlationId,
                     ProductName = productName,
                     ProductUrl = productUrl,
                     ProductPrice = resultPrice,
                     ScreenshotPng = screenshot,
                     UsedCartScreenshot = usedCart,
+                    Detail = pathDetail,
                     CaptionNote = FormatPublishCaptionNotes(checkoutDiscount, priceMismatch: !pricesMatch)
                 };
-            }
             } // socksBridge
+        }
+
+        /// <summary>
+        /// One warm Chromium for all prepare attempts; each capture still gets a fresh context.
+        /// </summary>
+        private static async Task<IBrowser> GetSharedBrowserAsync()
+        {
+            if (_sharedBrowser is { IsConnected: true })
+                return _sharedBrowser;
+
+            await SharedBrowserLock.WaitAsync();
+            try
+            {
+                if (_sharedBrowser is { IsConnected: true })
+                    return _sharedBrowser;
+
+                if (_sharedBrowser is not null)
+                {
+                    try { await _sharedBrowser.DisposeAsync(); }
+                    catch { /* already dead */ }
+                    _sharedBrowser = null;
+                }
+
+                _sharedPlaywright ??= await Playwright.CreateAsync();
+                try
+                {
+                    _sharedBrowser = await _sharedPlaywright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+                    {
+                        Headless = true,
+                        Args =
+                        [
+                            "--disable-blink-features=AutomationControlled",
+                            "--no-sandbox",
+                            "--disable-dev-shm-usage"
+                        ]
+                    });
+                }
+                catch (PlaywrightException ex) when (ex.Message.Contains("Executable doesn't exist", StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException(
+                        "Chromium غير مثبت لـ Playwright. من مجلد المشروع نفّذ: " +
+                        "powershell -ExecutionPolicy Bypass -File bin\\Debug\\net8.0\\playwright.ps1 install chromium",
+                        ex);
+                }
+
+                return _sharedBrowser;
+            }
+            finally
+            {
+                SharedBrowserLock.Release();
+            }
         }
 
         /// <summary>
@@ -558,20 +670,24 @@ namespace Affiliate.Services
                 : $"{route}: {error} | {result.Detail}";
         }
 
-        private static PrepareForPublishResult WithRoute(PrepareForPublishResult result, string route) =>
-            new()
-            {
-                Success = result.Success,
-                Error = result.Error,
-                Detail = result.Detail,
-                Route = route,
-                ProductName = result.ProductName,
-                ProductUrl = result.ProductUrl,
-                ProductPrice = result.ProductPrice,
-                ScreenshotPng = result.ScreenshotPng,
-                UsedCartScreenshot = result.UsedCartScreenshot,
-                CaptionNote = result.CaptionNote
-            };
+        private static string AuditRoute(IspProxyEndpoint? proxy) =>
+            proxy is { UseProxy: true } && !string.IsNullOrWhiteSpace(proxy.Host)
+                ? $"{proxy.Host}:{proxy.Port}"
+                : "direct";
+
+        private static string? TruncateAudit(string? text, int max = 500)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+                return null;
+            text = text.Trim();
+            return text.Length <= max ? text : text[..max];
+        }
+
+        private static PrepareForPublishResult WithRoute(
+            PrepareForPublishResult result,
+            string route,
+            Guid correlationId) =>
+            result with { Route = route, CorrelationId = correlationId };
 
         /// <summary>Telegram caption lines placed before the URL (discount and/or cart price hint).</summary>
         internal static string? FormatPublishCaptionNotes(
@@ -695,19 +811,76 @@ namespace Affiliate.Services
 
         private static async Task<decimal?> ReadDesktopPriceAsync(IPage page)
         {
-            string[] selectors =
+            // Prefer data-csa-c-price-to-pay (.a-offscreen often empty). Soft retry — never WaitFor
+            // (timeout there was failing the whole publish attempt).
+            for (var attempt = 0; attempt < 4; attempt++)
+            {
+                try
+                {
+                    var fromAttr = await page.EvaluateAsync<string?>(
+                        """
+                        () => document.querySelector(
+                          '#corePriceDisplay_desktop_feature_div [data-csa-c-price-to-pay], [data-csa-c-price-to-pay]'
+                        )?.getAttribute('data-csa-c-price-to-pay') || null
+                        """);
+                    var attrPrice = ParsePrice(fromAttr);
+                    if (attrPrice is > 0)
+                        return attrPrice;
+                }
+                catch (PlaywrightException)
+                {
+                    // fall through
+                }
+
+                await Task.Delay(400);
+            }
+
+            string[] wholeSelectors =
             [
-                "#corePrice_feature_div .a-price.priceToPay .a-offscreen",
+                "#corePriceDisplay_desktop_feature_div .a-price.priceToPay .a-price-whole",
+                "#corePrice_feature_div .a-price.priceToPay .a-price-whole",
+                "#apex_desktop .a-price.priceToPay .a-price-whole",
+                ".a-price.priceToPay .a-price-whole"
+            ];
+
+            foreach (var wholeSel in wholeSelectors)
+            {
+                var wholeLoc = page.Locator(wholeSel);
+                if (await wholeLoc.CountAsync() == 0)
+                    continue;
+
+                try
+                {
+                    // .a-price-whole text includes nested "."; don't append another before fraction.
+                    var wholeText = (await wholeLoc.First.TextContentAsync(
+                        new LocatorTextContentOptions { Timeout = 3_000 }) ?? "").Trim().TrimEnd('.');
+                    var root = wholeSel.Replace(" .a-price-whole", "");
+                    var fractionLoc = page.Locator($"{root} .a-price-fraction");
+                    var fractionText = await fractionLoc.CountAsync() > 0
+                        ? await fractionLoc.First.TextContentAsync(
+                            new LocatorTextContentOptions { Timeout = 2_000 }) ?? "00"
+                        : "00";
+                    var parsed = ParsePrice($"{wholeText}.{fractionText}");
+                    if (parsed is > 0)
+                        return parsed;
+                }
+                catch (PlaywrightException)
+                {
+                    // try next
+                }
+            }
+
+            string[] offscreenSelectors =
+            [
+                "#apex-pricetopay-accessibility-label",
                 "#corePriceDisplay_desktop_feature_div .a-price.priceToPay .a-offscreen",
-                "#corePrice_feature_div span.a-offscreen",
+                "#corePrice_feature_div .a-price.priceToPay .a-offscreen",
                 "#apex_desktop .a-price.priceToPay .a-offscreen",
                 ".a-price.priceToPay .a-offscreen"
             ];
 
-            foreach (var selector in selectors)
+            foreach (var selector in offscreenSelectors)
             {
-                // Count on the base locator (no wait). Avoid .First before existence check —
-                // .First.TextContentAsync waits up to the default timeout when missing.
                 var loc = page.Locator(selector);
                 if (await loc.CountAsync() == 0)
                     continue;
@@ -716,30 +889,12 @@ namespace Affiliate.Services
                 {
                     var text = await loc.First.TextContentAsync(new LocatorTextContentOptions { Timeout = 3_000 });
                     var parsed = ParsePrice(text);
-                    if (parsed.HasValue)
+                    if (parsed is > 0)
                         return parsed;
                 }
                 catch (PlaywrightException)
                 {
                     // try next selector
-                }
-            }
-
-            var wholeLoc = page.Locator("#corePrice_feature_div .a-price.priceToPay .a-price-whole");
-            if (await wholeLoc.CountAsync() > 0)
-            {
-                try
-                {
-                    var wholeText = await wholeLoc.First.TextContentAsync(new LocatorTextContentOptions { Timeout = 3_000 }) ?? "";
-                    var fractionLoc = page.Locator("#corePrice_feature_div .a-price.priceToPay .a-price-fraction");
-                    var fractionText = await fractionLoc.CountAsync() > 0
-                        ? await fractionLoc.First.TextContentAsync(new LocatorTextContentOptions { Timeout = 2_000 }) ?? "00"
-                        : "00";
-                    return ParsePrice($"{wholeText}.{fractionText}");
-                }
-                catch (PlaywrightException)
-                {
-                    // ignore
                 }
             }
 
@@ -1068,9 +1223,21 @@ namespace Affiliate.Services
                       rows.push(row);
                     });
 
+                  // Bank / ValU / card promos also say "at checkout" / "عند الدفع" and must NOT
+                  // force the cart screenshot path (those are payment-method offers, not Amazon
+                  // auto checkout or Amazon promo-code discounts).
+                  const isBankOrPaymentPromo = (row, text) => {
+                    if (row.querySelector('[data-csa-c-action="clipPromotion"], [id^="clickMe"]'))
+                      return true;
+                    return /Enter code|Credit Card|Visa|Mastercard|Vodafone|Valu|Buy Now,\s*Pay Later|بطاقة|فودافون|بنك|كود\s|Redeem|NBE|ABC\s*x?\s*Visa/i
+                      .test(text);
+                  };
+
                   let best = null;
                   for (const row of rows) {
                     const text = (row.innerText || '').replace(/\s+/g, ' ');
+                    if (isBankOrPaymentPromo(row, text)) continue;
+
                     const hasPspLink = !!row.querySelector(
                       'a.cxcwEmphasisLink[href*="/promotion/psp/"], a[href*="/promotion/psp/"], a#emphasisLink, #emphasisLink');
                     const isAuto = text.includes('عند الدفع');
@@ -1360,16 +1527,22 @@ namespace Affiliate.Services
 
             await addButton.First.ClickAsync();
 
+            // Sidesheet / "go to cart" controls are flaky (often never appear). Navigate
+            // straight to the cart after add — same outcome, much more reliable.
             try
             {
                 var goToCart = page.Locator(
-                    "#sw-gtc a, #attach-sidesheet-view-cart-button, #nav-cart, a[href*='/cart/']");
-                await goToCart.First.WaitForAsync(new LocatorWaitForOptions
+                    "#sw-gtc a, #attach-sidesheet-view-cart-button");
+                if (await goToCart.CountAsync() > 0)
                 {
-                    State = WaitForSelectorState.Visible,
-                    Timeout = 10_000
-                });
-                await goToCart.First.ClickAsync();
+                    await goToCart.First.ClickAsync(new LocatorClickOptions { Timeout = 3_000 });
+                }
+                else
+                {
+                    await page.GotoAsync(
+                        "https://www.amazon.eg/gp/cart/view.html?language=ar_AE&ref_=nav_cart",
+                        new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 45_000 });
+                }
             }
             catch (PlaywrightException)
             {
@@ -1390,6 +1563,34 @@ namespace Affiliate.Services
                 new PageWaitForSelectorOptions { Timeout = 30_000 });
         }
 
+        /// <summary>
+        /// Arabic one-liner explaining why the cart path was chosen (null = use DP).
+        /// </summary>
+        private static string? DescribeCartReasonAr(
+            CheckoutDiscountInfo? discount,
+            decimal? pagePrice,
+            decimal? alertPrice,
+            bool pricesMatch)
+        {
+            if (discount is not null)
+            {
+                return discount.Kind.Equals("auto", StringComparison.OrdinalIgnoreCase)
+                    ? $"خصم تلقائي عند الدفع {discount.Percent}% (مش بانك)"
+                    : $"كود خصم أمازون {discount.Percent}% (رمز العرض)";
+            }
+
+            if (pagePrice is null)
+                return $"ما قدرناش نقرأ سعر صفحة المنتج (page=null, db={alertPrice?.ToString(CultureInfo.InvariantCulture) ?? "null"})";
+
+            if (!pricesMatch)
+            {
+                return
+                    $"السعر مختلف — صفحة المنتج={pagePrice.Value.ToString(CultureInfo.InvariantCulture)}، قاعدة البيانات={alertPrice?.ToString(CultureInfo.InvariantCulture) ?? "null"}";
+            }
+
+            return null;
+        }
+
         internal static bool PricesMatch(decimal pagePrice, decimal alertPrice) =>
             Math.Abs(pagePrice - alertPrice) < 0.05m;
 
@@ -1398,7 +1599,12 @@ namespace Affiliate.Services
             if (string.IsNullOrWhiteSpace(raw))
                 return null;
 
-            var cleaned = Regex.Replace(raw, @"[^\d.,]", "");
+            // First money token only (a11y label appends "توفير بنسبة 24").
+            var match = Regex.Match(raw, @"[\d][\d.,]*");
+            if (!match.Success)
+                return null;
+
+            var cleaned = Regex.Replace(match.Value, @"\.+", ".").Trim('.');
             if (string.IsNullOrWhiteSpace(cleaned))
                 return null;
 
@@ -1463,7 +1669,15 @@ namespace Affiliate.Services
         private static PrepareForPublishResult Fail(
             string error,
             string? detail = null,
-            string? route = null) =>
-            new() { Success = false, Error = error, Detail = detail, Route = route };
+            string? route = null,
+            Guid correlationId = default) =>
+            new()
+            {
+                Success = false,
+                Error = error,
+                Detail = detail,
+                Route = route,
+                CorrelationId = correlationId
+            };
     }
 }

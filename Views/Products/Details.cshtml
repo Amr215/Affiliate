@@ -43,6 +43,9 @@
         @if (!string.IsNullOrWhiteSpace(p.Asin))
         {
             <a href="https://www.amazon.eg/dp/@p.Asin.Trim()?language=ar_AE" target="_blank" rel="noopener" class="btn btn-outline-primary">فتح على Amazon</a>
+            <a asp-controller="PublishAuditLogs" asp-action="Index" asp-route-Asin="@p.Asin" class="btn btn-outline-secondary">
+                <i class="bi bi-send-check"></i> سجلات النشر
+            </a>
         }
     </div>
 </div>

@@ -16,6 +16,7 @@ namespace Affiliate.Data
         public DbSet<PriceHistory> PriceHistories { get; set; }
         public DbSet<ScraperUrl> ScraperUrls { get; set; }
         public DbSet<OxylabsRequestLog> OxylabsRequestLogs { get; set; }
+        public DbSet<PublishAuditLog> PublishAuditLogs { get; set; }
         public DbSet<NoonBrandUrl> NoonBrandUrls { get; set; }
         public DbSet<NoonProduct> NoonProducts { get; set; }
         public DbSet<NoonPriceHistory> NoonPriceHistories { get; set; }
@@ -75,6 +76,13 @@ namespace Affiliate.Data
                     .HasForeignKey(l => l.ScraperUrlId)
                     .IsRequired(false)
                     .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            modelBuilder.Entity<PublishAuditLog>(entity =>
+            {
+                entity.HasIndex(l => l.CorrelationId);
+                entity.HasIndex(l => l.OccurredAt);
+                entity.HasIndex(l => new { l.Asin, l.OccurredAt });
             });
 
             // Configure relationships
