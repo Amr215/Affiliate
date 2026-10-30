@@ -883,7 +883,10 @@ namespace Affiliate.Services
                     'header[data-cel-widget]', '#rhf', '#navFooter',
                     '#gw-card-layout', '#nav-progressive-toc',
                     '#nav-breadcrumb-copy', '#wayfinding-breadcrumbs_container',
-                    '#wayfinding-breadcrumbs_feature_div', '#navBackToTop'
+                    '#wayfinding-breadcrumbs_feature_div', '#navBackToTop',
+                    // Stock left count ("تبقى N فقط") — hide from publish screenshot
+                    '#availability', '#availability_feature_div',
+                    '.primary-availability-message'
                   ].forEach(hide);
 
                   // Promo / localization strips that sit under the main nav.
