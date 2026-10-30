@@ -567,8 +567,7 @@ namespace Affiliate.Services
                     ProductPrice = resultPrice,
                     ScreenshotPng = screenshot,
                     UsedCartScreenshot = usedCart,
-                    Detail = pathDetail,
-                    CaptionNote = FormatPublishCaptionNotes(checkoutDiscount, priceMismatch: !pricesMatch)
+                    Detail = pathDetail
                 };
             } // socksBridge
         }
@@ -704,28 +703,6 @@ namespace Affiliate.Services
             string route,
             Guid correlationId) =>
             result with { Route = route, CorrelationId = correlationId };
-
-        /// <summary>Telegram caption lines placed before the URL (discount and/or cart price hint).</summary>
-        internal static string? FormatPublishCaptionNotes(
-            CheckoutDiscountInfo? discount,
-            bool priceMismatch)
-        {
-            var lines = new List<string>(2);
-
-            if (discount is { Percent: > 0 })
-            {
-                lines.Add(discount.Kind.Equals("auto", StringComparison.OrdinalIgnoreCase)
-                    ? $"ملحوظة: حط السعر في السلة وهتلاقي خصم تلقائي عند الدفع ({discount.Percent}%)"
-                    : "ملحوظة: يوجد كود خصم للتحصيل عند الشراء هتلاقية تحت المنتج");
-            }
-
-            if (priceMismatch)
-            {
-                lines.Add("ملحوظة: السعر ممكن يكون لسه متحدثش في صفحة المنتج حط في السلة هيتحدث");
-            }
-
-            return lines.Count == 0 ? null : string.Join("\n", lines);
-        }
 
         /// <summary>
         /// language=ar_AE alone is unreliable — also set cookies/headers/locale,
