@@ -49,6 +49,9 @@ namespace Affiliate.Options
         /// <summary>Group where posted Amazon links get «نشر عرض / نشر عرض ممتاز / نشر لقطة / نشر ببلاش» buttons.</summary>
         public string PublishChatId { get; set; } = string.Empty;
 
+        /// <summary>Group where posted Noon links get the same publish template buttons (Chromium/proxy screenshots).</summary>
+        public string NoonPublishChatId { get; set; } = string.Empty;
+
         /// <summary>Channel that also receives every post published from the publish group.</summary>
         public string PublishChannelId { get; set; } = string.Empty;
 

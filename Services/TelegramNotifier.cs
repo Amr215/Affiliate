@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json.Serialization;
 using System.Web;
 using Affiliate.Models;
+using Affiliate.Noon;
 using Affiliate.Noon.Models;
 using Affiliate.Options;
 using Microsoft.Extensions.Options;
@@ -176,17 +177,20 @@ namespace Affiliate.Services
         private readonly TelegramOptions _options;
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly AsinLinkCodec _asinLinkCodec;
+        private readonly NoonSkuLinkCodec _noonSkuLinkCodec;
         private readonly ILogger<TelegramNotifier> _logger;
 
         public TelegramNotifier(
             IOptions<TelegramOptions> options,
             IHttpClientFactory httpClientFactory,
             AsinLinkCodec asinLinkCodec,
+            NoonSkuLinkCodec noonSkuLinkCodec,
             ILogger<TelegramNotifier> logger)
         {
             _options = options.Value;
             _httpClientFactory = httpClientFactory;
             _asinLinkCodec = asinLinkCodec;
+            _noonSkuLinkCodec = noonSkuLinkCodec;
             _logger = logger;
         }
 
@@ -769,23 +773,30 @@ namespace Affiliate.Services
         /// <summary>
         /// Site redirect link for publish posts, e.g. <c>https://el-sindbad.com/xK9mPq2Ab</c>
         /// (opaque code; Amazon tag is applied by the short-link endpoint, not in the caption).
-        /// Already-short <c>/u/…</c> links are returned unchanged.
+        /// Already-short <c>/u/…</c> (Amazon) and <c>/n/…</c> (Noon) links are returned unchanged.
         /// </summary>
         private string BuildAffiliateProductUrl(string url)
         {
-            if (url.Contains("/u/", StringComparison.OrdinalIgnoreCase))
+            if (url.Contains("/u/", StringComparison.OrdinalIgnoreCase)
+                || url.Contains("/n/", StringComparison.OrdinalIgnoreCase))
                 return url;
 
             var match = DpAsinRegex.Match(url);
-            if (!match.Success)
-                return ShortenProductUrl(url);
+            if (match.Success)
+            {
+                var baseUrl = (_options.PublishLinkBaseUrl ?? "https://el-sindbad.com").Trim().TrimEnd('/');
+                if (baseUrl.Length == 0)
+                    baseUrl = "https://el-sindbad.com";
 
-            var baseUrl = (_options.PublishLinkBaseUrl ?? "https://el-sindbad.com").Trim().TrimEnd('/');
-            if (baseUrl.Length == 0)
-                baseUrl = "https://el-sindbad.com";
+                var code = _asinLinkCodec.Encode(match.Groups[1].Value);
+                return $"{baseUrl}/{code}";
+            }
 
-            var code = _asinLinkCodec.Encode(match.Groups[1].Value);
-            return $"{baseUrl}/{code}";
+            // Noon product → opaque SKU code (no DB), same idea as Amazon ASIN codes.
+            if (NoonPrepareForPublishService.TryResolveSkuAndUrl(url, out var sku, out _))
+                return _noonSkuLinkCodec.BuildPublicUrl(sku);
+
+            return ShortenProductUrl(url);
         }
 
         /// <summary>

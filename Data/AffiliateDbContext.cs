@@ -21,6 +21,8 @@ namespace Affiliate.Data
         public DbSet<NoonProduct> NoonProducts { get; set; }
         public DbSet<NoonPriceHistory> NoonPriceHistories { get; set; }
         public DbSet<NoonRequestLog> NoonRequestLogs { get; set; }
+        public DbSet<NoonPublishAuditLog> NoonPublishAuditLogs { get; set; }
+        public DbSet<NoonShortLink> NoonShortLinks { get; set; }
         public DbSet<ProductLink> ProductLinks { get; set; }
         public DbSet<AmazonShortLink> AmazonShortLinks { get; set; }
 
@@ -140,6 +142,14 @@ namespace Affiliate.Data
                     .OnDelete(DeleteBehavior.SetNull);
             });
 
+            modelBuilder.Entity<NoonPublishAuditLog>(entity =>
+            {
+                entity.ToTable("NoonPublishAuditLogs");
+                entity.HasIndex(l => l.CorrelationId);
+                entity.HasIndex(l => l.OccurredAt);
+                entity.HasIndex(l => new { l.Sku, l.OccurredAt });
+            });
+
             modelBuilder.Entity<ProductLink>(entity =>
             {
                 entity.HasIndex(l => l.ProductId).IsUnique();
@@ -156,6 +166,14 @@ namespace Affiliate.Data
 
             modelBuilder.Entity<AmazonShortLink>(entity =>
             {
+                entity.Property(l => l.Code).HasMaxLength(16);
+                entity.Property(l => l.DestinationUrl).HasMaxLength(4000);
+                entity.HasIndex(l => l.Code).IsUnique();
+            });
+
+            modelBuilder.Entity<NoonShortLink>(entity =>
+            {
+                entity.ToTable("NoonShortLinks");
                 entity.Property(l => l.Code).HasMaxLength(16);
                 entity.Property(l => l.DestinationUrl).HasMaxLength(4000);
                 entity.HasIndex(l => l.Code).IsUnique();

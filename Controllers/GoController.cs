@@ -1,3 +1,4 @@
+using Affiliate.Noon;
 using Affiliate.Options;
 using Affiliate.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -7,22 +8,26 @@ using Microsoft.Extensions.Options;
 namespace Affiliate.Controllers
 {
     /// <summary>
-    /// Public Amazon redirects:
-    /// <c>/{code}</c> → product ASIN with Associates tag;
-    /// <c>/u/{code}</c> → stored non-product Amazon.eg URL with Associates tag.
+    /// Public redirects:
+    /// <c>/{code}</c> → Amazon product ASIN with Associates tag (codec, no DB);
+    /// <c>/u/{code}</c> → stored non-product Amazon.eg URL with Associates tag;
+    /// <c>/n/{11}</c> → Noon product SKU (codec, no DB);
+    /// <c>/n/{8}</c> → stored non-product Noon URL.
     /// </summary>
     [AllowAnonymous]
     public class GoController(
         IOptions<TelegramOptions> options,
         AsinLinkCodec codec,
-        AmazonShortLinkService shortLinks) : Controller
+        NoonSkuLinkCodec noonSkuCodec,
+        AmazonShortLinkService shortLinks,
+        NoonShortLinkService noonShortLinks) : Controller
     {
         [HttpGet("/{code:regex(^[[0-9A-Za-z]]{{9}}$)}")]
-        public IActionResult Go(string code) => RedirectToProduct(code);
+        public IActionResult Go(string code) => RedirectToAmazonProduct(code);
 
         /// <summary>Keeps older <c>/go/…</c> channel links working.</summary>
         [HttpGet("/go/{code:regex(^[[0-9A-Za-z]]{{9}}$)}")]
-        public IActionResult GoLegacy(string code) => RedirectToProduct(code);
+        public IActionResult GoLegacy(string code) => RedirectToAmazonProduct(code);
 
         [HttpGet("/u/{code:regex(^[[0-9A-Za-z]]{{8}}$)}")]
         public async Task<IActionResult> GoUniversal(string code, CancellationToken cancellationToken)
@@ -34,7 +39,28 @@ namespace Affiliate.Controllers
             return Redirect(AppendTag(destination));
         }
 
-        private IActionResult RedirectToProduct(string code)
+        /// <summary>Noon product: opaque SKU code (not stored).</summary>
+        [HttpGet("/n/{code:regex(^[[0-9A-Za-z]]{{11}}$)}")]
+        public IActionResult GoNoonProduct(string code)
+        {
+            if (!noonSkuCodec.TryDecode(code, out var sku))
+                return NotFound();
+
+            return Redirect(NoonPrepareForPublishService.BuildProductUrl(sku));
+        }
+
+        /// <summary>Noon general URL from <c>NoonShortLinks</c>.</summary>
+        [HttpGet("/n/{code:regex(^[[0-9A-Za-z]]{{8}}$)}")]
+        public async Task<IActionResult> GoNoon(string code, CancellationToken cancellationToken)
+        {
+            var destination = await noonShortLinks.ResolveDestinationAsync(code, cancellationToken);
+            if (string.IsNullOrWhiteSpace(destination))
+                return NotFound();
+
+            return Redirect(destination);
+        }
+
+        private IActionResult RedirectToAmazonProduct(string code)
         {
             if (!codec.TryDecode(code, out var asin))
                 return NotFound();

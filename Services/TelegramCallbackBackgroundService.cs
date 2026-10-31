@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Affiliate.Data;
 using Affiliate.Models;
+using Affiliate.Noon;
 using Affiliate.Options;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -32,6 +33,7 @@ namespace Affiliate.Services
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly IOptions<TelegramOptions> _options;
         private readonly IHttpClientFactory _httpClientFactory;
+        private readonly NoonTelegramPublishHandler _noonPublish;
         private readonly ILogger<TelegramCallbackBackgroundService> _logger;
 
         private long _offset;
@@ -40,11 +42,13 @@ namespace Affiliate.Services
             IServiceScopeFactory scopeFactory,
             IOptions<TelegramOptions> options,
             IHttpClientFactory httpClientFactory,
+            NoonTelegramPublishHandler noonPublish,
             ILogger<TelegramCallbackBackgroundService> logger)
         {
             _scopeFactory = scopeFactory;
             _options = options;
             _httpClientFactory = httpClientFactory;
+            _noonPublish = noonPublish;
             _logger = logger;
         }
 
@@ -117,12 +121,27 @@ namespace Affiliate.Services
         private async Task HandleMessageAsync(TelegramCallbackMessage message, CancellationToken ct)
         {
             var chatId = message.Chat?.Id?.ToString();
-            if (chatId is null || chatId != _options.Value.PublishChatId.Trim())
+            if (chatId is null)
                 return;
 
             var text = message.Text ?? "";
 
-            // Reply to a publish preview → update caption (no re-screenshot).
+            if (_noonPublish.IsNoonPublishChat(chatId))
+            {
+                await _noonPublish.HandleMessageAsync(
+                    chatId,
+                    message.MessageId,
+                    text,
+                    message.ReplyToMessage?.MessageId,
+                    message.ReplyToMessage is not null ? text : null,
+                    ct);
+                return;
+            }
+
+            if (chatId != _options.Value.PublishChatId.Trim())
+                return;
+
+            // Reply to a publish preview ? update caption (no re-screenshot).
             if (message.ReplyToMessage is { MessageId: > 0 } reply
                 && !string.IsNullOrWhiteSpace(text))
             {
@@ -307,6 +326,18 @@ namespace Affiliate.Services
         private async Task HandleCallbackAsync(TelegramCallbackQuery callback, CancellationToken ct)
         {
             var data = callback.Data?.Trim() ?? "";
+
+            if (_noonPublish.IsNoonCallback(data))
+            {
+                await _noonPublish.HandleCallbackAsync(
+                    callback.Id,
+                    data,
+                    callback.Message?.Chat?.Id?.ToString(),
+                    callback.Message?.MessageId,
+                    AnswerCallbackAsync,
+                    ct);
+                return;
+            }
 
             if (data.StartsWith(PublishConfirmPrefix, StringComparison.OrdinalIgnoreCase))
             {
