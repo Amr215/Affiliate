@@ -38,6 +38,9 @@
     </div>
     <div class="btn-group-actions d-flex flex-wrap gap-2">
         <a asp-action="Index" class="btn btn-outline-secondary"><i class="bi bi-arrow-right"></i> العودة للقائمة</a>
+        <a asp-controller="NoonPublishAuditLogs" asp-action="Index" asp-route-Sku="@p.Sku" class="btn btn-outline-secondary">
+            <i class="bi bi-send-check"></i> سجلات النشر
+        </a>
         @if (!string.IsNullOrWhiteSpace(p.Url))
         {
             <a href="@p.Url" target="_blank" rel="noopener" class="btn btn-outline-primary">فتح على Noon</a>

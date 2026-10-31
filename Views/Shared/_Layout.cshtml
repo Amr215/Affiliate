@@ -5,7 +5,7 @@
     var dashboardNav = controller switch
     {
         "Home" when action == "Index" => null,
-        "NoonBrands" or "NoonProducts" or "NoonLogs" or "NoonReports" => "_NoonNav",
+        "NoonBrands" or "NoonProducts" or "NoonLogs" or "NoonPublishAuditLogs" or "NoonReports" => "_NoonNav",
         "ProductLinks" => "_LinksNav",
         _ => "_AmazonNav"
     };
