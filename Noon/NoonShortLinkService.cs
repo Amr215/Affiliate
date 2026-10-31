@@ -9,8 +9,9 @@ using Microsoft.Extensions.Options;
 namespace Affiliate.Noon
 {
     /// <summary>
-    /// Creates and resolves DB-backed short links for <b>non-product</b> Noon URLs
-    /// (brand / search / deals). Product SKUs use <see cref="NoonSkuLinkCodec"/> instead (no DB).
+    /// Creates and resolves DB-backed short links for Noon URLs that are not classic
+    /// <c>N…</c> product SKUs (brand / search / deals, and partner / pzsku product pages).
+    /// Classic <c>N…</c> products use <see cref="NoonSkuLinkCodec"/> instead (no DB).
     /// Public form: <c>{PublishLinkBaseUrl}/n/{8-char code}</c>.
     /// </summary>
     public sealed class NoonShortLinkService(
@@ -25,8 +26,9 @@ namespace Affiliate.Noon
             if (!TryNormalize(noonUrl, out var destination))
                 return null;
 
-            // Product pages belong to NoonSkuLinkCodec — do not store them here.
-            if (NoonPrepareForPublishService.TryResolveSkuAndUrl(destination, out _, out _))
+            // Classic N-SKU products belong to NoonSkuLinkCodec — do not store them here.
+            if (NoonPrepareForPublishService.TryResolveSkuAndUrl(destination, out var sku, out _)
+                && NoonSkuLinkCodec.IsValidSku(sku))
                 return null;
 
             var existing = await db.NoonShortLinks.AsNoTracking()

@@ -11,8 +11,8 @@ namespace Affiliate.Controllers
     /// Public redirects:
     /// <c>/{code}</c> → Amazon product ASIN with Associates tag (codec, no DB);
     /// <c>/u/{code}</c> → stored non-product Amazon.eg URL with Associates tag;
-    /// <c>/n/{11}</c> → Noon product SKU (codec, no DB);
-    /// <c>/n/{8}</c> → stored non-product Noon URL.
+    /// <c>/n/{11}</c> → classic Noon <c>N…</c> product SKU (codec, no DB);
+    /// <c>/n/{8}</c> → stored Noon URL (brand/search/deals or partner / ZFC product pages).
     /// </summary>
     [AllowAnonymous]
     public class GoController(

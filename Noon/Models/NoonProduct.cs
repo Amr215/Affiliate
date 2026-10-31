@@ -4,7 +4,7 @@ namespace Affiliate.Noon.Models
     {
         public int Id { get; set; }
 
-        /// <summary>Noon product key (e.g. N70259009V); unique.</summary>
+        /// <summary>Noon product key (e.g. N70259009V or partner ZFC…); unique.</summary>
         public string Sku { get; set; } = string.Empty;
 
         public string Name { get; set; } = string.Empty;

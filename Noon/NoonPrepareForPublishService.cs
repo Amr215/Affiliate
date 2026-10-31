@@ -52,8 +52,12 @@ namespace Affiliate.Noon
         private static IBrowser? _sharedBrowser;
         private static (DateTime At, Exception Error)? _lastLaunchFailure;
 
+        /// <summary>
+        /// Path segment immediately before <c>/p/</c> — classic <c>N…</c> SKUs and partner
+        /// <c>ZFC…</c> / pzsku ids (e.g. <c>…/hand-wash-…/ZFC49D3A29A424DCE1C6FZ/p/</c>).
+        /// </summary>
         private static readonly Regex SkuInUrl = new(
-            @"/(N[A-Z0-9]{5,})(?:/p/?|/|\?|$)",
+            @"/([A-Za-z0-9]{6,32})/p(?:/|\?|$)",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         // Analytics / ads / chat widgets: not needed for the screenshot, only cost CPU and bandwidth.
@@ -64,8 +68,9 @@ namespace Affiliate.Noon
             @"newrelic|nr-data|intercom|zendesk|freshchat|optimizely|segment\.(io|com)",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+        /// <summary>Bare product id: must include a digit so plain words are not treated as SKUs.</summary>
         private static readonly Regex BareSku = new(
-            @"^N[A-Z0-9]{5,}$",
+            @"^(?=.*\d)[A-Za-z0-9]{6,32}$",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         private readonly IIspProxyService _ispProxy;

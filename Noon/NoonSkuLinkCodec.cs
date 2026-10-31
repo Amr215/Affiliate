@@ -131,8 +131,11 @@ namespace Affiliate.Noon
         internal static string NormalizeSku(string sku) =>
             (sku ?? string.Empty).Trim().ToUpperInvariant();
 
-        /// <summary>Noon product SKUs: N + 5–11 alphanumerics (total 6–12).</summary>
-        internal static bool IsValidSku(string sku) =>
+        /// <summary>
+        /// Classic Noon SKUs encodable without DB: <c>N</c> + 5–11 alphanumerics (total 6–12).
+        /// Longer partner / pzsku ids (e.g. <c>ZFC…</c>) use <see cref="NoonShortLinkService"/> instead.
+        /// </summary>
+        public static bool IsValidSku(string sku) =>
             sku.Length is >= 6 and <= 12
             && sku[0] == 'N'
             && sku.Skip(1).All(c => char.IsAsciiLetterOrDigit(c));

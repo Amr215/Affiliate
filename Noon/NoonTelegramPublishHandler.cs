@@ -30,8 +30,9 @@ namespace Affiliate.Noon
             @"https?://(?:www\.)?noon\.com/[^\s<>]+",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+        /// <summary>Bare SKU in chat text (classic <c>N…</c> or partner <c>ZFC…</c>); requires a digit.</summary>
         private static readonly Regex SkuToken = new(
-            @"\b(N[A-Z0-9]{5,})\b",
+            @"\b(?=[A-Za-z0-9]*\d)[A-Za-z0-9]{6,32}\b",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         public bool IsNoonPublishChat(string? chatId)
@@ -178,9 +179,19 @@ namespace Affiliate.Noon
             var productUrl = result.ProductUrl ?? NoonPrepareForPublishService.BuildProductUrl(sku);
             var productPrice = result.ProductPrice ?? known?.CurrentPrice;
 
-            // Same as Amazon products: opaque codec URL (no DB). General Noon URLs still use NoonShortLinks.
-            var skuCodec = scope.ServiceProvider.GetRequiredService<NoonSkuLinkCodec>();
-            var publicUrl = skuCodec.BuildPublicUrl(sku);
+            // Classic N… SKUs → opaque codec (no DB). Partner / ZFC… SKUs → NoonShortLinks.
+            string publicUrl;
+            if (NoonSkuLinkCodec.IsValidSku(sku))
+            {
+                var skuCodec = scope.ServiceProvider.GetRequiredService<NoonSkuLinkCodec>();
+                publicUrl = skuCodec.BuildPublicUrl(sku);
+            }
+            else
+            {
+                var shortLinks = scope.ServiceProvider.GetRequiredService<NoonShortLinkService>();
+                publicUrl = await shortLinks.CreatePublicUrlAsync(productUrl, ct)
+                    ?? NoonPrepareForPublishService.ToArabicLocaleUrl(productUrl);
+            }
 
             var caption = telegram.BuildPublishCaptionHtml(
                 kind, productName, publicUrl, productPrice);

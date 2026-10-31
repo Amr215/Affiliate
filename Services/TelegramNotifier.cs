@@ -794,9 +794,14 @@ namespace Affiliate.Services
                 return $"{baseUrl}/{code}";
             }
 
-            // Noon product → opaque SKU code (no DB), same idea as Amazon ASIN codes.
+            // Classic N… Noon product → opaque SKU code (no DB). Partner / ZFC… keep the noon URL
+            // (publish flow builds a DB short link before calling BuildPublishCaptionHtml).
             if (NoonPrepareForPublishService.TryResolveSkuAndUrl(url, out var sku, out _))
-                return _noonSkuLinkCodec.BuildPublicUrl(sku);
+            {
+                if (NoonSkuLinkCodec.IsValidSku(sku))
+                    return _noonSkuLinkCodec.BuildPublicUrl(sku);
+                return NoonPrepareForPublishService.ToArabicLocaleUrl(url);
+            }
 
             return ShortenProductUrl(url);
         }
