@@ -79,6 +79,14 @@ namespace Affiliate.Models
         public bool IsAsinRecheckEnabled { get; set; } = true;
 
         /// <summary>
+        /// Minimum minutes between ASIN rechecks for this URL's products.
+        /// 0 = no minimum (products stay eligible by oldest <see cref="Product.LastCheckedAt"/> only).
+        /// </summary>
+        [Range(0, 10080)]
+        [Display(Name = "فاصل إعادة فحص ASIN (دقيقة)")]
+        public int AsinRecheckIntervalMinutes { get; set; } = 0;
+
+        /// <summary>
         /// After a product has been unavailable longer than the global long-unavailable window,
         /// minimum minutes between ASIN rechecks for this URL's products.
         /// </summary>

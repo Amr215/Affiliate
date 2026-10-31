@@ -41,6 +41,12 @@
         <div class="form-text">انخفاض من السعر السابق، وأقل من المتوسط بنفس النسبة (تحت 10%).</div>
     </div>
     <div class="col-md-3">
+        <label asp-for="AsinRecheckIntervalMinutes" class="form-label">فاصل فحص ASIN (دقيقة)</label>
+        <input asp-for="AsinRecheckIntervalMinutes" class="form-control ltr" type="number" min="0" max="10080" />
+        <span asp-validation-for="AsinRecheckIntervalMinutes" class="text-danger"></span>
+        <div class="form-text">أقل فاصل بين إعادة فحص منتجات هذا الرابط. 0 = بدون حد (الافتراضي).</div>
+    </div>
+    <div class="col-md-3">
         <label asp-for="LongUnavailableRecheckIntervalMinutes" class="form-label">فاصل غير المتوفر (دقيقة)</label>
         <input asp-for="LongUnavailableRecheckIntervalMinutes" class="form-control ltr" type="number" min="1" max="10080" />
         <span asp-validation-for="LongUnavailableRecheckIntervalMinutes" class="text-danger"></span>

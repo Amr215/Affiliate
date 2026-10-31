@@ -279,9 +279,11 @@ namespace Affiliate.Services
                 return false;
             }
 
-            var header = $"<a href=\"{Html(product.Url)}\">{Html(product.Name)}</a>\nSKU: <code>{Html(product.Sku)}</code>\n";
+            // Alerts open the Arabic storefront (egypt-ar), even when the scraped URL is egypt-en.
+            var productUrl = NoonPrepareForPublishService.ToArabicLocaleUrl(product.Url);
+            var header = $"<a href=\"{Html(productUrl)}\">{Html(product.Name)}</a>\nSKU: <code>{Html(product.Sku)}</code>\n";
             var text = BuildDropHtml(alert, header, product.Currency);
-            var replyMarkup = BuildAlertReplyMarkupJson(product.Name, product.Url, null, alert.CurrentPrice, "🛒 فتح نون");
+            var replyMarkup = BuildAlertReplyMarkupJson(product.Name, productUrl, null, alert.CurrentPrice, "🛒 فتح نون");
 
             var sent = await SendMessageAsync(chatId.Trim(), text, replyMarkup, replyToMessageId: null, cancellationToken);
 

@@ -963,14 +963,9 @@ namespace Affiliate.Noon
             if (Uri.TryCreate(text, UriKind.Absolute, out var uri) &&
                 uri.Host.EndsWith("noon.com", StringComparison.OrdinalIgnoreCase))
             {
-                var path = uri.AbsolutePath;
-                // egypt-en → egypt-ar for Arabic publish screenshots.
-                path = Regex.Replace(path, @"^/(egypt|saudi|uae)-(en|ar)", "/egypt-ar",
-                    RegexOptions.IgnoreCase);
-                if (!path.Contains("/egypt-", StringComparison.OrdinalIgnoreCase))
+                productUrl = ToArabicLocaleUrl(text);
+                if (!productUrl.Contains("/egypt-", StringComparison.OrdinalIgnoreCase))
                     productUrl = BuildProductUrl(sku);
-                else
-                    productUrl = $"https://www.noon.com{path}{uri.Query}";
             }
             else
             {
@@ -982,6 +977,27 @@ namespace Affiliate.Noon
 
         public static string BuildProductUrl(string sku) =>
             $"https://www.noon.com/egypt-ar/{sku.Trim()}/p/";
+
+        /// <summary>
+        /// Rewrites noon.com locale segments to Arabic Egypt (<c>egypt-ar</c>), e.g.
+        /// <c>/egypt-en/…</c> → <c>/egypt-ar/…</c>. Non-noon URLs are returned unchanged.
+        /// </summary>
+        public static string ToArabicLocaleUrl(string? url)
+        {
+            if (string.IsNullOrWhiteSpace(url) ||
+                !Uri.TryCreate(url.Trim(), UriKind.Absolute, out var uri) ||
+                !uri.Host.EndsWith("noon.com", StringComparison.OrdinalIgnoreCase))
+            {
+                return url?.Trim() ?? "";
+            }
+
+            var path = Regex.Replace(
+                uri.AbsolutePath,
+                @"^/(egypt|saudi|uae)-(en|ar)",
+                "/egypt-ar",
+                RegexOptions.IgnoreCase);
+            return $"https://www.noon.com{path}{uri.Query}";
+        }
 
         internal static decimal? ParsePrice(string? raw)
         {

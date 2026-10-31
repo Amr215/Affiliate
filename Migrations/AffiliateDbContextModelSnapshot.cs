@@ -358,6 +358,9 @@ namespace Affiliate.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<int>("AsinRecheckIntervalMinutes")
+                        .HasColumnType("int");
+
                     b.Property<int?>("Category")
                         .HasColumnType("int");
 

@@ -99,6 +99,7 @@ namespace Affiliate.Controllers
                 nameof(ScraperUrl.Name), nameof(ScraperUrl.Url), nameof(ScraperUrl.Domain),
                 nameof(ScraperUrl.StartPage), nameof(ScraperUrl.IntervalSeconds),
                 nameof(ScraperUrl.IsEnabled), nameof(ScraperUrl.IsAsinRecheckEnabled),
+                nameof(ScraperUrl.AsinRecheckIntervalMinutes),
                 nameof(ScraperUrl.LongUnavailableRecheckIntervalMinutes),
                 nameof(ScraperUrl.Category), nameof(ScraperUrl.DropAlertPercent))] ScraperUrl scraperUrl)
         {
@@ -134,6 +135,7 @@ namespace Affiliate.Controllers
                 nameof(ScraperUrl.Domain), nameof(ScraperUrl.StartPage),
                 nameof(ScraperUrl.IntervalSeconds), nameof(ScraperUrl.IsEnabled),
                 nameof(ScraperUrl.IsAsinRecheckEnabled),
+                nameof(ScraperUrl.AsinRecheckIntervalMinutes),
                 nameof(ScraperUrl.LongUnavailableRecheckIntervalMinutes),
                 nameof(ScraperUrl.Category),
                 nameof(ScraperUrl.DropAlertPercent))] ScraperUrl scraperUrl)
@@ -307,6 +309,51 @@ namespace Affiliate.Controllers
 
         [HttpPost]
         [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SaveAsinRecheckInterval(
+            [FromBody] SaveAsinRecheckIntervalRequest request,
+            CancellationToken cancellationToken)
+        {
+            if (request.Minutes is < 0 or > 10080)
+                return BadRequest(new { success = false, message = "فاصل فحص ASIN يجب أن يكون بين 0 و 10080 دقيقة." });
+
+            var updated = await _context.ScraperUrls
+                .Where(s => s.Id == request.Id)
+                .ExecuteUpdateAsync(
+                    s => s.SetProperty(x => x.AsinRecheckIntervalMinutes, request.Minutes),
+                    cancellationToken);
+
+            if (updated == 0)
+                return BadRequest(new { success = false, message = "لم يتم العثور على الرابط." });
+
+            return Ok(new { success = true, minutes = request.Minutes });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> BulkUpdateAsinRecheckInterval(
+            [FromBody] BulkUpdateMinutesRequest request,
+            CancellationToken cancellationToken)
+        {
+            if (request.Ids is not { Length: > 0 })
+                return BadRequest(new { success = false, message = "لم يتم تحديد أي روابط." });
+
+            if (request.Minutes is < 0 or > 10080)
+                return BadRequest(new { success = false, message = "فاصل فحص ASIN يجب أن يكون بين 0 و 10080 دقيقة." });
+
+            var updated = await _context.ScraperUrls
+                .Where(s => request.Ids.Contains(s.Id))
+                .ExecuteUpdateAsync(
+                    s => s.SetProperty(x => x.AsinRecheckIntervalMinutes, request.Minutes),
+                    cancellationToken);
+
+            if (updated == 0)
+                return BadRequest(new { success = false, message = "لم يتم العثور على الروابط المحددة." });
+
+            return Ok(new { success = true, message = $"تم تعيين فاصل فحص ASIN ({request.Minutes} د) لـ {updated} رابط." });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
         public async Task<IActionResult> SaveLongUnavailableRecheckInterval(
             [FromBody] SaveLongUnavailableRecheckIntervalRequest request,
             CancellationToken cancellationToken)
@@ -324,6 +371,30 @@ namespace Affiliate.Controllers
                 return BadRequest(new { success = false, message = "لم يتم العثور على الرابط." });
 
             return Ok(new { success = true, minutes = request.Minutes });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> BulkUpdateLongUnavailableRecheckInterval(
+            [FromBody] BulkUpdateMinutesRequest request,
+            CancellationToken cancellationToken)
+        {
+            if (request.Ids is not { Length: > 0 })
+                return BadRequest(new { success = false, message = "لم يتم تحديد أي روابط." });
+
+            if (request.Minutes is < 1 or > 10080)
+                return BadRequest(new { success = false, message = "فاصل غير المتوفر يجب أن يكون بين 1 و 10080 دقيقة." });
+
+            var updated = await _context.ScraperUrls
+                .Where(s => request.Ids.Contains(s.Id))
+                .ExecuteUpdateAsync(
+                    s => s.SetProperty(x => x.LongUnavailableRecheckIntervalMinutes, request.Minutes),
+                    cancellationToken);
+
+            if (updated == 0)
+                return BadRequest(new { success = false, message = "لم يتم العثور على الروابط المحددة." });
+
+            return Ok(new { success = true, message = $"تم تعيين فاصل غير المتوفر ({request.Minutes} د) لـ {updated} رابط." });
         }
 
         [HttpPost]
@@ -403,9 +474,21 @@ namespace Affiliate.Controllers
         public decimal DropAlertPercent { get; set; }
     }
 
+    public class SaveAsinRecheckIntervalRequest
+    {
+        public int Id { get; set; }
+        public int Minutes { get; set; }
+    }
+
     public class SaveLongUnavailableRecheckIntervalRequest
     {
         public int Id { get; set; }
+        public int Minutes { get; set; }
+    }
+
+    public class BulkUpdateMinutesRequest
+    {
+        public int[] Ids { get; set; } = [];
         public int Minutes { get; set; }
     }
 }

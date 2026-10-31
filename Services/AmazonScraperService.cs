@@ -127,6 +127,10 @@ namespace Affiliate.Services
             var asins = await _db.Products
                 .Where(p => p.IsAvailable && p.IsBlocked != true && p.Asin != null && p.Asin != "")
                 .Where(p => p.ScraperUrl == null || p.ScraperUrl.IsAsinRecheckEnabled)
+                // Per-URL minimum gap: 0 = no throttle; otherwise LastCheckedAt + minutes must be past.
+                .Where(p => p.ScraperUrl == null
+                    || p.ScraperUrl.AsinRecheckIntervalMinutes <= 0
+                    || EF.Functions.DateDiffMinute(p.LastCheckedAt, now) >= p.ScraperUrl.AsinRecheckIntervalMinutes)
                 .Where(p => p.NotAvailableDate == null
                     || p.NotAvailableDate > longUnavailableSince
                     || EF.Functions.DateDiffMinute(p.LastCheckedAt, now) >=

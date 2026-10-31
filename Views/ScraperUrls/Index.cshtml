@@ -114,6 +114,18 @@
         <button type="button" class="btn btn-sm btn-outline-primary" id="bulkAssignCategory" disabled>
             <i class="bi bi-tag"></i> تعيين التصنيف
         </button>
+        <input type="number" class="form-control form-control-sm ltr" id="bulkAsinRecheckInterval"
+               min="0" max="10080" value="0" style="width:5rem" disabled
+               aria-label="فاصل فحص ASIN بالدقائق" title="فاصل فحص ASIN (دقيقة)" />
+        <button type="button" class="btn btn-sm btn-outline-primary" id="bulkApplyAsinRecheckInterval" disabled>
+            <i class="bi bi-clock-history"></i> فاصل فحص ASIN
+        </button>
+        <input type="number" class="form-control form-control-sm ltr" id="bulkLongUnavailableInterval"
+               min="1" max="10080" value="180" style="width:5rem" disabled
+               aria-label="فاصل غير المتوفر بالدقائق" title="فاصل غير المتوفر (دقيقة)" />
+        <button type="button" class="btn btn-sm btn-outline-primary" id="bulkApplyLongUnavailableInterval" disabled>
+            <i class="bi bi-hourglass-split"></i> فاصل غير المتوفر
+        </button>
         <button type="button" class="btn btn-sm btn-primary" id="saveDropAlertPercents" disabled>
             <i class="bi bi-save"></i> حفظ حد التنبيه
         </button>
@@ -135,6 +147,7 @@
                     <th>التصنيف</th>
                     <th>المنتجات</th>
                     <th>حد التنبيه %</th>
+                    <th>فاصل فحص ASIN</th>
                     <th>فاصل غير المتوفر</th>
                     <th>النطاق</th>
                     <th>الفاصل</th>
@@ -173,6 +186,19 @@
                                data-id="@item.Id" data-original="@item.DropAlertPercent"
                                value="@item.DropAlertPercent" min="1" max="100" step="0.1"
                                aria-label="حد التنبيه لـ @item.Name" />
+                    </td>
+                    <td style="width:11rem">
+                        <div class="d-flex gap-1 align-items-center">
+                            <input type="number" class="form-control form-control-sm ltr asin-recheck-interval-input"
+                                   data-id="@item.Id" data-original="@item.AsinRecheckIntervalMinutes"
+                                   value="@item.AsinRecheckIntervalMinutes" min="0" max="10080"
+                                   aria-label="فاصل فحص ASIN لـ @item.Name" style="width:4.5rem" />
+                            <span class="small text-muted">د</span>
+                            <button type="button" class="btn btn-sm btn-outline-primary save-asin-recheck-interval"
+                                    data-id="@item.Id" disabled title="حفظ">
+                                <i class="bi bi-save"></i>
+                            </button>
+                        </div>
                     </td>
                     <td style="width:11rem">
                         <div class="d-flex gap-1 align-items-center">
@@ -262,6 +288,10 @@ else if (!Model.Any())
     const disableRecheckBtn = document.getElementById('bulkDisableRecheck');
     const categorySelect = document.getElementById('bulkCategory');
     const categoryBtn = document.getElementById('bulkAssignCategory');
+    const bulkAsinIntervalInput = document.getElementById('bulkAsinRecheckInterval');
+    const bulkAsinIntervalBtn = document.getElementById('bulkApplyAsinRecheckInterval');
+    const bulkLongUnavailableInput = document.getElementById('bulkLongUnavailableInterval');
+    const bulkLongUnavailableBtn = document.getElementById('bulkApplyLongUnavailableInterval');
     const saveDropAlertBtn = document.getElementById('saveDropAlertPercents');
     const dropAlertInputs = () => [...document.querySelectorAll('.drop-alert-input')];
 
@@ -285,6 +315,10 @@ else if (!Model.Any())
         if (disableRecheckBtn) disableRecheckBtn.disabled = n === 0;
         if (categorySelect) categorySelect.disabled = n === 0;
         if (categoryBtn) categoryBtn.disabled = n === 0;
+        if (bulkAsinIntervalInput) bulkAsinIntervalInput.disabled = n === 0;
+        if (bulkAsinIntervalBtn) bulkAsinIntervalBtn.disabled = n === 0;
+        if (bulkLongUnavailableInput) bulkLongUnavailableInput.disabled = n === 0;
+        if (bulkLongUnavailableBtn) bulkLongUnavailableBtn.disabled = n === 0;
         if (saveDropAlertBtn) saveDropAlertBtn.disabled = changedDropAlerts().length === 0;
         if (selectAll) {
             const all = boxes();
@@ -333,6 +367,22 @@ else if (!Model.Any())
     categoryBtn?.addEventListener('click', () => bulk('@Url.Action("BulkAssignCategory")', {
         category: categorySelect.value === '' ? null : Number(categorySelect.value)
     }));
+    bulkAsinIntervalBtn?.addEventListener('click', () => {
+        const minutes = Number(bulkAsinIntervalInput?.value);
+        if (!Number.isFinite(minutes) || minutes < 0 || minutes > 10080) {
+            alert('فاصل فحص ASIN يجب أن يكون بين 0 و 10080 دقيقة.');
+            return;
+        }
+        bulk('@Url.Action("BulkUpdateAsinRecheckInterval")', { minutes });
+    });
+    bulkLongUnavailableBtn?.addEventListener('click', () => {
+        const minutes = Number(bulkLongUnavailableInput?.value);
+        if (!Number.isFinite(minutes) || minutes < 1 || minutes > 10080) {
+            alert('فاصل غير المتوفر يجب أن يكون بين 1 و 10080 دقيقة.');
+            return;
+        }
+        bulk('@Url.Action("BulkUpdateLongUnavailableRecheckInterval")', { minutes });
+    });
     saveDropAlertBtn?.addEventListener('click', async () => {
         const items = changedDropAlerts();
         if (!items.length || !token) return;
@@ -353,18 +403,47 @@ else if (!Model.Any())
         location.reload();
     });
 
-    const saveIntervalUrl = '@Url.Action("SaveLongUnavailableRecheckInterval")';
-    function syncIntervalSaveBtn(input) {
-        const btn = input.closest('td')?.querySelector('.save-long-unavailable-interval');
+    const saveAsinRecheckIntervalUrl = '@Url.Action("SaveAsinRecheckInterval")';
+    const saveLongUnavailableIntervalUrl = '@Url.Action("SaveLongUnavailableRecheckInterval")';
+    function syncIntervalSaveBtn(input, btnSelector) {
+        const btn = input.closest('td')?.querySelector(btnSelector);
         if (!btn) return;
         const minutes = Number(input.value);
         btn.disabled = !Number.isFinite(minutes) || minutes === Number(input.dataset.original);
     }
     document.getElementById('searchesTable')?.addEventListener('input', e => {
+        if (e.target.classList.contains('asin-recheck-interval-input'))
+            syncIntervalSaveBtn(e.target, '.save-asin-recheck-interval');
         if (e.target.classList.contains('long-unavailable-interval-input'))
-            syncIntervalSaveBtn(e.target);
+            syncIntervalSaveBtn(e.target, '.save-long-unavailable-interval');
     });
     document.getElementById('searchesTable')?.addEventListener('click', async e => {
+        const asinBtn = e.target.closest('.save-asin-recheck-interval');
+        if (asinBtn && token) {
+            const input = asinBtn.closest('td')?.querySelector('.asin-recheck-interval-input');
+            if (!input) return;
+            const minutes = Number(input.value);
+            if (!Number.isFinite(minutes) || minutes < 0 || minutes > 10080) {
+                alert('فاصل فحص ASIN يجب أن يكون بين 0 و 10080 دقيقة.');
+                return;
+            }
+            asinBtn.disabled = true;
+            const res = await fetch(saveAsinRecheckIntervalUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+                body: JSON.stringify({ id: Number(asinBtn.dataset.id), minutes })
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok || !data.success) {
+                alert(data.message || 'فشل التحديث');
+                syncIntervalSaveBtn(input, '.save-asin-recheck-interval');
+                return;
+            }
+            input.dataset.original = String(data.minutes ?? minutes);
+            syncIntervalSaveBtn(input, '.save-asin-recheck-interval');
+            return;
+        }
+
         const btn = e.target.closest('.save-long-unavailable-interval');
         if (!btn || !token) return;
         const input = btn.closest('td')?.querySelector('.long-unavailable-interval-input');
@@ -375,7 +454,7 @@ else if (!Model.Any())
             return;
         }
         btn.disabled = true;
-        const res = await fetch(saveIntervalUrl, {
+        const res = await fetch(saveLongUnavailableIntervalUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
             body: JSON.stringify({ id: Number(btn.dataset.id), minutes })
@@ -383,11 +462,11 @@ else if (!Model.Any())
         const data = await res.json().catch(() => ({}));
         if (!res.ok || !data.success) {
             alert(data.message || 'فشل التحديث');
-            syncIntervalSaveBtn(input);
+            syncIntervalSaveBtn(input, '.save-long-unavailable-interval');
             return;
         }
         input.dataset.original = String(data.minutes ?? minutes);
-        syncIntervalSaveBtn(input);
+        syncIntervalSaveBtn(input, '.save-long-unavailable-interval');
     });
     refresh();
 })();
