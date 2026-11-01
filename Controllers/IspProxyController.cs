@@ -114,7 +114,11 @@ namespace Affiliate.Controllers
                 Ports = ports,
                 TotalRequests = ports.Sum(p => p.TotalRequests),
                 TotalSuccess = ports.Sum(p => p.SuccessCount),
-                TotalFailed = ports.Sum(p => p.FailedCount)
+                TotalFailed = ports.Sum(p => p.FailedCount),
+                TotalGoogleSuccess = ports.Sum(p => p.GoogleSuccessCount),
+                TotalGoogleFailed = ports.Sum(p => p.GoogleFailedCount),
+                TotalAmazonSuccess = ports.Sum(p => p.AmazonSuccessCount),
+                TotalAmazonFailed = ports.Sum(p => p.AmazonFailedCount)
             });
         }
     }

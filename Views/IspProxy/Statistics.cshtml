@@ -12,6 +12,8 @@
             <span class="stat-pill"><i class="bi bi-check-circle"></i> @Model.TotalSuccess نجاح</span>
             <span class="stat-pill"><i class="bi bi-x-circle"></i> @Model.TotalFailed فشل</span>
             <span class="stat-pill"><i class="bi bi-percent"></i> @Model.OverallSuccessRate.ToString("0.0")% نجاح</span>
+            <span class="stat-pill"><i class="bi bi-amazon"></i> @Model.OverallAmazonSuccessRate.ToString("0.0")% Amazon</span>
+            <span class="stat-pill"><i class="bi bi-google"></i> @Model.OverallGoogleSuccessRate.ToString("0.0")% Google</span>
         </p>
     </div>
     <div class="d-flex flex-wrap gap-2">
@@ -45,7 +47,7 @@
 </form>
 
 <div class="row g-3 mb-4">
-    <div class="col-sm-6 col-lg-3">
+    <div class="col-sm-6 col-lg-2">
         <div class="card h-100">
             <div class="card-body">
                 <div class="text-muted small mb-1">إجمالي الطلبات</div>
@@ -53,7 +55,7 @@
             </div>
         </div>
     </div>
-    <div class="col-sm-6 col-lg-3">
+    <div class="col-sm-6 col-lg-2">
         <div class="card h-100">
             <div class="card-body">
                 <div class="text-muted small mb-1">ناجح (200)</div>
@@ -61,7 +63,7 @@
             </div>
         </div>
     </div>
-    <div class="col-sm-6 col-lg-3">
+    <div class="col-sm-6 col-lg-2">
         <div class="card h-100">
             <div class="card-body">
                 <div class="text-muted small mb-1">فاشل (≠ 200)</div>
@@ -69,11 +71,27 @@
             </div>
         </div>
     </div>
-    <div class="col-sm-6 col-lg-3">
+    <div class="col-sm-6 col-lg-2">
         <div class="card h-100">
             <div class="card-body">
                 <div class="text-muted small mb-1">نسبة النجاح</div>
                 <div class="fw-bold ltr">@Model.OverallSuccessRate.ToString("0.00")%</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-lg-2">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="text-muted small mb-1">نسبة نجاح Amazon</div>
+                <div class="fw-bold ltr">@Model.OverallAmazonSuccessRate.ToString("0.00")%</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-lg-2">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="text-muted small mb-1">نسبة نجاح Google</div>
+                <div class="fw-bold ltr">@Model.OverallGoogleSuccessRate.ToString("0.00")%</div>
             </div>
         </div>
     </div>
@@ -94,8 +112,10 @@
                     <th class="ltr sortable">فشل <i class="bi sort-icon"></i></th>
                     <th class="ltr sortable">Google نجاح <i class="bi sort-icon"></i></th>
                     <th class="ltr sortable">Google فشل <i class="bi sort-icon"></i></th>
+                    <th class="ltr sortable">% Google <i class="bi sort-icon"></i></th>
                     <th class="ltr sortable">Amazon نجاح <i class="bi sort-icon"></i></th>
                     <th class="ltr sortable">Amazon فشل <i class="bi sort-icon"></i></th>
+                    <th class="ltr sortable">% Amazon <i class="bi sort-icon"></i></th>
                     <th class="ltr sortable">نسبة النجاح <i class="bi sort-icon"></i></th>
                     <th></th>
                 </tr>
@@ -104,7 +124,7 @@
             @if (Model.Ports.Count == 0)
             {
                 <tr>
-                    <td colspan="10" class="text-center text-muted py-4">لا توجد سجلات مطابقة</td>
+                    <td colspan="12" class="text-center text-muted py-4">لا توجد سجلات مطابقة</td>
                 </tr>
             }
             else
@@ -113,6 +133,14 @@
                 {
                     var rateClass = row.SuccessRate >= 90 ? "text-success"
                         : row.SuccessRate >= 70 ? "text-warning"
+                        : "text-danger";
+                    var googleRateClass = row.GoogleTotal == 0 ? "text-muted"
+                        : row.GoogleSuccessRate >= 90 ? "text-success"
+                        : row.GoogleSuccessRate >= 70 ? "text-warning"
+                        : "text-danger";
+                    var amazonRateClass = row.AmazonTotal == 0 ? "text-muted"
+                        : row.AmazonSuccessRate >= 90 ? "text-success"
+                        : row.AmazonSuccessRate >= 70 ? "text-warning"
                         : "text-danger";
                     <tr>
                         <td class="fw-semibold ltr" data-sort="@row.Port">
@@ -130,8 +158,14 @@
                         <td class="ltr num text-danger">@row.FailedCount</td>
                         <td class="ltr num text-success">@row.GoogleSuccessCount</td>
                         <td class="ltr num text-danger">@row.GoogleFailedCount</td>
+                        <td class="ltr num fw-semibold @googleRateClass" data-sort="@row.GoogleSuccessRate.ToString(System.Globalization.CultureInfo.InvariantCulture)">
+                            @(row.GoogleTotal == 0 ? "—" : row.GoogleSuccessRate.ToString("0.00") + "%")
+                        </td>
                         <td class="ltr num text-success">@row.AmazonSuccessCount</td>
                         <td class="ltr num text-danger">@row.AmazonFailedCount</td>
+                        <td class="ltr num fw-semibold @amazonRateClass" data-sort="@row.AmazonSuccessRate.ToString(System.Globalization.CultureInfo.InvariantCulture)">
+                            @(row.AmazonTotal == 0 ? "—" : row.AmazonSuccessRate.ToString("0.00") + "%")
+                        </td>
                         <td class="ltr num fw-semibold @rateClass" data-sort="@row.SuccessRate.ToString(System.Globalization.CultureInfo.InvariantCulture)">@row.SuccessRate.ToString("0.00")%</td>
                         <td class="text-nowrap">
                             @if (row.Port.HasValue)

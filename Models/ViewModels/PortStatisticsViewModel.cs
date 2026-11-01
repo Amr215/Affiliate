@@ -28,8 +28,17 @@ namespace Affiliate.ViewModels
         public int AmazonSuccessCount { get; set; }
         public int AmazonFailedCount { get; set; }
 
+        public int GoogleTotal => GoogleSuccessCount + GoogleFailedCount;
+        public int AmazonTotal => AmazonSuccessCount + AmazonFailedCount;
+
         public double SuccessRate =>
             TotalRequests == 0 ? 0 : 100.0 * SuccessCount / TotalRequests;
+
+        public double GoogleSuccessRate =>
+            GoogleTotal == 0 ? 0 : 100.0 * GoogleSuccessCount / GoogleTotal;
+
+        public double AmazonSuccessRate =>
+            AmazonTotal == 0 ? 0 : 100.0 * AmazonSuccessCount / AmazonTotal;
     }
 
     public class PortStatisticsViewModel
@@ -41,7 +50,21 @@ namespace Affiliate.ViewModels
         public int TotalSuccess { get; set; }
         public int TotalFailed { get; set; }
 
+        public int TotalGoogleSuccess { get; set; }
+        public int TotalGoogleFailed { get; set; }
+        public int TotalAmazonSuccess { get; set; }
+        public int TotalAmazonFailed { get; set; }
+
         public double OverallSuccessRate =>
             TotalRequests == 0 ? 0 : 100.0 * TotalSuccess / TotalRequests;
+
+        public int TotalGoogleRequests => TotalGoogleSuccess + TotalGoogleFailed;
+        public int TotalAmazonRequests => TotalAmazonSuccess + TotalAmazonFailed;
+
+        public double OverallGoogleSuccessRate =>
+            TotalGoogleRequests == 0 ? 0 : 100.0 * TotalGoogleSuccess / TotalGoogleRequests;
+
+        public double OverallAmazonSuccessRate =>
+            TotalAmazonRequests == 0 ? 0 : 100.0 * TotalAmazonSuccess / TotalAmazonRequests;
     }
 }
