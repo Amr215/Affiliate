@@ -244,26 +244,24 @@ namespace Affiliate.Services
             //         cancellationToken: cancellationToken);
             // }
 
-            var sent = await SendMessageAsync(categoryChatId, text, replyMarkup, replyToMessageId: null, cancellationToken);
+            // One chat only: mega deals → lowest → category.
+            var targetChatId =
+                alert.DropPercent > MegaDealDropPercent && NullIfBlank(_options.MegaDealsChatId) is { } megaChatId
+                    ? megaChatId.Trim()
+                    : QualifiesForLowestPriceGroup(alert) && NullIfBlank(_options.LowestPriceChatId) is { } lowestChatId
+                        ? lowestChatId.Trim()
+                        : categoryChatId;
 
-            // Drops above 50% are mirrored to the cross-category mega deals group.
-            if (alert.DropPercent > MegaDealDropPercent && NullIfBlank(_options.MegaDealsChatId) is { } megaChatId)
-                sent |= await SendMessageAsync(megaChatId.Trim(), text, replyMarkup, replyToMessageId: null, cancellationToken);
-
-            // Unique lowest-ever goes only to the unique chat (not also the lowest-price chat).
-            if (alert.IsUniqueLowestEver && NullIfBlank(_options.UniqueLowestPriceChatId) is { } uniqueLowestChatId)
-                sent |= await SendMessageAsync(uniqueLowestChatId.Trim(), text, replyMarkup, replyToMessageId: null, cancellationToken);
-            else if (QualifiesForLowestPriceGroup(alert) && NullIfBlank(_options.LowestPriceChatId) is { } lowestChatId)
-                sent |= await SendMessageAsync(lowestChatId.Trim(), text, replyMarkup, replyToMessageId: null, cancellationToken);
+            var sent = await SendMessageAsync(targetChatId, text, replyMarkup, replyToMessageId: null, cancellationToken);
 
             if (sent)
                 _logger.LogInformation(
                     "Telegram drop alert sent for {Asin} ({Percent}% → {Category} chat {ChatId})",
-                    alert.Product.Asin, alert.DropPercent, alert.Category, categoryChatId);
+                    alert.Product.Asin, alert.DropPercent, alert.Category, targetChatId);
             else
                 _logger.LogWarning(
                     "Telegram drop alert failed for {Asin} ({Percent}% → {Category} chat {ChatId})",
-                    alert.Product.Asin, alert.DropPercent, alert.Category, categoryChatId);
+                    alert.Product.Asin, alert.DropPercent, alert.Category, targetChatId);
 
             return sent;
         }
@@ -271,7 +269,7 @@ namespace Affiliate.Services
         public async Task<bool> NotifyNoonDropAsync(NoonDropAlert alert, CancellationToken cancellationToken = default)
         {
             var product = alert.Product;
-            if (!_options.Enabled || NullIfBlank(_options.BotToken) is null || NullIfBlank(_options.NoonChatId) is not { } chatId)
+            if (!_options.Enabled || NullIfBlank(_options.BotToken) is null || NullIfBlank(_options.NoonChatId) is not { } noonChatId)
             {
                 _logger.LogInformation(
                     "Telegram disabled or not configured for Noon — Noon drop alert not sent: {Sku} {Percent}%",
@@ -285,22 +283,20 @@ namespace Affiliate.Services
             var text = BuildDropHtml(alert, header, product.Currency);
             var replyMarkup = BuildAlertReplyMarkupJson(product.Name, productUrl, null, alert.CurrentPrice, "🛒 فتح نون");
 
-            var sent = await SendMessageAsync(chatId.Trim(), text, replyMarkup, replyToMessageId: null, cancellationToken);
+            // One chat only: mega deals → lowest → Noon main.
+            var targetChatId =
+                alert.DropPercent > MegaDealDropPercent && NullIfBlank(_options.NoonMegaDealsChatId) is { } megaChatId
+                    ? megaChatId.Trim()
+                    : QualifiesForLowestPriceGroup(alert) && NullIfBlank(_options.NoonLowestPriceChatId) is { } lowestChatId
+                        ? lowestChatId.Trim()
+                        : noonChatId.Trim();
 
-            // Same criteria as Amazon: >50% → mega deals; lowest-ever or lowest for ≥N days → lowest-price group.
-            if (alert.DropPercent > MegaDealDropPercent && NullIfBlank(_options.NoonMegaDealsChatId) is { } megaChatId)
-                sent |= await SendMessageAsync(megaChatId.Trim(), text, replyMarkup, replyToMessageId: null, cancellationToken);
-
-            // Unique lowest-ever goes only to the unique chat (not also the lowest-price chat).
-            if (alert.IsUniqueLowestEver && NullIfBlank(_options.NoonUniqueLowestPriceChatId) is { } uniqueLowestChatId)
-                sent |= await SendMessageAsync(uniqueLowestChatId.Trim(), text, replyMarkup, replyToMessageId: null, cancellationToken);
-            else if (QualifiesForLowestPriceGroup(alert) && NullIfBlank(_options.NoonLowestPriceChatId) is { } lowestChatId)
-                sent |= await SendMessageAsync(lowestChatId.Trim(), text, replyMarkup, replyToMessageId: null, cancellationToken);
+            var sent = await SendMessageAsync(targetChatId, text, replyMarkup, replyToMessageId: null, cancellationToken);
 
             _logger.Log(
                 sent ? LogLevel.Information : LogLevel.Warning,
-                "Telegram Noon drop alert {Result} for {Sku} ({Percent}%)",
-                sent ? "sent" : "failed", product.Sku, alert.DropPercent);
+                "Telegram Noon drop alert {Result} for {Sku} ({Percent}% → chat {ChatId})",
+                sent ? "sent" : "failed", product.Sku, alert.DropPercent, targetChatId);
             return sent;
         }
 
@@ -967,7 +963,9 @@ namespace Affiliate.Services
             var sb = new StringBuilder();
 
             sb.AppendLine($"🔻 <b>انخفاض السعر {alert.DropPercent:0.#}%</b>");
-            if (alert.IsLowestEver)
+            if (alert.IsUniqueLowestEver)
+                sb.AppendLine("🏆 <b><u>أقل سعر غير مكرر على الإطلاق</u></b>");
+            else if (alert.IsLowestEver)
                 sb.AppendLine("🏆 <b><u>أقل سعر على الإطلاق</u></b>");
             else if (alert.LowestPriceDays >= LowestPriceGroupMinDays)
                 sb.AppendLine($"🔥 <b><u>أقل سعر منذ {alert.LowestPriceDays} يوم</u></b>");

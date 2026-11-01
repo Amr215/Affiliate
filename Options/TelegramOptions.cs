@@ -25,26 +25,20 @@ namespace Affiliate.Options
         /// <summary>Chat for drops on devices URLs.</summary>
         public string DevicesChatId { get; set; } = string.Empty;
 
-        /// <summary>Chat that also receives every drop above 50%, whatever the category.</summary>
+        /// <summary>Exclusive target for Amazon drops above 50% (skipped category/lowest when this chat is set).</summary>
         public string MegaDealsChatId { get; set; } = string.Empty;
 
-        /// <summary>Chat for Amazon lowest-price drops (≥30 days or lowest ever) that are not a unique lowest-ever.</summary>
+        /// <summary>Exclusive target for Amazon lowest-price drops when not a mega deal (≥30 days or lowest ever).</summary>
         public string LowestPriceChatId { get; set; } = string.Empty;
 
-        /// <summary>Chat for Amazon unique lowest-ever drops only (not also sent to <see cref="LowestPriceChatId"/>).</summary>
-        public string UniqueLowestPriceChatId { get; set; } = string.Empty;
-
-        /// <summary>Chat that receives every Noon price drop.</summary>
+        /// <summary>Default Noon drop chat when the alert is neither mega nor lowest-price.</summary>
         public string NoonChatId { get; set; } = string.Empty;
 
-        /// <summary>Chat that also receives every Noon drop above 50%.</summary>
+        /// <summary>Exclusive target for Noon drops above 50% (skipped Noon/lowest when this chat is set).</summary>
         public string NoonMegaDealsChatId { get; set; } = string.Empty;
 
-        /// <summary>Chat for Noon lowest-price drops (≥30 days or lowest ever) that are not a unique lowest-ever.</summary>
+        /// <summary>Exclusive target for Noon lowest-price drops when not a mega deal (≥30 days or lowest ever).</summary>
         public string NoonLowestPriceChatId { get; set; } = string.Empty;
-
-        /// <summary>Chat for Noon unique lowest-ever drops only (not also sent to <see cref="NoonLowestPriceChatId"/>).</summary>
-        public string NoonUniqueLowestPriceChatId { get; set; } = string.Empty;
 
         /// <summary>Group where posted Amazon links get «نشر عرض / نشر عرض ممتاز / نشر لقطة / نشر ببلاش» buttons.</summary>
         public string PublishChatId { get; set; } = string.Empty;
