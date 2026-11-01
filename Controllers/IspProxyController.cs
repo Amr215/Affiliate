@@ -121,5 +121,170 @@ namespace Affiliate.Controllers
                 TotalAmazonFailed = ports.Sum(p => p.AmazonFailedCount)
             });
         }
+
+        /// <summary>
+        /// Aggregates Amazon success rates by proxy IP /24 range.
+        /// Prefers <see cref="Models.OxylabsRequestLog.ProxyHost"/> from each log; older rows
+        /// without a host fall back to the configured proxy list via port (ambiguous ports skipped).
+        /// </summary>
+        public async Task<IActionResult> IpRanges(
+            [FromQuery] IpRangeStatisticsFilterViewModel filter,
+            CancellationToken cancellationToken)
+        {
+            if (filter.MinAmazonRequests < 0)
+                filter.MinAmazonRequests = 0;
+
+            var query = _context.OxylabsRequestLogs.AsNoTracking().AsQueryable();
+
+            if (filter.From.HasValue)
+                query = query.Where(l => l.RequestedAt >= filter.From.Value.Date);
+
+            if (filter.To.HasValue)
+                query = query.Where(l => l.RequestedAt < filter.To.Value.Date.AddDays(1));
+
+            // Same Amazon-vs-Google split as Statistics. Group by logged host+port so new rows
+            // keep an exact IP even when the same port exists on multiple proxies.
+            var hostPortStats = await query
+                .Where(l => l.Port != null || (l.ProxyHost != null && l.ProxyHost != ""))
+                .GroupBy(l => new { l.ProxyHost, l.Port })
+                .Select(g => new
+                {
+                    g.Key.ProxyHost,
+                    g.Key.Port,
+                    AmazonSuccessCount = g.Count(l => l.StatusCode == 200
+                        && (l.RequestBody == null
+                            || (!l.RequestBody.Contains(GoogleTranslateProxy.LogMarker)
+                                && !l.RequestBody.Contains(GoogleTranslateProxy.HostSuffix)))),
+                    AmazonFailedCount = g.Count(l => l.StatusCode != 200
+                        && (l.RequestBody == null
+                            || (!l.RequestBody.Contains(GoogleTranslateProxy.LogMarker)
+                                && !l.RequestBody.Contains(GoogleTranslateProxy.HostSuffix))))
+                })
+                .ToListAsync(cancellationToken);
+
+            var hostsByPort = _ispProxy.GetPortStatuses()
+                .Where(p => !string.IsNullOrWhiteSpace(p.Host))
+                .GroupBy(p => p.Port)
+                .ToDictionary(
+                    g => g.Key,
+                    g => g.Select(p => p.Host!).Distinct(StringComparer.OrdinalIgnoreCase).ToList());
+
+            var proxiesPerRange = hostsByPort.Values
+                .SelectMany(hosts => hosts)
+                .Select(ToCidr24)
+                .Where(r => r != null)
+                .GroupBy(r => r!, StringComparer.Ordinal)
+                .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
+
+            var rangeBuckets = new Dictionary<string, IpRangeStatisticsRow>(StringComparer.Ordinal);
+            var ambiguous = new IpRangeStatisticsRow
+            {
+                IpRange = null,
+                IsAmbiguous = true
+            };
+            var unmappedPorts = 0;
+            var portsPerRange = new Dictionary<string, HashSet<int>>(StringComparer.Ordinal);
+
+            foreach (var row in hostPortStats)
+            {
+                if (row.AmazonSuccessCount + row.AmazonFailedCount == 0)
+                    continue;
+
+                string? host = null;
+                if (!string.IsNullOrWhiteSpace(row.ProxyHost))
+                {
+                    host = row.ProxyHost;
+                }
+                else if (row.Port is int port
+                         && hostsByPort.TryGetValue(port, out var hosts)
+                         && hosts.Count == 1)
+                {
+                    host = hosts[0];
+                }
+                else
+                {
+                    if (row.Port is null
+                        || !hostsByPort.TryGetValue(row.Port.Value, out var mapped)
+                        || mapped.Count == 0)
+                        unmappedPorts++;
+
+                    ambiguous.PortCount++;
+                    ambiguous.AmazonSuccessCount += row.AmazonSuccessCount;
+                    ambiguous.AmazonFailedCount += row.AmazonFailedCount;
+                    continue;
+                }
+
+                var range = ToCidr24(host);
+                if (range is null)
+                {
+                    unmappedPorts++;
+                    ambiguous.PortCount++;
+                    ambiguous.AmazonSuccessCount += row.AmazonSuccessCount;
+                    ambiguous.AmazonFailedCount += row.AmazonFailedCount;
+                    continue;
+                }
+
+                if (!rangeBuckets.TryGetValue(range, out var bucket))
+                {
+                    bucket = new IpRangeStatisticsRow
+                    {
+                        IpRange = range,
+                        ProxyCount = proxiesPerRange.GetValueOrDefault(range)
+                    };
+                    rangeBuckets[range] = bucket;
+                    portsPerRange[range] = new HashSet<int>();
+                }
+
+                if (row.Port is int attributedPort)
+                    portsPerRange[range].Add(attributedPort);
+
+                bucket.AmazonSuccessCount += row.AmazonSuccessCount;
+                bucket.AmazonFailedCount += row.AmazonFailedCount;
+            }
+
+            foreach (var (range, ports) in portsPerRange)
+                rangeBuckets[range].PortCount = ports.Count;
+
+            var ranges = rangeBuckets.Values
+                .Where(r => r.AmazonTotal >= filter.MinAmazonRequests)
+                .OrderByDescending(r => r.AmazonSuccessRate)
+                .ThenByDescending(r => r.AmazonTotal)
+                .ThenBy(r => r.IpRange)
+                .ToList();
+
+            if (ambiguous.AmazonTotal > 0)
+                ranges.Add(ambiguous);
+
+            return View(new IpRangeStatisticsViewModel
+            {
+                Filter = filter,
+                Ranges = ranges,
+                TotalAmazonSuccess = rangeBuckets.Values.Sum(r => r.AmazonSuccessCount)
+                    + ambiguous.AmazonSuccessCount,
+                TotalAmazonFailed = rangeBuckets.Values.Sum(r => r.AmazonFailedCount)
+                    + ambiguous.AmazonFailedCount,
+                AmbiguousPortCount = ambiguous.PortCount,
+                UnmappedPortCount = unmappedPorts
+            });
+        }
+
+        /// <summary>First three IPv4 octets as a /24 CIDR label, or null if not a dotted IPv4.</summary>
+        private static string? ToCidr24(string? host)
+        {
+            if (string.IsNullOrWhiteSpace(host))
+                return null;
+
+            var parts = host.Split('.');
+            if (parts.Length != 4)
+                return null;
+
+            for (var i = 0; i < 4; i++)
+            {
+                if (!byte.TryParse(parts[i], out _))
+                    return null;
+            }
+
+            return $"{parts[0]}.{parts[1]}.{parts[2]}.0/24";
+        }
     }
 }

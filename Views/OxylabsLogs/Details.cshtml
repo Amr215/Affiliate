@@ -48,6 +48,9 @@
             <dt class="col-sm-3">الصفحة</dt>
             <dd class="col-sm-9 num">@Model.Page</dd>
 
+            <dt class="col-sm-3">IP البروكسي</dt>
+            <dd class="col-sm-9 ltr num">@(Model.ProxyHost ?? "—")</dd>
+
             <dt class="col-sm-3">البورت</dt>
             <dd class="col-sm-9 ltr num">@(Model.Port?.ToString() ?? "—")</dd>
 

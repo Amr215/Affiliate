@@ -20,6 +20,9 @@
         <a class="btn btn-outline-secondary" asp-action="Index">
             <i class="bi bi-hdd-network"></i> حالة المنافذ
         </a>
+        <a class="btn btn-outline-primary" asp-action="IpRanges" asp-route-From="@f.From?.ToString("yyyy-MM-dd")" asp-route-To="@f.To?.ToString("yyyy-MM-dd")">
+            <i class="bi bi-diagram-3"></i> أفضل نطاقات IP
+        </a>
         <a class="btn btn-outline-secondary" asp-action="Statistics" asp-route-From="@f.From?.ToString("yyyy-MM-dd")" asp-route-To="@f.To?.ToString("yyyy-MM-dd")">
             <i class="bi bi-arrow-clockwise"></i> تحديث
         </a>

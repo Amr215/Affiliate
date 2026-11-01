@@ -68,9 +68,11 @@ namespace Affiliate.Data
             modelBuilder.Entity<OxylabsRequestLog>(entity =>
             {
                 entity.Property(l => l.StatusPhrase).HasMaxLength(64);
+                entity.Property(l => l.ProxyHost).HasMaxLength(128);
                 entity.HasIndex(l => l.ScraperUrlId);
                 entity.HasIndex(l => l.RequestedAt);
                 entity.HasIndex(l => l.Port);
+                entity.HasIndex(l => l.ProxyHost);
                 entity.HasIndex(l => new { l.ScraperUrlId, l.RequestedAt });
 
                 entity.HasOne(l => l.ScraperUrl)

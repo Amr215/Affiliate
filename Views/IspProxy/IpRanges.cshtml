@@ -1,0 +1,221 @@
+@model IpRangeStatisticsViewModel
+@{
+    ViewData["Title"] = "أفضل نطاقات IP";
+    var f = Model.Filter;
+}
+
+<div class="page-toolbar">
+    <div>
+        <h1 class="h2">أفضل نطاقات IP — نجاح Amazon</h1>
+        <p class="text-muted mb-0">
+            <span class="stat-pill"><i class="bi bi-diagram-3"></i> @Model.Ranges.Count(r => !r.IsAmbiguous) نطاق</span>
+            <span class="stat-pill"><i class="bi bi-amazon"></i> @Model.TotalAmazonRequests طلب Amazon</span>
+            <span class="stat-pill"><i class="bi bi-percent"></i> @Model.OverallAmazonSuccessRate.ToString("0.0")% نجاح</span>
+            @if (Model.AmbiguousPortCount > 0)
+            {
+                <span class="stat-pill"><i class="bi bi-question-circle"></i> @Model.AmbiguousPortCount منفذ غير محدد</span>
+            }
+        </p>
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+        <a class="btn btn-outline-secondary" asp-action="Statistics" asp-route-From="@f.From?.ToString("yyyy-MM-dd")" asp-route-To="@f.To?.ToString("yyyy-MM-dd")">
+            <i class="bi bi-bar-chart"></i> إحصائيات المنافذ
+        </a>
+        <a class="btn btn-outline-secondary" asp-action="IpRanges" asp-route-From="@f.From?.ToString("yyyy-MM-dd")" asp-route-To="@f.To?.ToString("yyyy-MM-dd")" asp-route-MinAmazonRequests="@f.MinAmazonRequests">
+            <i class="bi bi-arrow-clockwise"></i> تحديث
+        </a>
+    </div>
+</div>
+
+<form method="get" asp-action="IpRanges" class="card filter-card mb-4">
+    <div class="card-header"><i class="bi bi-funnel"></i> عوامل التصفية</div>
+    <div class="card-body">
+        <div class="row g-3 align-items-end">
+            <div class="col-sm-6 col-lg-3">
+                <label class="form-label">من تاريخ</label>
+                <input name="From" value="@(f.From?.ToString("yyyy-MM-dd"))" class="form-control" type="date" />
+            </div>
+            <div class="col-sm-6 col-lg-3">
+                <label class="form-label">إلى تاريخ</label>
+                <input name="To" value="@(f.To?.ToString("yyyy-MM-dd"))" class="form-control" type="date" />
+            </div>
+            <div class="col-sm-6 col-lg-3">
+                <label class="form-label">حد أدنى لطلبات Amazon</label>
+                <input name="MinAmazonRequests" value="@f.MinAmazonRequests" class="form-control ltr" type="number" min="0" />
+            </div>
+            <div class="col-sm-12 col-lg-3 d-flex flex-wrap gap-2">
+                <button type="submit" class="btn btn-primary"><i class="bi bi-check2"></i> تطبيق</button>
+                <a asp-action="IpRanges" class="btn btn-outline-secondary">إعادة تعيين</a>
+            </div>
+        </div>
+        <p class="text-muted small mb-0 mt-3">
+            التجميع على نطاق /24 من <span class="ltr">ProxyHost</span> المحفوظ في السجل. السجلات القديمة بلا IP تُطابق عبر المنفذ من ملف القائمة؛ المنافذ المشتركة بين أكثر من IP تُستبعد من الترتيب.
+        </p>
+    </div>
+</form>
+
+<div class="row g-3 mb-4">
+    <div class="col-sm-6 col-lg-3">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="text-muted small mb-1">طلبات Amazon</div>
+                <div class="fw-bold ltr">@Model.TotalAmazonRequests</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="text-muted small mb-1">نجاح Amazon</div>
+                <div class="fw-bold text-success ltr">@Model.TotalAmazonSuccess</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="text-muted small mb-1">فشل Amazon</div>
+                <div class="fw-bold text-danger ltr">@Model.TotalAmazonFailed</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="text-muted small mb-1">نسبة نجاح Amazon</div>
+                <div class="fw-bold ltr">@Model.OverallAmazonSuccessRate.ToString("0.00")%</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-trophy"></i> النطاقات مرتبة حسب نجاح Amazon</span>
+        <span class="text-muted small">الأفضل أولاً · حد أدنى @f.MinAmazonRequests طلب</span>
+    </div>
+    <div class="table-responsive">
+        <table id="ip-range-stats" class="table table-hover mb-0 align-middle">
+            <thead>
+                <tr>
+                    <th class="ltr sortable"># <i class="bi sort-icon"></i></th>
+                    <th class="ltr sortable">نطاق IP <i class="bi sort-icon"></i></th>
+                    <th class="ltr sortable">بروكسيات <i class="bi sort-icon"></i></th>
+                    <th class="ltr sortable">منافذ في الإحصاء <i class="bi sort-icon"></i></th>
+                    <th class="ltr sortable">Amazon نجاح <i class="bi sort-icon"></i></th>
+                    <th class="ltr sortable">Amazon فشل <i class="bi sort-icon"></i></th>
+                    <th class="ltr sortable">إجمالي Amazon <i class="bi sort-icon"></i></th>
+                    <th class="ltr sortable">% Amazon <i class="bi sort-icon"></i></th>
+                </tr>
+            </thead>
+            <tbody>
+            @{
+                var ranked = Model.Ranges.Where(r => !r.IsAmbiguous).ToList();
+                var rank = 0;
+            }
+            @if (ranked.Count == 0 && !Model.Ranges.Any(r => r.IsAmbiguous))
+            {
+                <tr>
+                    <td colspan="8" class="text-center text-muted py-4">لا توجد نطاقات مطابقة</td>
+                </tr>
+            }
+            else
+            {
+                foreach (var row in ranked)
+                {
+                    rank++;
+                    var amazonRateClass = row.AmazonTotal == 0 ? "text-muted"
+                        : row.AmazonSuccessRate >= 90 ? "text-success"
+                        : row.AmazonSuccessRate >= 70 ? "text-warning"
+                        : "text-danger";
+                    <tr>
+                        <td class="ltr num" data-sort="@rank">@rank</td>
+                        <td class="fw-semibold ltr" data-sort="@row.IpRange">@row.IpRange</td>
+                        <td class="ltr num" data-sort="@row.ProxyCount">@row.ProxyCount</td>
+                        <td class="ltr num" data-sort="@row.PortCount">@row.PortCount</td>
+                        <td class="ltr num text-success" data-sort="@row.AmazonSuccessCount">@row.AmazonSuccessCount</td>
+                        <td class="ltr num text-danger" data-sort="@row.AmazonFailedCount">@row.AmazonFailedCount</td>
+                        <td class="ltr num" data-sort="@row.AmazonTotal">@row.AmazonTotal</td>
+                        <td class="ltr num fw-semibold @amazonRateClass" data-sort="@row.AmazonSuccessRate.ToString(System.Globalization.CultureInfo.InvariantCulture)">
+                            @row.AmazonSuccessRate.ToString("0.00")%
+                        </td>
+                    </tr>
+                }
+
+                var ambiguous = Model.Ranges.FirstOrDefault(r => r.IsAmbiguous);
+                if (ambiguous is not null)
+                {
+                    <tr class="table-secondary">
+                        <td class="ltr num text-muted" data-sort="999999">—</td>
+                        <td class="text-muted">
+                            غير محدد
+                            <span class="small">(منفذ مكرر أو غير موجود في القائمة)</span>
+                        </td>
+                        <td class="ltr num text-muted" data-sort="0">—</td>
+                        <td class="ltr num" data-sort="@ambiguous.PortCount">@ambiguous.PortCount</td>
+                        <td class="ltr num text-success" data-sort="@ambiguous.AmazonSuccessCount">@ambiguous.AmazonSuccessCount</td>
+                        <td class="ltr num text-danger" data-sort="@ambiguous.AmazonFailedCount">@ambiguous.AmazonFailedCount</td>
+                        <td class="ltr num" data-sort="@ambiguous.AmazonTotal">@ambiguous.AmazonTotal</td>
+                        <td class="ltr num text-muted" data-sort="@ambiguous.AmazonSuccessRate.ToString(System.Globalization.CultureInfo.InvariantCulture)">
+                            @(ambiguous.AmazonTotal == 0 ? "—" : ambiguous.AmazonSuccessRate.ToString("0.00") + "%")
+                        </td>
+                    </tr>
+                }
+            }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<style>
+    #ip-range-stats th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+    #ip-range-stats th.sortable .sort-icon { opacity: .35; }
+    #ip-range-stats th.sortable .sort-icon::before { content: "\F127"; }
+    #ip-range-stats th.sorted-asc .sort-icon,
+    #ip-range-stats th.sorted-desc .sort-icon { opacity: 1; }
+    #ip-range-stats th.sorted-asc .sort-icon::before { content: "\F148"; }
+    #ip-range-stats th.sorted-desc .sort-icon::before { content: "\F128"; }
+</style>
+
+@section Scripts {
+    <script>
+        (function () {
+            const table = document.getElementById('ip-range-stats');
+            const tbody = table.tBodies[0];
+            const headers = Array.from(table.tHead.rows[0].cells);
+
+            function value(row, index) {
+                const cell = row.cells[index];
+                const raw = cell.dataset.sort !== undefined ? cell.dataset.sort : cell.textContent;
+                const n = parseFloat(String(raw).trim());
+                return isNaN(n) ? null : n;
+            }
+
+            headers.forEach((th, index) => {
+                if (!th.classList.contains('sortable')) return;
+
+                th.addEventListener('click', () => {
+                    const rows = Array.from(tbody.rows).filter(r => r.cells.length === headers.length);
+                    if (rows.length < 2) return;
+
+                    const desc = !th.classList.contains('sorted-desc');
+                    headers.forEach(h => h.classList.remove('sorted-asc', 'sorted-desc'));
+                    th.classList.add(desc ? 'sorted-desc' : 'sorted-asc');
+
+                    // Keep the ambiguous summary row at the bottom.
+                    const rankedRows = rows.filter(r => !r.classList.contains('table-secondary'));
+                    const footerRows = rows.filter(r => r.classList.contains('table-secondary'));
+
+                    rankedRows.sort((a, b) => {
+                        const va = value(a, index), vb = value(b, index);
+                        if (va === null && vb === null) return 0;
+                        if (va === null) return 1;
+                        if (vb === null) return -1;
+                        return desc ? vb - va : va - vb;
+                    });
+                    rankedRows.concat(footerRows).forEach(r => tbody.appendChild(r));
+                });
+            });
+        })();
+    </script>
+}

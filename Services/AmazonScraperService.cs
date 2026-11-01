@@ -347,7 +347,6 @@ namespace Affiliate.Services
             var client = _ispProxy.CreateClient(endpoint);
             string? referer = null;
             var warmedHost = false;
-            int? proxyPort = endpoint.UseProxy ? endpoint.Port : null;
 
             try
             {
@@ -375,7 +374,7 @@ namespace Affiliate.Services
                             }
 
                             var (result, pageUrl) = await FetchSearchPageAsync(
-                                client, scraperUrl, page, referer, endpoint, proxyPort, ct);
+                                client, scraperUrl, page, referer, endpoint, ct);
 
                             _ispProxy.ReportSuccess(endpoint);
 
@@ -404,7 +403,7 @@ namespace Affiliate.Services
                             // A rejection is already logged once in FetchSearchPageAsync — do not write a second row.
                             if (!rejected)
                                 QueueLog(scraperUrl.Id, page, DateTime.UtcNow, 0, "TransportError",
-                                    $"{endpoint.Describe()} page={page}", Truncate(reason, 2000), proxyPort);
+                                    $"{endpoint.Describe()} page={page}", Truncate(reason, 2000), endpoint);
 
                             if (attempt >= MaxPageAttempts)
                             {
@@ -420,7 +419,6 @@ namespace Affiliate.Services
                             client.Dispose();
                             endpoint = _ispProxy.GetEndpoint();
                             client = _ispProxy.CreateClient(endpoint);
-                            proxyPort = endpoint.UseProxy ? endpoint.Port : null;
                             referer = null;
                             warmedHost = false;
 
@@ -486,7 +484,6 @@ namespace Affiliate.Services
             int page,
             string? referer,
             IspProxyEndpoint endpoint,
-            int? proxyPort,
             CancellationToken ct)
         {
             var pageUrl = BuildPageUrl(scraperUrl.Url, page);
@@ -502,7 +499,7 @@ namespace Affiliate.Services
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
                 var reason = DescribeTransport(ex);
-                QueueLog(scraperUrl.Id, page, requestedAt, 0, "TransportError", requestLog, reason, proxyPort);
+                QueueLog(scraperUrl.Id, page, requestedAt, 0, "TransportError", requestLog, reason, endpoint);
                 throw new AmazonFetchRejectedException(
                     $"Transport error on page {page}: {reason}", statusCode: 0, ex, isTransport: true);
             }
@@ -544,12 +541,12 @@ namespace Affiliate.Services
                     // Always persist Amazon's HTML (when present) so it can be inspected/parsed later.
                     // Reject reason stays in the exception / app logs only — never in ResponseBody.
                     QueueLog(scraperUrl.Id, page, requestedAt, logStatus, "Rejected", requestLog,
-                        string.IsNullOrEmpty(body) ? null : body, proxyPort);
+                        string.IsNullOrEmpty(body) ? null : body, endpoint);
                     throw new AmazonFetchRejectedException(rejectReason, logStatus);
                 }
 
                 QueueLog(scraperUrl.Id, page, requestedAt, httpStatus, response.ReasonPhrase, requestLog,
-                    null, proxyPort);
+                    null, endpoint);
                 return (parsed!, pageUrl);
             }
         }
@@ -759,7 +756,6 @@ namespace Affiliate.Services
             var client = _ispProxy.CreateClient(endpoint);
             string? referer = null;
             var warmedHost = false;
-            int? proxyPort = endpoint.UseProxy ? endpoint.Port : null;
             string? qid = null;
             string? xpid = null;
 
@@ -811,7 +807,7 @@ namespace Affiliate.Services
 
                             var result = await FetchAsinBatchSearchPageAsync(
                                 client, pageUrl, referer, asins.Count, batchIndex, page,
-                                endpoint, proxyPort, viaTranslate, ct);
+                                endpoint, viaTranslate, ct);
 
                             if (viaTranslate)
                             {
@@ -877,7 +873,6 @@ namespace Affiliate.Services
                             client.Dispose();
                             endpoint = NextEndpoint();
                             client = _ispProxy.CreateClient(endpoint);
-                            proxyPort = endpoint.UseProxy ? endpoint.Port : null;
                             referer = null;
                             warmedHost = false;
 
@@ -895,7 +890,7 @@ namespace Affiliate.Services
                             var reason = DescribeTransport(ex);
                             QueueLog(null, page, DateTime.UtcNow, 0, "TransportError",
                                 $"{endpoint.Describe()} batch={batchIndex} page={page} asins={asins.Count}",
-                                Truncate(reason, 2000), proxyPort);
+                                Truncate(reason, 2000), endpoint);
 
                             if (attempt >= maxAttempts)
                             {
@@ -911,7 +906,6 @@ namespace Affiliate.Services
                             client.Dispose();
                             endpoint = NextEndpoint();
                             client = _ispProxy.CreateClient(endpoint);
-                            proxyPort = endpoint.UseProxy ? endpoint.Port : null;
                             referer = null;
                             warmedHost = false;
 
@@ -1004,7 +998,6 @@ namespace Affiliate.Services
             int batchIndex,
             int page,
             IspProxyEndpoint endpoint,
-            int? proxyPort,
             bool viaTranslate,
             CancellationToken ct)
         {
@@ -1020,7 +1013,7 @@ namespace Affiliate.Services
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
                 var reason = DescribeTransport(ex);
-                QueueLog(null, page, requestedAt, 0, "TransportError", requestLog, reason, proxyPort);
+                QueueLog(null, page, requestedAt, 0, "TransportError", requestLog, reason, endpoint);
                 throw new AmazonFetchRejectedException(
                     $"Transport error on ASIN batch {batchIndex} page {page}: {reason}",
                     statusCode: 0, ex, isTransport: true);
@@ -1075,11 +1068,11 @@ namespace Affiliate.Services
                     // Always persist Amazon's HTML (when present) so it can be inspected/parsed later.
                     // Reject reason stays in the exception / app logs only — never in ResponseBody.
                     QueueLog(null, page, requestedAt, logStatus, "Rejected", requestLog,
-                        string.IsNullOrEmpty(body) ? null : body, proxyPort);
+                        string.IsNullOrEmpty(body) ? null : body, endpoint);
                     throw new AmazonFetchRejectedException(rejectReason, logStatus);
                 }
 
-                QueueLog(null, page, requestedAt, httpStatus, response.ReasonPhrase, requestLog, null, proxyPort);
+                QueueLog(null, page, requestedAt, httpStatus, response.ReasonPhrase, requestLog, null, endpoint);
                 return parsed!;
             }
         }
@@ -1144,13 +1137,14 @@ namespace Affiliate.Services
         /// Drained by <see cref="SaveChangesCoreAsync"/> under the DB lock.
         /// </summary>
         private void QueueLog(int? scraperUrlId, int page, DateTime requestedAt, int statusCode,
-            string? statusPhrase, string requestBody, string? responseBody, int? proxyPort = null)
+            string? statusPhrase, string requestBody, string? responseBody, IspProxyEndpoint? endpoint = null)
         {
             _pendingLogs.Enqueue(new OxylabsRequestLog
             {
                 ScraperUrlId = scraperUrlId,
                 Page = page,
-                Port = proxyPort,
+                Port = endpoint is { UseProxy: true } ? endpoint.Port : null,
+                ProxyHost = endpoint is { UseProxy: true } ? endpoint.Host : null,
                 RequestedAt = requestedAt,
                 StatusCode = statusCode,
                 StatusPhrase = Truncate(statusPhrase, 64),

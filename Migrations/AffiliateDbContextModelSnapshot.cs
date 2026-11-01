@@ -65,6 +65,10 @@ namespace Affiliate.Migrations
                     b.Property<int?>("Port")
                         .HasColumnType("int");
 
+                    b.Property<string>("ProxyHost")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
                     b.Property<string>("RequestBody")
                         .HasColumnType("nvarchar(max)");
 
@@ -87,6 +91,8 @@ namespace Affiliate.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("Port");
+
+                    b.HasIndex("ProxyHost");
 
                     b.HasIndex("RequestedAt");
 

@@ -20,6 +20,13 @@ namespace Affiliate.Models
         /// </summary>
         public int? Port { get; set; }
 
+        /// <summary>
+        /// ISP proxy host/IP used for the request.
+        /// Null for direct (no-proxy) fetches or older rows logged before this column existed.
+        /// </summary>
+        [StringLength(128)]
+        public string? ProxyHost { get; set; }
+
         /// <summary>UTC time the HTTP request was sent.</summary>
         public DateTime RequestedAt { get; set; }
 

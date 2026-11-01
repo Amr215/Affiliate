@@ -36,6 +36,12 @@ namespace Affiliate.Controllers
             if (filter.Port.HasValue)
                 query = query.Where(l => l.Port == filter.Port.Value);
 
+            if (!string.IsNullOrWhiteSpace(filter.ProxyHost))
+            {
+                var host = filter.ProxyHost.Trim();
+                query = query.Where(l => l.ProxyHost == host);
+            }
+
             if (filter.ErrorsOnly == true)
                 query = query.Where(l => l.StatusCode != 200);
 
@@ -62,6 +68,7 @@ namespace Affiliate.Controllers
                 StatusCode = l.StatusCode,
                 StatusPhrase = l.StatusPhrase,
                 Port = l.Port,
+                ProxyHost = l.ProxyHost,
                 HasResponseBody = l.ResponseBody != null && l.ResponseBody != "",
                 ViaGoogleTranslate = l.RequestBody != null
                                      && (l.RequestBody.Contains(GoogleTranslateProxy.LogMarker)

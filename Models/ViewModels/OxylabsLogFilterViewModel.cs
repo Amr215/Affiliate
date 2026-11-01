@@ -12,6 +12,10 @@ namespace Affiliate.ViewModels
         [Display(Name = "Port")]
         public int? Port { get; set; }
 
+        [Display(Name = "Proxy IP")]
+        [StringLength(128)]
+        public string? ProxyHost { get; set; }
+
         /// <summary>When true, only rows with StatusCode != 200.</summary>
         public bool? ErrorsOnly { get; set; }
 
@@ -60,6 +64,7 @@ namespace Affiliate.ViewModels
         public int StatusCode { get; set; }
         public string? StatusPhrase { get; set; }
         public int? Port { get; set; }
+        public string? ProxyHost { get; set; }
         public bool HasResponseBody { get; set; }
 
         /// <summary>
