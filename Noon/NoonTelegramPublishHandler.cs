@@ -204,9 +204,20 @@ namespace Affiliate.Noon
             var draft = drafts.Create(chatId, sku, caption, result.ScreenshotPng, correlationId);
             var previewId = await SendPreviewAsync(
                 chatId, caption, result.ScreenshotPng, draft.Token, replyToMessageId, ct);
-            if (previewId is > 0)
-                drafts.SetPreviewMessageId(draft, previewId.Value);
+            if (previewId is not > 0)
+            {
+                drafts.Remove(draft.Token);
+                audit.Log(correlationId, sku, NoonPublishAuditEvent.Failed,
+                    pageKind: "Dp", success: false, chatId: chatId, detail: "Telegram preview send failed");
+                await telegram.SendPlainTextAsync(
+                    chatId,
+                    "تعذر إرسال معاينة النشر — أعد اختيار القالب.",
+                    replyToMessageId,
+                    ct);
+                return;
+            }
 
+            drafts.SetPreviewMessageId(draft, previewId.Value);
             audit.Log(correlationId, sku, NoonPublishAuditEvent.PreviewSent,
                 pageKind: "Dp", success: true, chatId: chatId, draftToken: draft.Token);
         }
@@ -374,40 +385,76 @@ namespace Affiliate.Noon
         {
             var previewCaption = TelegramNotifier.ClampCaptionHtml(
                 captionHtml + "\n\n" + HttpUtility.HtmlEncode(TelegramNotifier.PublishEditHint));
+            var keyboard = BuildConfirmKeyboardJson(token);
             var png = ImageLogoOverlay.Apply(screenshotPng, cartScreenshot: false);
+            var (photoBytes, contentType, fileName) =
+                ImageLogoOverlay.CompactForTelegram(png, "noon-publish-preview.png");
 
             var botToken = options.Value.BotToken.Trim();
             var client = httpClientFactory.CreateClient(TelegramNotifier.HttpClientName);
-            var url = $"https://api.telegram.org/bot{botToken}/sendPhoto";
 
-            using var form = new MultipartFormDataContent();
-            form.Add(new StringContent(chatId), "chat_id");
-            var photoContent = new ByteArrayContent(png);
-            photoContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/png");
-            form.Add(photoContent, "photo", "noon-publish-preview.png");
-            form.Add(new StringContent(previewCaption), "caption");
-            form.Add(new StringContent("HTML"), "parse_mode");
-            form.Add(new StringContent(BuildConfirmKeyboardJson(token)), "reply_markup");
-            if (replyToMessageId is > 0)
-                form.Add(new StringContent(replyToMessageId.Value.ToString()), "reply_to_message_id");
+            using var sendCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            sendCts.CancelAfter(TimeSpan.FromSeconds(25));
 
-            using var response = await client.PostAsync(url, form, ct);
-            var body = await response.Content.ReadAsStringAsync(ct);
-            if (!response.IsSuccessStatusCode)
+            try
             {
-                logger.LogWarning("Noon publish preview failed: {Status} {Body}", (int)response.StatusCode, body);
+                var url = $"https://api.telegram.org/bot{botToken}/sendPhoto";
+                using var form = new MultipartFormDataContent();
+                form.Add(new StringContent(chatId), "chat_id");
+                var photoContent = new ByteArrayContent(photoBytes);
+                photoContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(contentType);
+                form.Add(photoContent, "photo", fileName);
+                form.Add(new StringContent(previewCaption), "caption");
+                form.Add(new StringContent("HTML"), "parse_mode");
+                form.Add(new StringContent(keyboard), "reply_markup");
+
+                using var response = await client.PostAsync(url, form, sendCts.Token);
+                var body = await response.Content.ReadAsStringAsync(sendCts.Token);
+                if (response.IsSuccessStatusCode)
+                {
+                    var photoId = TryReadMessageId(body);
+                    if (photoId is > 0)
+                        return photoId;
+                }
+                else
+                {
+                    logger.LogWarning("Noon publish preview failed: {Status} {Body}", (int)response.StatusCode, body);
+                }
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                logger.LogWarning("Noon publish preview photo timed out for chat {ChatId}", chatId);
+            }
+
+            // Same fallback as Amazon: confirm buttons must still arrive.
+            logger.LogWarning("Noon preview photo failed; falling back to text+buttons");
+            var msgUrl = $"https://api.telegram.org/bot{botToken}/sendMessage";
+            var payload = new Dictionary<string, object>
+            {
+                ["chat_id"] = chatId,
+                ["text"] = previewCaption,
+                ["parse_mode"] = "HTML",
+                ["reply_markup"] = JsonSerializer.Deserialize<JsonElement>(keyboard)
+            };
+            using var textResponse = await client.PostAsJsonAsync(msgUrl, payload, ct);
+            var textBody = await textResponse.Content.ReadAsStringAsync(ct);
+            if (!textResponse.IsSuccessStatusCode)
+            {
+                logger.LogWarning("Noon text preview failed: {Status} {Body}", (int)textResponse.StatusCode, textBody);
                 return null;
             }
 
+            return TryReadMessageId(textBody);
+        }
+
+        private static int? TryReadMessageId(string body)
+        {
             using var doc = JsonDocument.Parse(body);
             if (!doc.RootElement.TryGetProperty("ok", out var ok) || !ok.GetBoolean())
                 return null;
             if (doc.RootElement.TryGetProperty("result", out var result) &&
                 result.TryGetProperty("message_id", out var mid))
-            {
                 return mid.GetInt32();
-            }
-
             return null;
         }
 

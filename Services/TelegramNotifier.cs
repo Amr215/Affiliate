@@ -468,16 +468,27 @@ namespace Affiliate.Services
             CancellationToken cancellationToken = default)
         {
             var previewCaption = AppendPublishEditHint(captionHtml);
-            var (_, messageId) = await SendPhotoAsync(
+            var keyboard = BuildPublishConfirmKeyboardJson(token);
+
+            var (_, photoId) = await SendPhotoAsync(
                 chatId,
                 screenshotPng,
                 previewCaption,
-                BuildPublishConfirmKeyboardJson(token),
-                replyToMessageId,
+                keyboard,
+                replyToMessageId: null, // reply-to often breaks sendPhoto; preview does not need it
                 photoFileName: "publish-preview.png",
                 cartScreenshot: cartScreenshot,
                 cancellationToken: cancellationToken);
-            return messageId;
+            if (photoId is > 0)
+                return photoId;
+
+            // Slow/blocked photo upload must not block confirm buttons — draft still has the PNG.
+            _logger.LogWarning(
+                "Publish preview photo failed for chat {ChatId}; falling back to text+buttons",
+                chatId);
+            var (_, textId) = await SendMessageWithIdAsync(
+                chatId, previewCaption, keyboard, replyToMessageId: null, cancellationToken);
+            return textId is > 0 ? textId : null;
         }
 
         public async Task<bool> SendPublishCaptionAsync(
@@ -627,6 +638,18 @@ namespace Affiliate.Services
             int? replyToMessageId,
             CancellationToken cancellationToken)
         {
+            var (ok, _) = await SendMessageWithIdAsync(
+                chatId, text, replyMarkupJson, replyToMessageId, cancellationToken);
+            return ok;
+        }
+
+        private async Task<(bool Ok, int? MessageId)> SendMessageWithIdAsync(
+            string chatId,
+            string text,
+            string? replyMarkupJson,
+            int? replyToMessageId,
+            CancellationToken cancellationToken)
+        {
             try
             {
                 var client = _httpClientFactory.CreateClient(HttpClientName);
@@ -650,22 +673,27 @@ namespace Affiliate.Services
                     _logger.LogError(
                         "Telegram sendMessage failed (chat {ChatId}): {StatusCode} {Body}",
                         chatId, (int)response.StatusCode, body);
-                    return false;
+                    return (false, null);
                 }
 
                 var result = System.Text.Json.JsonSerializer.Deserialize<TelegramApiResponse>(body);
                 if (result is not { Ok: true })
                 {
                     _logger.LogError("Telegram sendMessage returned ok=false (chat {ChatId}): {Body}", chatId, body);
-                    return false;
+                    return (false, null);
                 }
 
-                return true;
+                return (true, result.Result?.MessageId);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                _logger.LogError("Telegram sendMessage timed out (chat {ChatId})", chatId);
+                return (false, null);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 _logger.LogError(ex, "Telegram sendMessage threw (chat {ChatId})", chatId);
-                return false;
+                return (false, null);
             }
         }
 
@@ -682,6 +710,11 @@ namespace Affiliate.Services
             try
             {
                 pngBytes = ImageLogoOverlay.Apply(pngBytes, cartScreenshot);
+                var (photoBytes, contentType, fileName) = ImageLogoOverlay.CompactForTelegram(pngBytes, photoFileName);
+
+                // Short cap so a stuck upload can fall back to text+buttons.
+                using var sendCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                sendCts.CancelAfter(TimeSpan.FromSeconds(25));
 
                 var client = _httpClientFactory.CreateClient(HttpClientName);
                 var url = $"https://api.telegram.org/bot{_options.BotToken.Trim()}/sendPhoto";
@@ -689,9 +722,9 @@ namespace Affiliate.Services
                 using var form = new MultipartFormDataContent();
                 form.Add(new StringContent(chatId), "chat_id");
 
-                var photoContent = new ByteArrayContent(pngBytes);
-                photoContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/png");
-                form.Add(photoContent, "photo", photoFileName);
+                var photoContent = new ByteArrayContent(photoBytes);
+                photoContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(contentType);
+                form.Add(photoContent, "photo", fileName);
 
                 if (!string.IsNullOrWhiteSpace(captionHtml))
                 {
@@ -705,8 +738,8 @@ namespace Affiliate.Services
                 if (replyToMessageId is > 0)
                     form.Add(new StringContent(replyToMessageId.Value.ToString()), "reply_to_message_id");
 
-                using var response = await client.PostAsync(url, form, cancellationToken);
-                var body = await response.Content.ReadAsStringAsync(cancellationToken);
+                using var response = await client.PostAsync(url, form, sendCts.Token);
+                var body = await response.Content.ReadAsStringAsync(sendCts.Token);
 
                 if (!response.IsSuccessStatusCode)
                 {
@@ -724,6 +757,12 @@ namespace Affiliate.Services
                 }
 
                 return (true, result.Result?.MessageId);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                // HttpClient/send timeout must not bubble — callers treat null as send failure.
+                _logger.LogError("Telegram sendPhoto timed out (chat {ChatId})", chatId);
+                return (false, null);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {

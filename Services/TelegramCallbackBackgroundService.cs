@@ -242,9 +242,21 @@ namespace Affiliate.Services
             var previewId = await telegram.SendPublishPreviewAsync(
                 chatId, caption, result.ScreenshotPng, draft.Token,
                 result.UsedCartScreenshot, callback.Message?.MessageId, ct);
-            if (previewId is > 0)
-                drafts.SetPreviewMessageId(draft, previewId.Value);
+            if (previewId is not > 0)
+            {
+                drafts.Remove(draft.Token);
+                audit.Log(correlationId, asin, PublishAuditEvent.Failed,
+                    pageKind: result.UsedCartScreenshot ? "Cart" : "Dp",
+                    success: false, chatId: chatId, detail: "Telegram preview send failed");
+                await telegram.SendPlainTextAsync(
+                    chatId,
+                    "تعذر إرسال معاينة النشر — أعد اختيار القالب.",
+                    callback.Message?.MessageId,
+                    ct);
+                return;
+            }
 
+            drafts.SetPreviewMessageId(draft, previewId.Value);
             audit.Log(correlationId, asin, PublishAuditEvent.PreviewSent,
                 pageKind: result.UsedCartScreenshot ? "Cart" : "Dp",
                 success: true, chatId: chatId, draftToken: draft.Token);
@@ -396,7 +408,7 @@ namespace Affiliate.Services
                 return;
             }
 
-            await telegram.SendPreparePublishAsync(
+            var sent = await telegram.SendPreparePublishAsync(
                 chatId,
                 result.ProductName ?? asin,
                 result.ProductUrl ?? PrepareForPublishService.BuildProductUrl(asin),
@@ -405,6 +417,19 @@ namespace Affiliate.Services
                 callback.Message?.MessageId,
                 result.UsedCartScreenshot,
                 ct);
+
+            if (!sent)
+            {
+                audit.Log(correlationId, asin, PublishAuditEvent.Failed,
+                    pageKind: result.UsedCartScreenshot ? "Cart" : "Dp",
+                    success: false, chatId: chatId, detail: "Telegram prepare preview send failed");
+                await telegram.SendPlainTextAsync(
+                    chatId,
+                    "تعذر إرسال المعاينة — أعد المحاولة.",
+                    callback.Message?.MessageId,
+                    ct);
+                return;
+            }
 
             audit.Log(correlationId, asin, PublishAuditEvent.PreviewSent,
                 pageKind: result.UsedCartScreenshot ? "Cart" : "Dp",
@@ -500,7 +525,7 @@ namespace Affiliate.Services
         private async Task<IReadOnlyList<TelegramUpdate>> GetUpdatesAsync(string botToken, CancellationToken ct)
         {
             var client = _httpClientFactory.CreateClient(TelegramNotifier.HttpClientName);
-            // Long poll — allow up to ~35s (client timeout is 30s on TelegramBot; raise via query 25).
+            // Long poll — allow up to ~35s (client timeout is 60s on TelegramBot).
             var url =
                 $"https://api.telegram.org/bot{botToken}/getUpdates?timeout=25&offset={_offset}" +
                 "&allowed_updates=%5B%22callback_query%22%2C%22message%22%5D";

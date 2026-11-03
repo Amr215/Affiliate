@@ -41,6 +41,58 @@ namespace Affiliate.Services
             return encoded?.ToArray() ?? pngBytes;
         }
 
+        /// <summary>
+        /// Always JPEG + downscale so Telegram photo upload stays small/fast on slow links.
+        /// </summary>
+        public static (byte[] Bytes, string ContentType, string FileName) CompactForTelegram(
+            byte[] imageBytes,
+            string preferredFileName)
+        {
+            const int maxWidth = 960;
+            const int maxBytes = 400_000;
+            var name = Path.ChangeExtension(preferredFileName, ".jpg") ?? "publish.jpg";
+
+            if (imageBytes.Length == 0)
+                return (imageBytes, "image/jpeg", name);
+
+            using var bitmap = SKBitmap.Decode(imageBytes);
+            if (bitmap is null)
+                return (imageBytes, "image/png", preferredFileName);
+
+            SKBitmap work = bitmap;
+            SKBitmap? resized = null;
+            try
+            {
+                if (bitmap.Width > maxWidth)
+                {
+                    var h = Math.Max(1, (int)(bitmap.Height * (maxWidth / (float)bitmap.Width)));
+                    resized = bitmap.Resize(new SKImageInfo(maxWidth, h), SKFilterQuality.Medium);
+                    if (resized is not null)
+                        work = resized;
+                }
+
+                byte[]? best = null;
+                for (var quality = 70; quality >= 40; quality -= 10)
+                {
+                    using var jpeg = work.Encode(SKEncodedImageFormat.Jpeg, quality);
+                    var bytes = jpeg?.ToArray();
+                    if (bytes is null || bytes.Length == 0)
+                        continue;
+                    best = bytes;
+                    if (bytes.Length <= maxBytes)
+                        break;
+                }
+
+                return best is null
+                    ? (imageBytes, "image/png", preferredFileName)
+                    : (best, "image/jpeg", name);
+            }
+            finally
+            {
+                resized?.Dispose();
+            }
+        }
+
         private static SKBitmap? LoadLogo()
         {
             var path = Path.Combine(AppContext.BaseDirectory, "Assets", "sinbad-logo.png");
