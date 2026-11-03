@@ -209,6 +209,10 @@ namespace Affiliate.Migrations
                     b.Property<DateTime>("LastCheckedAt")
                         .HasColumnType("datetime2");
 
+                    b.Property<decimal?>("LastComparePrice")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
                     b.Property<decimal?>("LastDropAlertPercent")
                         .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
@@ -538,6 +542,10 @@ namespace Affiliate.Migrations
 
                     b.Property<DateTime>("LastCheckedAt")
                         .HasColumnType("datetime2");
+
+                    b.Property<decimal?>("LastComparePrice")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
 
                     b.Property<decimal?>("LastDropAlertPercent")
                         .HasPrecision(18, 2)

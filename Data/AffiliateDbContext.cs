@@ -47,6 +47,7 @@ namespace Affiliate.Data
                 entity.Property(p => p.DropPercent).HasPrecision(18, 2);
                 entity.Property(p => p.DropBaselinePrice).HasPrecision(18, 2);
                 entity.Property(p => p.LastDropAlertPercent).HasPrecision(18, 2);
+                entity.Property(p => p.LastComparePrice).HasPrecision(18, 2);
 
                 // ASIN is the natural product key and the scraper's hot lookup path.
                 entity.Property(p => p.Asin).HasMaxLength(16);
@@ -115,6 +116,7 @@ namespace Affiliate.Data
                 entity.Property(p => p.DropPercent).HasPrecision(18, 2);
                 entity.Property(p => p.DropBaselinePrice).HasPrecision(18, 2);
                 entity.Property(p => p.LastDropAlertPercent).HasPrecision(18, 2);
+                entity.Property(p => p.LastComparePrice).HasPrecision(18, 2);
 
                 entity.HasOne(p => p.NoonBrandUrl)
                     .WithMany(b => b.Products)

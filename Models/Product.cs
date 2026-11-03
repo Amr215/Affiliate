@@ -26,6 +26,12 @@ namespace Affiliate.Models
         /// </summary>
         public decimal? LastDropAlertPercent { get; set; }
 
+        /// <summary>
+        /// The previous price when <see cref="CurrentPrice"/> last changed.
+        /// Used to re-alert on restock when the sale price is unchanged.
+        /// </summary>
+        public decimal? LastComparePrice { get; set; }
+
         public bool IsAvailable { get; set; } = true;
 
         /// <summary>

@@ -142,6 +142,9 @@ namespace Affiliate.Services
 
         public decimal? CurrentPrice { get; init; }
 
+        /// <summary>True when the product returned from unavailable at a still-discounted price.</summary>
+        public bool IsBackInStock { get; init; }
+
         /// <summary>
         /// Price history for the alert (oldest → newest). When truncated, only first 5 + last 5
         /// are included and <see cref="HistoryTruncated"/> is true.
@@ -1002,6 +1005,8 @@ namespace Affiliate.Services
             var sb = new StringBuilder();
 
             sb.AppendLine($"🔻 <b>انخفاض السعر {alert.DropPercent:0.#}%</b>");
+            if (alert.IsBackInStock)
+                sb.AppendLine("✅ <b><u>أصبح متاحًا مرة أخرى</u></b>");
             if (alert.IsUniqueLowestEver)
                 sb.AppendLine("🏆 <b><u>أقل سعر غير مكرر على الإطلاق</u></b>");
             else if (alert.IsLowestEver)

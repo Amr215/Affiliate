@@ -31,6 +31,12 @@ namespace Affiliate.Noon.Models
 
         public decimal? LastDropAlertPercent { get; set; }
 
+        /// <summary>
+        /// The previous price when <see cref="CurrentPrice"/> last changed.
+        /// Used to re-alert on restock when the sale price is unchanged.
+        /// </summary>
+        public decimal? LastComparePrice { get; set; }
+
         public bool IsAvailable { get; set; } = true;
 
         /// <summary>When true, scrapes never update this product or alert on it.</summary>
