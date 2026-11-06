@@ -28,8 +28,17 @@ namespace Affiliate.Options
         /// <summary>Exclusive target for Amazon drops above 50% (skipped category/lowest when this chat is set).</summary>
         public string MegaDealsChatId { get; set; } = string.Empty;
 
-        /// <summary>Exclusive target for Amazon lowest-price drops when not a mega deal (≥30 days or lowest ever).</summary>
+        /// <summary>
+        /// Exclusive target for Amazon Devices lowest-price drops when not a mega deal
+        /// (≥30 days or lowest ever). Food/fashion use <see cref="FoodFashionLowestPriceChatId"/>.
+        /// </summary>
         public string LowestPriceChatId { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Exclusive target for Amazon FoodDrinksAndCleaning and FashionAndWatches lowest-price
+        /// drops when not a mega deal (≥30 days or lowest ever).
+        /// </summary>
+        public string FoodFashionLowestPriceChatId { get; set; } = string.Empty;
 
         /// <summary>Default Noon drop chat when the alert is neither mega nor lowest-price.</summary>
         public string NoonChatId { get; set; } = string.Empty;

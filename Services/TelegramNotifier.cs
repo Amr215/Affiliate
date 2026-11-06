@@ -142,9 +142,6 @@ namespace Affiliate.Services
 
         public decimal? CurrentPrice { get; init; }
 
-        /// <summary>True when the product returned from unavailable at a still-discounted price.</summary>
-        public bool IsBackInStock { get; init; }
-
         /// <summary>
         /// Price history for the alert (oldest → newest). When truncated, only first 5 + last 5
         /// are included and <see cref="HistoryTruncated"/> is true.
@@ -247,12 +244,12 @@ namespace Affiliate.Services
             //         cancellationToken: cancellationToken);
             // }
 
-            // One chat only: mega deals → lowest → category.
+            // One chat only: mega deals → category-specific lowest → category.
             var targetChatId =
                 alert.DropPercent > MegaDealDropPercent && NullIfBlank(_options.MegaDealsChatId) is { } megaChatId
                     ? megaChatId.Trim()
-                    : QualifiesForLowestPriceGroup(alert) && NullIfBlank(_options.LowestPriceChatId) is { } lowestChatId
-                        ? lowestChatId.Trim()
+                    : QualifiesForLowestPriceGroup(alert) && ResolveLowestPriceChatId(alert.Category) is { } lowestChatId
+                        ? lowestChatId
                         : categoryChatId;
 
             var sent = await SendMessageAsync(targetChatId, text, replyMarkup, replyToMessageId: null, cancellationToken);
@@ -631,6 +628,18 @@ namespace Affiliate.Services
             _ => null
         };
 
+        /// <summary>
+        /// Lowest-price Amazon group by category: Devices → <see cref="TelegramOptions.LowestPriceChatId"/>;
+        /// food/fashion → <see cref="TelegramOptions.FoodFashionLowestPriceChatId"/>.
+        /// </summary>
+        private string? ResolveLowestPriceChatId(ScraperCategory? category) => category switch
+        {
+            ScraperCategory.Devices => NullIfBlank(_options.LowestPriceChatId)?.Trim(),
+            ScraperCategory.FoodDrinksAndCleaning or ScraperCategory.FashionAndWatches =>
+                NullIfBlank(_options.FoodFashionLowestPriceChatId)?.Trim(),
+            _ => null
+        };
+
         private static string? NullIfBlank(string? value) =>
             string.IsNullOrWhiteSpace(value) ? null : value;
 
@@ -1005,8 +1014,6 @@ namespace Affiliate.Services
             var sb = new StringBuilder();
 
             sb.AppendLine($"🔻 <b>انخفاض السعر {alert.DropPercent:0.#}%</b>");
-            if (alert.IsBackInStock)
-                sb.AppendLine("✅ <b><u>أصبح متاحًا مرة أخرى</u></b>");
             if (alert.IsUniqueLowestEver)
                 sb.AppendLine("🏆 <b><u>أقل سعر غير مكرر على الإطلاق</u></b>");
             else if (alert.IsLowestEver)

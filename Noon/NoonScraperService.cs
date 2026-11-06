@@ -205,7 +205,6 @@ namespace Affiliate.Noon
                     }
 
                     var previousPrice = product!.CurrentPrice;
-                    var wasUnavailable = !isNew && product.NotAvailableDate != null;
                     ApplyHit(product, hit, brand.Id, now);
 
                     if (isNew || previousPrice != product.CurrentPrice)
@@ -216,7 +215,7 @@ namespace Affiliate.Noon
                             CheckedAt = now
                         });
 
-                    TrackPrice(product, previousPrice, isNew, wasUnavailable, alerts, brandRow.DropAlertPercent);
+                    TrackPrice(product, previousPrice, isNew, alerts, brandRow.DropAlertPercent);
                 }
 
                 if (error is null)
@@ -287,12 +286,11 @@ namespace Affiliate.Noon
             product.NoonBrandUrlId = brandId;
         }
 
-        /// <summary>Same tracking as Amazon products: baseline drop %, lowest/highest, and a drop alert vs the previous price.</summary>
+        /// <summary>Baseline drop %, lowest/highest, and a drop alert vs the previous price only.</summary>
         private static void TrackPrice(
             NoonProduct product,
             decimal? previousPrice,
             bool isNew,
-            bool wasUnavailable,
             List<NoonDropAlert> alerts,
             decimal thresholdPercent)
         {
@@ -310,32 +308,14 @@ namespace Affiliate.Noon
             if (isNew)
                 return;
 
-            if (previousPrice is > 0 && previousPrice != price)
-                product.LastComparePrice = previousPrice;
-
-            var comparePrice = previousPrice;
-            var backInStock = false;
-            if (wasUnavailable &&
-                product.LastComparePrice is > 0 &&
-                (previousPrice is not > 0 || price >= previousPrice))
-            {
-                comparePrice = product.LastComparePrice;
-                backInStock = true;
-            }
-            else if (wasUnavailable)
-            {
-                backInStock = true;
-            }
-
-            if (AlertDropPercent(comparePrice, price, thresholdPercent) is { } drop)
+            if (AlertDropPercent(previousPrice, price, thresholdPercent) is { } drop)
                 alerts.Add(new NoonDropAlert
                 {
                     Product = product,
                     DropPercent = drop,
                     AlertThresholdPercent = thresholdPercent,
-                    BaselinePrice = comparePrice,
-                    CurrentPrice = price,
-                    IsBackInStock = backInStock
+                    BaselinePrice = previousPrice,
+                    CurrentPrice = price
                 });
         }
 

@@ -1278,7 +1278,6 @@ namespace Affiliate.Services
                         continue;
 
                     var previousPrice = product?.CurrentPrice;
-                    var wasUnavailable = !isNew && product?.NotAvailableDate != null;
                     var priceUnchanged = !isNew && previousPrice == org.Price;
 
                     if (isNew)
@@ -1299,7 +1298,7 @@ namespace Affiliate.Services
                     var threshold = product!.ScraperUrlId is int urlId && thresholds.TryGetValue(urlId, out var pct)
                         ? pct
                         : PriceDropAlertThresholdPercent;
-                    ApplyPriceTracking(product, org.Price, previousPrice, isNew, wasUnavailable, alerts, threshold);
+                    ApplyPriceTracking(product, org.Price, previousPrice, isNew, alerts, threshold);
                     saved++;
                 }
 
@@ -1401,7 +1400,6 @@ namespace Affiliate.Services
             decimal? newPrice,
             decimal? previousPrice,
             bool isNew,
-            bool wasUnavailable,
             List<ProductDropAlert> alerts,
             decimal thresholdPercent)
         {
@@ -1420,29 +1418,11 @@ namespace Affiliate.Services
             if (isNew)
                 return;
 
-            // Remember what the last stored price was compared against, for restock alerts.
-            if (previousPrice is > 0 && previousPrice != newPrice)
-                product.LastComparePrice = previousPrice;
-
-            // Restock at the same (or higher) sale price: compare vs LastComparePrice, not vs itself.
-            var comparePrice = previousPrice;
-            var backInStock = false;
-            if (wasUnavailable &&
-                product.LastComparePrice is > 0 &&
-                (previousPrice is not > 0 || newPrice >= previousPrice))
-            {
-                comparePrice = product.LastComparePrice;
-                backInStock = true;
-            }
-            else if (wasUnavailable)
-            {
-                backInStock = true;
-            }
-
-            if (comparePrice is not > 0)
+            // Always compare against the previous stored price (including after a restock).
+            if (previousPrice is not > 0)
                 return;
 
-            if (!TryPercentOff(comparePrice.Value, newPrice.Value, out var dropFromLast))
+            if (!TryPercentOff(previousPrice.Value, newPrice.Value, out var dropFromLast))
                 return;
 
             var drop = RoundPct(dropFromLast);
@@ -1454,9 +1434,8 @@ namespace Affiliate.Services
                 Product = product,
                 DropPercent = drop,
                 AlertThresholdPercent = thresholdPercent,
-                BaselinePrice = comparePrice,
-                CurrentPrice = newPrice,
-                IsBackInStock = backInStock
+                BaselinePrice = previousPrice,
+                CurrentPrice = newPrice
             });
         }
 
