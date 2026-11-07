@@ -9,12 +9,12 @@ namespace Affiliate.Services
     public interface IPrepareForPublishService
     {
         /// <summary>
-        /// Opens Amazon.eg (direct host first), ensures Arabic UI, and returns a publish screenshot.
+        /// Opens Amazon.eg via ISP SOCKS5 proxies only (never the host IP), ensures Arabic UI,
+        /// and returns a publish screenshot.
         /// Products with an automatic checkout discount or Amazon promo-code coupon use a mobile
         /// cart screenshot with an injected discount row (Amazon hides that until login).
         /// Otherwise: highlighted DP when prices match; cart when they do not.
-        /// If the DP price cannot be read, that attempt fails and the next route (proxy) is tried.
-        /// On direct-host timeout/captcha/block/null price, retries via ISP SOCKS5 proxies.
+        /// If the DP price cannot be read, that attempt fails and the next proxy is tried.
         /// </summary>
         Task<PrepareForPublishResult> PrepareAsync(
             string asin,
@@ -29,7 +29,7 @@ namespace Affiliate.Services
         public string? Error { get; init; }
         /// <summary>Raw exception / Playwright detail for ops (sent to the publish group).</summary>
         public string? Detail { get; init; }
-        /// <summary><c>direct</c> or proxy describe string used for the successful/final attempt.</summary>
+        /// <summary>Proxy describe string used for the successful/final attempt.</summary>
         public string? Route { get; init; }
         public string? ProductName { get; init; }
         public string? ProductUrl { get; init; }
@@ -156,6 +156,9 @@ namespace Affiliate.Services
                 Environment.SetEnvironmentVariable("PLAYWRIGHT_BROWSERS_PATH", local);
         }
 
+        /// <summary>
+        /// Amazon publish always goes through ISP proxies — never the VPS/host IP.
+        /// </summary>
         private async Task<PrepareForPublishResult> CaptureWithFallbackAsync(
             string asin,
             decimal? alertPrice,
@@ -166,27 +169,12 @@ namespace Affiliate.Services
             var attemptLogs = new List<string>();
             PrepareForPublishResult? lastFailure = null;
 
-            var direct = await TryCaptureOnceAsync(
-                asin, alertPrice, productUrl, proxy: null, correlationId, cancellationToken);
-            if (direct.Success)
-                return WithRoute(direct, "direct", correlationId);
-
-            lastFailure = WithRoute(direct, "direct", correlationId);
-            attemptLogs.Add(FormatAttemptLog("direct", direct));
-
-            if (!IsProxyFallbackCandidate(direct))
-                return lastFailure;
-
-            _logger.LogWarning(
-                "Prepare-for-publish {Asin} failed on VPS/direct host ({Error}); falling back to ISP proxies",
-                asin, direct.Error);
-
             var proxyProbe = _ispProxy.GetEndpoint();
             if (!proxyProbe.UseProxy)
             {
-                return lastFailure ?? Fail(
-                    "فشل تجهيز المنتج للنشر.",
-                    "ISP proxies disabled or empty; no fallback route.",
+                return Fail(
+                    "بروكسيات ISP غير مفعّلة — أمازون يُجهَّز عبر البروكسي فقط.",
+                    "ISP proxies disabled or empty; host IP is not allowed for publish.",
                     correlationId: correlationId);
             }
 
@@ -235,7 +223,12 @@ namespace Affiliate.Services
 
             var detail = string.Join("\n", attemptLogs);
             if (lastFailure is null)
-                return Fail("فشل تجهيز المنتج للنشر.", detail, correlationId: correlationId);
+            {
+                return Fail(
+                    "كل البروكسيات محظورة أو مستخدمة — أعد المحاولة.",
+                    detail.Length > 0 ? detail : "No unused proxies left; host IP is not allowed.",
+                    correlationId: correlationId);
+            }
 
             return Fail(
                 lastFailure.Error ?? "فشل تجهيز المنتج للنشر.",
@@ -391,185 +384,188 @@ namespace Affiliate.Services
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
+
+            // Hard rule: Amazon publish never uses the host IP.
+            if (proxy is not { UseProxy: true } || string.IsNullOrWhiteSpace(proxy.Host))
+            {
+                return Fail(
+                    "بروكسيات ISP غير مفعّلة — أمازون يُجهَّز عبر البروكسي فقط.",
+                    "CaptureOnceAsync refused direct/host route.",
+                    "direct-refused",
+                    correlationId);
+            }
+
             var route = AuditRoute(proxy);
 
             // Chromium cannot auth SOCKS5; bridge local no-auth SOCKS5 → upstream Webshare SOCKS5.
-            LocalSocks5Bridge? socksBridge = null;
-            Proxy? playwrightProxy = null;
-            if (proxy is { UseProxy: true } && !string.IsNullOrWhiteSpace(proxy.Host))
+            await using var socksBridge = LocalSocks5Bridge.Start(
+                proxy.Host!, proxy.Port, proxy.Username, proxy.Password);
+            var playwrightProxy = new Proxy { Server = socksBridge.PlaywrightServer };
+
+            var browser = await GetSharedBrowserAsync();
+            await using var context = await browser.NewContextAsync(new BrowserNewContextOptions
             {
-                socksBridge = LocalSocks5Bridge.Start(
-                    proxy.Host!, proxy.Port, proxy.Username, proxy.Password);
-                playwrightProxy = new Proxy { Server = socksBridge.PlaywrightServer };
+                ViewportSize = new ViewportSize { Width = 1000, Height = 1100 },
+                DeviceScaleFactor = 2,
+                Locale = "ar-AE",
+                TimezoneId = "Africa/Cairo",
+                UserAgent =
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+                ExtraHTTPHeaders = new Dictionary<string, string>
+                {
+                    ["Accept-Language"] = "ar-AE,ar;q=0.9,en-AE;q=0.5,en;q=0.4"
+                },
+                Proxy = playwrightProxy
+            });
+
+            await context.AddCookiesAsync(
+            [
+                new Cookie
+                {
+                    Name = "lc-acbeg",
+                    Value = "ar_AE",
+                    Domain = ".amazon.eg",
+                    Path = "/"
+                },
+                new Cookie
+                {
+                    Name = "i18n-prefs",
+                    Value = "EGP",
+                    Domain = ".amazon.eg",
+                    Path = "/"
+                },
+                new Cookie
+                {
+                    Name = "skin",
+                    Value = "noskin",
+                    Domain = ".amazon.eg",
+                    Path = "/"
+                }
+            ]);
+
+            var page = await context.NewPageAsync();
+            page.SetDefaultTimeout(45_000);
+
+            await NavigateToArabicProductAsync(page, asin, productUrl, cancellationToken);
+
+            if (await LooksBlockedAsync(page))
+            {
+                return Fail(
+                    "أمازون طلب تحقق (captcha) — أعد المحاولة لاحقاً.",
+                    $"Captcha/robot check via {route}",
+                    route,
+                    correlationId);
             }
 
-            await using (socksBridge)
+            var productName = await ReadProductTitleAsync(page) ?? asin;
+            var pagePrice = await ReadDesktopPriceAsync(page);
+
+            _logger.LogInformation(
+                "Prepare-for-publish {Asin} via {Route}: pagePrice={PagePrice}, alertPrice={AlertPrice}, lang={Lang}",
+                asin, route, pagePrice, alertPrice, await ReadHtmlLangAsync(page));
+
+            // No DP price → fail this proxy so CaptureWithFallbackAsync tries the next one
+            // (do not force cart for MAP / unread price).
+            if (pagePrice is null)
             {
-                var browser = await GetSharedBrowserAsync();
-                await using var context = await browser.NewContextAsync(new BrowserNewContextOptions
-                {
-                    ViewportSize = new ViewportSize { Width = 1000, Height = 1100 },
-                    DeviceScaleFactor = 2,
-                    Locale = "ar-AE",
-                    TimezoneId = "Africa/Cairo",
-                    UserAgent =
-                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-                    ExtraHTTPHeaders = new Dictionary<string, string>
-                    {
-                        ["Accept-Language"] = "ar-AE,ar;q=0.9,en-AE;q=0.5,en;q=0.4"
-                    },
-                    Proxy = playwrightProxy
-                });
+                return Fail(
+                    "ما قدرناش نقرأ سعر صفحة المنتج — هنحاول بروكسي تاني.",
+                    "pagePrice=null; retry via next proxy",
+                    route,
+                    correlationId);
+            }
 
-                await context.AddCookiesAsync(
-                [
-                    new Cookie
-                    {
-                        Name = "lc-acbeg",
-                        Value = "ar_AE",
-                        Domain = ".amazon.eg",
-                        Path = "/"
-                    },
-                    new Cookie
-                    {
-                        Name = "i18n-prefs",
-                        Value = "EGP",
-                        Domain = ".amazon.eg",
-                        Path = "/"
-                    },
-                    new Cookie
-                    {
-                        Name = "skin",
-                        Value = "noskin",
-                        Domain = ".amazon.eg",
-                        Path = "/"
-                    }
-                ]);
+            var pricesMatch = alertPrice is null
+                || PricesMatch(pagePrice.Value, alertPrice.Value);
 
-                var page = await context.NewPageAsync();
-                page.SetDefaultTimeout(45_000);
-
-                await NavigateToArabicProductAsync(page, asin, productUrl, cancellationToken);
-
-                if (await LooksBlockedAsync(page))
-                {
-                    return Fail(
-                        "أمازون طلب تحقق (captcha) — أعد المحاولة لاحقاً.",
-                        $"Captcha/robot check via {route}",
-                        route,
-                        correlationId);
-                }
-
-                var productName = await ReadProductTitleAsync(page) ?? asin;
-                var pagePrice = await ReadDesktopPriceAsync(page);
-
+            var checkoutDiscount = await DetectCheckoutDiscountAsync(page);
+            if (checkoutDiscount is not null)
+            {
                 _logger.LogInformation(
-                    "Prepare-for-publish {Asin} via {Route}: pagePrice={PagePrice}, alertPrice={AlertPrice}, lang={Lang}",
-                    asin, route, pagePrice, alertPrice, await ReadHtmlLangAsync(page));
+                    "Prepare-for-publish {Asin}: checkout discount {Kind} {Percent}% → cart with injected summary",
+                    asin, checkoutDiscount.Kind, checkoutDiscount.Percent);
+            }
 
-                // No DP price → fail this route so CaptureWithFallbackAsync tries proxies
-                // (do not force cart for MAP / unread price).
-                if (pagePrice is null)
+            // Auto/promo discounts: always cart + drawn summary (not shown until login).
+            // Price mismatch vs DB: cart. Null page price is handled above (proxy retry).
+            var cartReasonAr = DescribeCartReasonAr(checkoutDiscount, pagePrice, alertPrice, pricesMatch);
+            var useCart = cartReasonAr is not null;
+
+            byte[] screenshot;
+            var usedCart = false;
+            decimal? resultPrice = pagePrice ?? alertPrice;
+            // Always store the path decision in Detail so publish logs show WHY cart/DP.
+            string? pathDetail = useCart
+                ? $"سبب السلة: {cartReasonAr}"
+                : alertPrice is null
+                    ? "سبب المسار: مفيش سعر محفوظ → صفحة المنتج"
+                    : "سبب المسار: الأسعار متطابقة → صفحة المنتج";
+
+            if (!useCart)
+            {
+                await UseNarrowPublishLayoutAsync(page);
+                await HighlightDesktopPublishTargetsAsync(page);
+                screenshot = await CapturePublishScreenshotAsync(page, cart: false);
+            }
+            else
+            {
+                try
                 {
-                    return Fail(
-                        "ما قدرناش نقرأ سعر صفحة المنتج — هنحاول مسار تاني.",
-                        "pagePrice=null; retry via proxy",
-                        route,
-                        correlationId);
+                    await AddToCartAndOpenCartAsync(page, asin, cancellationToken);
+                    usedCart = true;
+                    screenshot = await CaptureMobileCartItemAsync(
+                        browser, context, asin, playwrightProxy, checkoutDiscount, pagePrice);
+                    if (checkoutDiscount is not null && pagePrice is { } listPrice)
+                        resultPrice = ApplyCheckoutDiscount(listPrice, checkoutDiscount.Percent);
+                    else
+                        resultPrice = alertPrice ?? pagePrice;
                 }
-
-                var pricesMatch = alertPrice is null
-                    || PricesMatch(pagePrice.Value, alertPrice.Value);
-
-                var checkoutDiscount = await DetectCheckoutDiscountAsync(page);
-                if (checkoutDiscount is not null)
+                catch (Exception cartEx)
                 {
-                    _logger.LogInformation(
-                        "Prepare-for-publish {Asin}: checkout discount {Kind} {Percent}% → cart with injected summary",
-                        asin, checkoutDiscount.Kind, checkoutDiscount.Percent);
-                }
+                    // Cart often fails (interstitial / soft block). Fall back to highlighted DP.
+                    _logger.LogWarning(cartEx,
+                        "Prepare-for-publish cart path failed for {Asin} via {Route} (reason={Reason}); falling back to DP screenshot",
+                        asin, route, cartReasonAr);
 
-                // Auto/promo discounts: always cart + drawn summary (not shown until login).
-                // Price mismatch vs DB: cart. Null page price is handled above (proxy retry).
-                var cartReasonAr = DescribeCartReasonAr(checkoutDiscount, pagePrice, alertPrice, pricesMatch);
-                var useCart = cartReasonAr is not null;
+                    var failShort = TruncateAudit(cartEx.Message) ?? "timeout/error";
+                    _audit.Log(correlationId, asin, PublishAuditEvent.CartFallback,
+                        route: route,
+                        proxyHost: proxy.Host,
+                        proxyPort: proxy.Port,
+                        pageKind: "Dp",
+                        success: true,
+                        detail: TruncateAudit(
+                            $"سبب اختيار السلة: {cartReasonAr} | فشل التنفيذ: {failShort}"));
 
-                byte[] screenshot;
-                var usedCart = false;
-                decimal? resultPrice = pagePrice ?? alertPrice;
-                // Always store the path decision in Detail so publish logs show WHY cart/DP.
-                string? pathDetail = useCart
-                    ? $"سبب السلة: {cartReasonAr}"
-                    : alertPrice is null
-                        ? "سبب المسار: مفيش سعر محفوظ → صفحة المنتج"
-                        : "سبب المسار: الأسعار متطابقة → صفحة المنتج";
+                    await page.GotoAsync(productUrl, new PageGotoOptions
+                    {
+                        WaitUntil = WaitUntilState.DOMContentLoaded,
+                        Timeout = 45_000
+                    });
+                    await WaitForVisibleProductSignalAsync(page);
 
-                if (!useCart)
-                {
                     await UseNarrowPublishLayoutAsync(page);
                     await HighlightDesktopPublishTargetsAsync(page);
                     screenshot = await CapturePublishScreenshotAsync(page, cart: false);
+                    usedCart = false;
+                    resultPrice = pagePrice ?? alertPrice;
+                    pathDetail =
+                        $"سبب السلة: {cartReasonAr} | السلة فشلت فرجعنا لصفحة المنتج | {failShort}";
                 }
-                else
-                {
-                    try
-                    {
-                        await AddToCartAndOpenCartAsync(page, asin, cancellationToken);
-                        usedCart = true;
-                        screenshot = await CaptureMobileCartItemAsync(
-                            browser, context, asin, playwrightProxy, checkoutDiscount, pagePrice);
-                        if (checkoutDiscount is not null && pagePrice is { } listPrice)
-                            resultPrice = ApplyCheckoutDiscount(listPrice, checkoutDiscount.Percent);
-                        else
-                            resultPrice = alertPrice ?? pagePrice;
-                    }
-                    catch (Exception cartEx)
-                    {
-                        // Cart often fails (interstitial / soft block). Fall back to highlighted DP.
-                        _logger.LogWarning(cartEx,
-                            "Prepare-for-publish cart path failed for {Asin} via {Route} (reason={Reason}); falling back to DP screenshot",
-                            asin, route, cartReasonAr);
+            }
 
-                        var failShort = TruncateAudit(cartEx.Message) ?? "timeout/error";
-                        _audit.Log(correlationId, asin, PublishAuditEvent.CartFallback,
-                            route: route,
-                            proxyHost: proxy?.Host,
-                            proxyPort: proxy is { UseProxy: true } ? proxy.Port : null,
-                            pageKind: "Dp",
-                            success: true,
-                            detail: TruncateAudit(
-                                $"سبب اختيار السلة: {cartReasonAr} | فشل التنفيذ: {failShort}"));
-
-                        await page.GotoAsync(productUrl, new PageGotoOptions
-                        {
-                            WaitUntil = WaitUntilState.DOMContentLoaded,
-                            Timeout = 45_000
-                        });
-                        await WaitForVisibleProductSignalAsync(page);
-
-                        await UseNarrowPublishLayoutAsync(page);
-                        await HighlightDesktopPublishTargetsAsync(page);
-                        screenshot = await CapturePublishScreenshotAsync(page, cart: false);
-                        usedCart = false;
-                        resultPrice = pagePrice ?? alertPrice;
-                        pathDetail =
-                            $"سبب السلة: {cartReasonAr} | السلة فشلت فرجعنا لصفحة المنتج | {failShort}";
-                    }
-                }
-
-                return new PrepareForPublishResult
-                {
-                    Success = true,
-                    Route = route,
-                    CorrelationId = correlationId,
-                    ProductName = productName,
-                    ProductUrl = productUrl,
-                    ProductPrice = resultPrice,
-                    ScreenshotPng = screenshot,
-                    UsedCartScreenshot = usedCart,
-                    Detail = pathDetail
-                };
-            } // socksBridge
+            return new PrepareForPublishResult
+            {
+                Success = true,
+                Route = route,
+                CorrelationId = correlationId,
+                ProductName = productName,
+                ProductUrl = productUrl,
+                ProductPrice = resultPrice,
+                ScreenshotPng = screenshot,
+                UsedCartScreenshot = usedCart,
+                Detail = pathDetail
+            };
         }
 
         /// <summary>
@@ -649,24 +645,6 @@ namespace Affiliate.Services
                 _logger.LogDebug(ex, "Prepare-for-publish proxy probe failed for {Proxy}", endpoint.Describe());
                 return false;
             }
-        }
-
-        private static bool IsProxyFallbackCandidate(PrepareForPublishResult result)
-        {
-            if (result.Success || IsFatalPrepareFailure(result))
-                return false;
-
-            var error = result.Error ?? "";
-            var detail = result.Detail ?? "";
-            return error.Contains("مهلة", StringComparison.OrdinalIgnoreCase)
-                   || error.Contains("captcha", StringComparison.OrdinalIgnoreCase)
-                   || error.Contains("تحقق", StringComparison.OrdinalIgnoreCase)
-                   || error.Contains("سعر صفحة المنتج", StringComparison.OrdinalIgnoreCase)
-                   || detail.Contains("Timeout", StringComparison.OrdinalIgnoreCase)
-                   || detail.Contains("Captcha", StringComparison.OrdinalIgnoreCase)
-                   || detail.Contains("pagePrice=null", StringComparison.OrdinalIgnoreCase)
-                   || detail.Contains("net::", StringComparison.OrdinalIgnoreCase)
-                   || error.Contains("فشل تجهيز", StringComparison.OrdinalIgnoreCase);
         }
 
         private static bool IsFatalPrepareFailure(PrepareForPublishResult result)
@@ -1535,7 +1513,7 @@ namespace Affiliate.Services
                     : $"كود خصم أمازون {discount.Percent}% (رمز العرض)";
             }
 
-            // Null pagePrice is handled earlier (fail attempt → try proxy), not cart.
+            // Null pagePrice is handled earlier (fail attempt → try next proxy), not cart.
             if (!pricesMatch)
             {
                 return
