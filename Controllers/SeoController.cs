@@ -56,8 +56,6 @@ namespace Affiliate.Controllers
             {
                 ("/?lang=ar", "hourly", "1.0"),
                 ("/?lang=en", "hourly", "0.9"),
-                ("/tracker?lang=ar", "hourly", "0.9"),
-                ("/tracker?lang=en", "hourly", "0.8"),
                 ("/Home/About?lang=ar", "monthly", "0.5"),
                 ("/Home/About?lang=en", "monthly", "0.4"),
                 ("/Home/Terms?lang=ar", "monthly", "0.5"),

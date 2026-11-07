@@ -106,7 +106,9 @@
     <a class="pub-logo" asp-controller="Home" asp-action="Index" asp-route-lang="@Model.Lang" aria-label="@brand">
         <img src="~/images/sinbad-logo.png" alt="@brand" width="40" height="40" />
     </a>
-    <span class="tracker-nav-current">@(ar ? "تتبع الأسعار" : "Price tracker")</span>
+    <a class="pub-page-back" asp-controller="Home" asp-action="Index" asp-route-lang="@Model.Lang">
+        @(ar ? "العروض" : "Deals")
+    </a>
     <button type="button" class="theme-toggle" id="theme-toggle"
             title="@(ar ? "الوضع الليلي" : "Night mode")"
             aria-label="@(ar ? "تبديل الوضع الليلي" : "Toggle night mode")"
@@ -126,8 +128,6 @@
 <nav class="tracker-breadcrumb" aria-label="@(ar ? "مسار التنقل" : "Breadcrumb")">
     <a asp-controller="Home" asp-action="Index" asp-route-lang="@Model.Lang">@(ar ? "العروض" : "Deals")</a>
     <span class="tracker-breadcrumb-sep" aria-hidden="true">/</span>
-    <a asp-controller="PriceTracker" asp-action="Index" asp-route-lang="@Model.Lang">@(ar ? "تتبع الأسعار" : "Price tracker")</a>
-    <span class="tracker-breadcrumb-sep" aria-hidden="true">/</span>
     <span class="tracker-breadcrumb-current" dir="auto">@name</span>
 </nav>
 
@@ -145,7 +145,6 @@
         </div>
         <div class="tracker-product-main">
             <h1 dir="auto">@name</h1>
-            <p class="tracker-asin ltr">ASIN: @Model.Asin</p>
 
             @if (Model.Stats.IsLowestEver)
             {

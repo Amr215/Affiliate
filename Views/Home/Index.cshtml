@@ -18,9 +18,11 @@
         ? (ar ? $"عروض {tagName}" : $"{tagName} deals")
         : (ar ? "أفضل العروض والتخفيضات اليوم" : "Best deals and discounts today");
 
-    var titleCore = !string.IsNullOrWhiteSpace(tagName)
-        ? (ar ? $"عروض {tagName} | {brand}" : $"{tagName} Deals | {brand}")
-        : (ar ? $"{brand} | تخفيضات وعروض يومية" : $"{brand} | Daily discounts & deals");
+    var titleCore = !string.IsNullOrWhiteSpace(Model.Query)
+        ? (ar ? $"بحث: {Model.Query} | {brand}" : $"Search: {Model.Query} | {brand}")
+        : !string.IsNullOrWhiteSpace(tagName)
+            ? (ar ? $"عروض {tagName} | {brand}" : $"{tagName} Deals | {brand}")
+            : (ar ? $"{brand} | تخفيضات وعروض يومية" : $"{brand} | Daily discounts & deals");
     if (Model.Page > 1)
         titleCore = ar ? $"{titleCore} — صفحة {Model.Page}" : $"{titleCore} — Page {Model.Page}";
     ViewData["Title"] = titleCore;
@@ -37,15 +39,20 @@
         ? "عروض, تخفيضات, عروض مصر, عروض السندباد, أسعار مخفضة, تيليجرام عروض"
         : "deals, discounts, Egypt deals, El Sindbad, price drops, Telegram deals";
 
-    object Route(int? page = null, int? tagId = null, string? lang = null, bool clearTag = false)
+    object Route(int? page = null, int? tagId = null, string? lang = null, string? q = null, bool clearTag = false, bool clearQuery = false)
     {
         var p = page ?? Model.Page;
         var l = lang ?? Model.Lang;
-        if (clearTag)
-            return new { page = p, lang = l };
-        var t = tagId ?? Model.SelectedTagId;
+        var query = clearQuery ? null : (q ?? Model.Query);
+        if (string.IsNullOrWhiteSpace(query))
+            query = null;
+        var t = clearTag ? null : (tagId ?? Model.SelectedTagId);
+        if (t.HasValue && query != null)
+            return new { page = p, tagId = t, lang = l, q = query };
         if (t.HasValue)
             return new { page = p, tagId = t, lang = l };
+        if (query != null)
+            return new { page = p, lang = l, q = query };
         return new { page = p, lang = l };
     }
 
@@ -204,9 +211,6 @@
         <span class="theme-toggle-icon icon-moon" aria-hidden="true">☾</span>
         <span class="theme-toggle-icon icon-sun" aria-hidden="true">☀</span>
     </button>
-    <a class="tracker-header-link" asp-controller="PriceTracker" asp-action="Index" asp-route-lang="@Model.Lang">
-        @(ar ? "تتبع الأسعار" : "Tracker")
-    </a>
     <a class="lang-toggle" href="@Url.Action("Index", Route(page: 1, lang: switchLang))"
        title="@switchTitle" aria-label="@switchTitle">
         <span class="lang-toggle-icon" aria-hidden="true">🌐</span>
@@ -232,19 +236,37 @@
     </nav>
 }
 
+<form class="tracker-search" method="get" asp-controller="Home" asp-action="Index" role="search">
+    <input type="hidden" name="lang" value="@Model.Lang" />
+    @if (Model.SelectedTagId is int selectedTagId)
+    {
+        <input type="hidden" name="tagId" value="@selectedTagId" />
+    }
+    <label class="visually-hidden" for="deals-q">@(ar ? "بحث" : "Search")</label>
+    <input id="deals-q" class="tracker-search-input" type="search" name="q" value="@Model.Query"
+           placeholder="@(ar ? "اسم المنتج أو ASIN..." : "Product name or ASIN...")"
+           autocomplete="off" />
+    <button class="tracker-search-btn" type="submit">@(ar ? "بحث" : "Search")</button>
+</form>
+
 @if (Model.Deals.Count == 0)
 {
     <section class="pub-empty">
         <div class="pub-empty-mark" aria-hidden="true">%</div>
-        @if (ar)
+        @if (!string.IsNullOrWhiteSpace(Model.Query))
+        {
+            <p class="pub-empty-title">@(ar ? "لا توجد نتائج" : "No results")</p>
+            <p>@(ar ? "جرّب كلمات بحث أخرى." : "Try a different search.")</p>
+        }
+        else if (ar)
         {
             <p class="pub-empty-title">لا توجد منتجات الآن</p>
-            <p>ستظهر العروض ومنتجات التتبع هنا فور توفرها. يمكنك أيضاً فتح <a asp-controller="PriceTracker" asp-action="Index" asp-route-lang="@Model.Lang">تتبع الأسعار</a>.</p>
+            <p>ستظهر العروض هنا فور توفرها.</p>
         }
         else
         {
             <p class="pub-empty-title">No products right now</p>
-            <p>Deals and tracked products will show up here soon. You can also open the <a asp-controller="PriceTracker" asp-action="Index" asp-route-lang="@Model.Lang">price tracker</a>.</p>
+            <p>Deals will show up here soon.</p>
         }
     </section>
 }

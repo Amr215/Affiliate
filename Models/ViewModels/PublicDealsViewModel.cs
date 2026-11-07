@@ -5,6 +5,7 @@ namespace Affiliate.ViewModels
         public IReadOnlyList<PublicDealItem> Deals { get; set; } = [];
         public IReadOnlyList<PublicDealTagOption> Tags { get; set; } = [];
         public int? SelectedTagId { get; set; }
+        public string? Query { get; set; }
         public int Page { get; set; } = 1;
         public int TotalPages { get; set; } = 1;
         public int TotalCount { get; set; }

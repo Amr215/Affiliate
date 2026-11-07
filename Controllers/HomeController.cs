@@ -24,12 +24,13 @@ namespace Affiliate.Controllers
         /// <summary>
         /// Public homepage feed in one grid:
         /// 1) external-price deals (highest discount % first),
-        /// 2) then tracker products (same eligibility/sort as /tracker), excluding deal ASINs.
+        /// 2) then tracker products (same eligibility/sort as product details), excluding deal ASINs.
         /// </summary>
         [AllowAnonymous]
         public async Task<IActionResult> Index(
             [FromServices] AffiliateDbContext db,
             [FromServices] AsinLinkCodec codec,
+            string? q = null,
             int? tagId = null,
             string? lang = null,
             int page = 1,
@@ -37,6 +38,10 @@ namespace Affiliate.Controllers
         {
             if (tagId is <= 0)
                 tagId = null;
+
+            var queryText = (q ?? string.Empty).Trim();
+            if (queryText.Length > 120)
+                queryText = queryText[..120];
 
             // Arabic is the default; English only when explicitly requested.
             var isArabic = !string.Equals(lang, "en", StringComparison.OrdinalIgnoreCase);
@@ -63,6 +68,15 @@ namespace Affiliate.Controllers
 
             if (tagId.HasValue)
                 dealsQuery = dealsQuery.Where(p => p.ScraperUrl != null && p.ScraperUrl.TagId == tagId.Value);
+
+            if (!string.IsNullOrEmpty(queryText))
+            {
+                var like = $"%{EscapeLike(queryText)}%";
+                dealsQuery = dealsQuery.Where(p =>
+                    EF.Functions.Like(p.Name, like)
+                    || (p.NameAr != null && EF.Functions.Like(p.NameAr, like))
+                    || (p.Asin != null && EF.Functions.Like(p.Asin, like)));
+            }
 
             var dealRows = await dealsQuery
                 .OrderByDescending(p => (p.ExternalLowestPrice!.Value - p.CurrentPrice!.Value) / p.ExternalLowestPrice!.Value)
@@ -118,6 +132,15 @@ namespace Affiliate.Controllers
 
             if (tagId.HasValue)
                 trackerQuery = trackerQuery.Where(p => p.ScraperUrl!.TagId == tagId.Value);
+
+            if (!string.IsNullOrEmpty(queryText))
+            {
+                var like = $"%{EscapeLike(queryText)}%";
+                trackerQuery = trackerQuery.Where(p =>
+                    EF.Functions.Like(p.Name, like)
+                    || (p.NameAr != null && EF.Functions.Like(p.NameAr, like))
+                    || (p.Asin != null && EF.Functions.Like(p.Asin, like)));
+            }
 
             if (dealIds.Count > 0)
             {
@@ -215,6 +238,7 @@ namespace Affiliate.Controllers
                 Deals = pageItems,
                 Tags = tags,
                 SelectedTagId = tagId,
+                Query = queryText,
                 Page = page,
                 TotalPages = totalPages,
                 TotalCount = totalCount,
@@ -276,5 +300,11 @@ namespace Affiliate.Controllers
 
         private bool IsArabicLang() =>
             string.Equals(ViewData["Lang"] as string, "ar", StringComparison.OrdinalIgnoreCase);
+
+        private static string EscapeLike(string value) =>
+            value
+                .Replace("[", "[[]", StringComparison.Ordinal)
+                .Replace("%", "[%]", StringComparison.Ordinal)
+                .Replace("_", "[_]", StringComparison.Ordinal);
     }
 }

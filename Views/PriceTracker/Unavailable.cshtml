@@ -7,11 +7,11 @@
     var brand = ar ? "عروض السندباد" : "El Sindbad Deals";
     var name = Model.DisplayName(ar);
     ViewData["Title"] = ar
-        ? $"{name} | لم يعد متاحًا للتتبع | {brand}"
-        : $"{name} | No longer tracked | {brand}";
+        ? $"{name} | لم يعد متاحًا | {brand}"
+        : $"{name} | No longer available | {brand}";
     ViewData["MetaDescription"] = ar
-        ? "هذا المنتج لم يعد متاحًا في تتبع الأسعار. تصفح منتجات أخرى أو ارجع إلى قائمة التتبع."
-        : "This product is no longer available in the price tracker. Browse other products or return to the tracker list.";
+        ? "هذا المنتج لم يعد متاحًا. تصفح العروض الأخرى من الصفحة الرئيسية."
+        : "This product is no longer available. Browse other deals on the home page.";
 
     var switchLang = ar ? "en" : "ar";
     var switchLabel = ar ? "EN" : "ع";
@@ -22,7 +22,9 @@
     <a class="pub-logo" asp-controller="Home" asp-action="Index" asp-route-lang="@Model.Lang" aria-label="@brand">
         <img src="~/images/sinbad-logo.png" alt="@brand" width="40" height="40" />
     </a>
-    <span class="tracker-nav-current">@(ar ? "تتبع الأسعار" : "Price tracker")</span>
+    <a class="pub-page-back" asp-controller="Home" asp-action="Index" asp-route-lang="@Model.Lang">
+        @(ar ? "العروض" : "Deals")
+    </a>
     <button type="button" class="theme-toggle" id="theme-toggle"
             title="@(ar ? "الوضع الليلي" : "Night mode")"
             aria-label="@(ar ? "تبديل الوضع الليلي" : "Toggle night mode")"
@@ -42,8 +44,6 @@
 <nav class="tracker-breadcrumb" aria-label="@(ar ? "مسار التنقل" : "Breadcrumb")">
     <a asp-controller="Home" asp-action="Index" asp-route-lang="@Model.Lang">@(ar ? "العروض" : "Deals")</a>
     <span class="tracker-breadcrumb-sep" aria-hidden="true">/</span>
-    <a asp-controller="PriceTracker" asp-action="Index" asp-route-lang="@Model.Lang">@(ar ? "تتبع الأسعار" : "Price tracker")</a>
-    <span class="tracker-breadcrumb-sep" aria-hidden="true">/</span>
     <span class="tracker-breadcrumb-current" dir="auto">@name</span>
 </nav>
 
@@ -54,20 +54,16 @@
             <img src="@Model.ImageUrl" alt="@name" width="160" height="160" loading="eager" decoding="async" />
         </div>
     }
-    <h1>@(ar ? "هذا المنتج لم يعد متاحًا للتتبع" : "This product is no longer tracked")</h1>
+    <h1>@(ar ? "هذا المنتج لم يعد متاحًا" : "This product is no longer available")</h1>
     <p class="tracker-unavailable-name" dir="auto">@name</p>
     <p class="tracker-unavailable-text">
         @(ar
-            ? "ربما أصبح غير متوفر أو توقف تحديث سعره. يمكنك الرجوع إلى قائمة التتبع أو البحث عن منتج آخر."
-            : "It may be unavailable or no longer price-updated. You can return to the tracker list or search for another product.")
+            ? "ربما أصبح غير متوفر أو توقف تحديث سعره. يمكنك الرجوع إلى العروض أو البحث عن منتج آخر."
+            : "It may be unavailable or no longer price-updated. You can return to deals or search for another product.")
     </p>
-    <p class="tracker-asin ltr">ASIN: @Model.Asin</p>
     <div class="tracker-unavailable-actions">
-        <a class="tracker-buy" asp-controller="PriceTracker" asp-action="Index" asp-route-lang="@Model.Lang">
-            @(ar ? "الرجوع لقائمة التتبع" : "Back to price tracker")
-        </a>
-        <a class="tracker-header-link" asp-controller="Home" asp-action="Index" asp-route-lang="@Model.Lang">
-            @(ar ? "العروض" : "Deals")
+        <a class="tracker-buy" asp-controller="Home" asp-action="Index" asp-route-lang="@Model.Lang">
+            @(ar ? "الرجوع للعروض" : "Back to deals")
         </a>
     </div>
 </section>

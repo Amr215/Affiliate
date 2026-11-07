@@ -21,8 +21,9 @@
     {
         <meta name="keywords" content="@metaKeywords" />
     }
-    <link rel="icon" href="~/favicon.ico" asp-append-version="true" />
-    <link rel="apple-touch-icon" href="~/images/sinbad-logo.png" asp-append-version="true" />
+    <link rel="icon" href="~/favicon.ico" type="image/x-icon" asp-append-version="true" />
+    <link rel="icon" href="~/images/favicon-32.png" type="image/png" sizes="32x32" asp-append-version="true" />
+    <link rel="apple-touch-icon" href="~/images/apple-touch-icon.png" sizes="180x180" asp-append-version="true" />
     <script>
         (function () {
             try {
@@ -45,15 +46,15 @@
     </main>
     <footer class="pub-footer">
         <div class="pub-footer-grid">
-            <section class="pub-footer-col" aria-labelledby="footer-tracker-title">
-                <h2 id="footer-tracker-title" class="pub-footer-heading">@(isArabic ? "تتبع الأسعار" : "Price tracker")</h2>
+            <section class="pub-footer-col" aria-labelledby="footer-deals-title">
+                <h2 id="footer-deals-title" class="pub-footer-heading">@(isArabic ? "العروض" : "Deals")</h2>
                 <p class="pub-footer-text">
                     @(isArabic
-                        ? "ابحث عن المنتجات وشاهد تغيّر السعر وأقل وأعلى قيمة مسجّلة."
-                        : "Search products and see price history with lowest and highest recorded values.")
+                        ? "ابحث عن المنتجات وشاهد أحدث العروض وتغيّر الأسعار."
+                        : "Search products and browse the latest deals with price history.")
                 </p>
-                <a class="pub-footer-link" asp-controller="PriceTracker" asp-action="Index" asp-route-lang="@htmlLang">
-                    @(isArabic ? "فتح التتبع" : "Open tracker")
+                <a class="pub-footer-link" asp-controller="Home" asp-action="Index" asp-route-lang="@htmlLang">
+                    @(isArabic ? "تصفح العروض" : "Browse deals")
                 </a>
             </section>
 

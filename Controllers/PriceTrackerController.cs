@@ -13,8 +13,6 @@ namespace Affiliate.Controllers
     [AllowAnonymous]
     public class PriceTrackerController : Controller
     {
-        private const int PageSize = 24;
-
         private readonly AffiliateDbContext _db;
         private readonly AsinLinkCodec _codec;
         private readonly string _siteBase;
@@ -29,151 +27,19 @@ namespace Affiliate.Controllers
             _siteBase = (telegramOptions.Value.PublishLinkBaseUrl ?? "https://el-sindbad.com").Trim().TrimEnd('/');
         }
 
+        /// <summary>List moved to the deals homepage; keep /tracker as a permanent redirect.</summary>
         [HttpGet("/tracker")]
-        public async Task<IActionResult> Index(
-            string? q = null,
-            int? tagId = null,
-            string? lang = null,
-            int page = 1,
-            CancellationToken cancellationToken = default)
+        public IActionResult Index(string? lang = null, string? q = null, int? tagId = null)
         {
-            var normalizedLang = NormalizeLang(lang);
-            var isArabic = normalizedLang == "ar";
-            if (tagId is <= 0)
-                tagId = null;
-
-            var queryText = (q ?? string.Empty).Trim();
-            if (queryText.Length > 120)
-                queryText = queryText[..120];
-
-            var tagsBase = _db.SearchTags.AsNoTracking();
-            var tagsOrdered = isArabic
-                ? tagsBase.OrderBy(t => t.NameAr).ThenBy(t => t.NameEn)
-                : tagsBase.OrderBy(t => t.NameEn).ThenBy(t => t.NameAr);
-            var tags = await tagsOrdered
-                .Select(t => new PublicDealTagOption { Id = t.Id, NameEn = t.NameEn, NameAr = t.NameAr })
-                .ToListAsync(cancellationToken);
-
-            if (tagId.HasValue && tags.All(t => t.Id != tagId.Value))
-                tagId = null;
-
-            var products = TrackableProducts();
-
-            if (tagId.HasValue)
-                products = products.Where(p => p.ScraperUrl!.TagId == tagId.Value);
-
-            if (!string.IsNullOrEmpty(queryText))
-            {
-                var like = $"%{EscapeLike(queryText)}%";
-                products = products.Where(p =>
-                    EF.Functions.Like(p.Name, like)
-                    || (p.NameAr != null && EF.Functions.Like(p.NameAr, like))
-                    || (p.Asin != null && EF.Functions.Like(p.Asin, like)));
-            }
-
-            var candidates = await products
-                .Select(p => new
+            return RedirectToActionPermanent(
+                nameof(HomeController.Index),
+                "Home",
+                new
                 {
-                    p.Id,
-                    p.Asin,
-                    p.Name,
-                    p.NameAr,
-                    p.ImageUrl,
-                    p.CurrentPrice,
-                    p.LowestPrice,
-                    p.HighestPrice,
-                    p.Currency
-                })
-                .ToListAsync(cancellationToken);
-
-            candidates = candidates
-                .Where(r => AsinLinkCodec.IsValidAsin(AsinLinkCodec.NormalizeAsin(r.Asin!)))
-                .ToList();
-
-            var productIds = candidates.Select(c => c.Id).ToList();
-            var historyByProduct = new Dictionary<int, List<decimal>>();
-            if (productIds.Count > 0)
-            {
-                // Load in chunks to keep the SQL IN clause manageable.
-                const int chunkSize = 500;
-                for (var offset = 0; offset < productIds.Count; offset += chunkSize)
-                {
-                    var chunk = productIds.Skip(offset).Take(chunkSize).ToList();
-                    var histRows = await _db.PriceHistories.AsNoTracking()
-                        .Where(h => chunk.Contains(h.ProductId) && h.Price != null && h.Price > 0)
-                        .Select(h => new { h.ProductId, Price = h.Price!.Value })
-                        .ToListAsync(cancellationToken);
-
-                    foreach (var row in histRows)
-                    {
-                        if (!historyByProduct.TryGetValue(row.ProductId, out var list))
-                        {
-                            list = [];
-                            historyByProduct[row.ProductId] = list;
-                        }
-                        list.Add(row.Price);
-                    }
-                }
-            }
-
-            var ranked = candidates
-                .Select(r =>
-                {
-                    var current = r.CurrentPrice ?? 0m;
-                    historyByProduct.TryGetValue(r.Id, out var hist);
-                    hist ??= [];
-                    var (tier, rank) = PriceTrackerSort.Compute(current, hist, r.LowestPrice);
-                    return (Row: r, Tier: tier, Rank: rank);
-                })
-                .OrderBy(x => x.Tier)
-                .ThenByDescending(x => x.Tier <= PriceTrackerSort.TierAllTimeLow ? x.Rank : 0m)
-                .ThenBy(x => x.Tier == PriceTrackerSort.TierClosestToAllTimeLow ? x.Rank : 0m)
-                .ThenBy(x => x.Row.Id)
-                .ToList();
-
-            var totalCount = ranked.Count;
-            var totalPages = Math.Max(1, (int)Math.Ceiling(totalCount / (double)PageSize));
-            page = Math.Clamp(page, 1, totalPages);
-
-            var items = ranked
-                .Skip((page - 1) * PageSize)
-                .Take(PageSize)
-                .Select(x =>
-                {
-                    var r = x.Row;
-                    var asin = AsinLinkCodec.NormalizeAsin(r.Asin!);
-                    var atLow = x.Tier <= PriceTrackerSort.TierAllTimeLow;
-                    var display = isArabic && !string.IsNullOrWhiteSpace(r.NameAr) ? r.NameAr! : r.Name;
-                    return new PriceTrackerListItem
-                    {
-                        Asin = asin,
-                        Name = r.Name,
-                        NameAr = r.NameAr,
-                        ImageUrl = r.ImageUrl,
-                        CurrentPrice = r.CurrentPrice,
-                        LowestPrice = r.LowestPrice,
-                        HighestPrice = r.HighestPrice,
-                        Currency = r.Currency,
-                        Slug = PriceTrackerSlug.FromName(display),
-                        IsLowestEver = atLow,
-                        IsLowestIn30DaysOrMore = atLow,
-                        LowestPriceDays = atLow ? 30 : 0
-                    };
-                })
-                .ToList();
-
-            ViewData["SiteBaseUrl"] = _siteBase;
-            return View(new PriceTrackerIndexViewModel
-            {
-                Lang = normalizedLang,
-                Query = queryText,
-                SelectedTagId = tagId,
-                Tags = tags,
-                Page = page,
-                TotalPages = totalPages,
-                TotalCount = totalCount,
-                Items = items
-            });
+                    lang = NormalizeLang(lang),
+                    q,
+                    tagId
+                });
         }
 
         [HttpGet("/tracker/{asin}/{slug?}")]
@@ -329,22 +195,7 @@ namespace Affiliate.Controllers
             });
         }
 
-        private IQueryable<Models.Product> TrackableProducts() =>
-            _db.Products.AsNoTracking()
-                .Where(p => p.IsBlocked != true
-                    && p.NotAvailableDate == null
-                    && p.Asin != null
-                    && p.CurrentPrice > 0
-                    && p.ScraperUrl != null
-                    && p.ScraperUrl.TagId != null);
-
         private static string NormalizeLang(string? lang) =>
             string.Equals(lang, "en", StringComparison.OrdinalIgnoreCase) ? "en" : "ar";
-
-        private static string EscapeLike(string value) =>
-            value
-                .Replace("[", "[[]", StringComparison.Ordinal)
-                .Replace("%", "[%]", StringComparison.Ordinal)
-                .Replace("_", "[_]", StringComparison.Ordinal);
     }
 }
