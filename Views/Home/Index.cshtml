@@ -1,46 +1,317 @@
-﻿@model HomeDashboardViewModel
+@model PublicDealsViewModel
+@using System.Text.Json
+@using Affiliate.Options
+@inject Microsoft.Extensions.Options.IOptions<TelegramOptions> TelegramOptions
 @{
-    ViewData["Title"] = "الرئيسية";
+    Layout = "_PublicLayout";
+    var ar = Model.IsArabic;
+    ViewData["Lang"] = Model.Lang;
+    var priceCulture = System.Globalization.CultureInfo.InvariantCulture;
+
+    var selectedTag = Model.SelectedTagId is int sid
+        ? Model.Tags.FirstOrDefault(t => t.Id == sid)
+        : null;
+    var tagName = selectedTag?.DisplayName(ar);
+
+    var brand = ar ? "عروض السندباد" : "El Sindbad Deals";
+    var h1 = !string.IsNullOrWhiteSpace(tagName)
+        ? (ar ? $"عروض {tagName}" : $"{tagName} deals")
+        : (ar ? "أفضل العروض والتخفيضات اليوم" : "Best deals and discounts today");
+
+    var titleCore = !string.IsNullOrWhiteSpace(tagName)
+        ? (ar ? $"عروض {tagName} | {brand}" : $"{tagName} Deals | {brand}")
+        : (ar ? $"{brand} | تخفيضات وعروض يومية" : $"{brand} | Daily discounts & deals");
+    if (Model.Page > 1)
+        titleCore = ar ? $"{titleCore} — صفحة {Model.Page}" : $"{titleCore} — Page {Model.Page}";
+    ViewData["Title"] = titleCore;
+
+    var description = ar
+        ? (!string.IsNullOrWhiteSpace(tagName)
+            ? $"تصفح أحدث عروض {tagName} على عروض السندباد. أسعار مخفضة مختارة يومياً في مصر، مع تحديث مستمر لأفضل التخفيضات."
+            : "عروض السندباد — اكتشف أحدث التخفيضات والعروض اليومية في مصر. أسعار مخفضة مختارة بعناية، مع تحديث مستمر عبر الموقع وقناة تيليجرام.")
+        : (!string.IsNullOrWhiteSpace(tagName)
+            ? $"Browse the latest {tagName} deals on El Sindbad. Selected discounted prices in Egypt, updated daily."
+            : "El Sindbad Deals — discover the latest daily discounts in Egypt. Hand-picked price drops, updated continuously on the site and Telegram.");
+    ViewData["MetaDescription"] = description;
+    ViewData["MetaKeywords"] = ar
+        ? "عروض, تخفيضات, عروض مصر, عروض السندباد, أسعار مخفضة, تيليجرام عروض"
+        : "deals, discounts, Egypt deals, El Sindbad, price drops, Telegram deals";
+
+    object Route(int? page = null, int? tagId = null, string? lang = null, bool clearTag = false)
+    {
+        var p = page ?? Model.Page;
+        var l = lang ?? Model.Lang;
+        if (clearTag)
+            return new { page = p, lang = l };
+        var t = tagId ?? Model.SelectedTagId;
+        if (t.HasValue)
+            return new { page = p, tagId = t, lang = l };
+        return new { page = p, lang = l };
+    }
+
+    string Abs(string? path)
+    {
+        var baseUrl = (TelegramOptions.Value.PublishLinkBaseUrl ?? "https://el-sindbad.com").Trim().TrimEnd('/');
+        if (string.IsNullOrWhiteSpace(path))
+            return baseUrl + "/";
+        if (path.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || path.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            return path;
+        return baseUrl + (path.StartsWith('/') ? path : "/" + path);
+    }
+
+    var canonicalPath = Url.Action("Index", Route(page: Model.Page)) ?? "/";
+    var canonical = Abs(canonicalPath);
+    var logoUrl = Abs(Url.Content("~/images/sinbad-logo.png"));
+    var ogImage = Model.Deals.Select(d => d.ImageUrl).FirstOrDefault(u => !string.IsNullOrWhiteSpace(u)) ?? logoUrl;
+
+    var hreflangAr = Abs(Url.Action("Index", Route(page: Model.Page, lang: "ar")) ?? "/?lang=ar");
+    var hreflangEn = Abs(Url.Action("Index", Route(page: Model.Page, lang: "en")) ?? "/?lang=en");
+
+    string? prevUrl = Model.Page > 1 ? Abs(Url.Action("Index", Route(page: Model.Page - 1))) : null;
+    string? nextUrl = Model.Page < Model.TotalPages ? Abs(Url.Action("Index", Route(page: Model.Page + 1))) : null;
+
+    var jsonLd = new Dictionary<string, object?>
+    {
+        ["@context"] = "https://schema.org",
+        ["@graph"] = new object[]
+        {
+            new Dictionary<string, object?>
+            {
+                ["@type"] = "Organization",
+                ["@id"] = Abs("/") + "#organization",
+                ["name"] = brand,
+                ["url"] = Abs("/"),
+                ["logo"] = logoUrl,
+                ["sameAs"] = new[] { "https://t.me/OrudElSindbad" }
+            },
+            new Dictionary<string, object?>
+            {
+                ["@type"] = "WebSite",
+                ["@id"] = Abs("/") + "#website",
+                ["name"] = brand,
+                ["url"] = Abs("/"),
+                ["inLanguage"] = new[] { "ar", "en" },
+                ["publisher"] = new Dictionary<string, string> { ["@id"] = Abs("/") + "#organization" }
+            },
+            new Dictionary<string, object?>
+            {
+                ["@type"] = "CollectionPage",
+                ["@id"] = canonical + "#webpage",
+                ["url"] = canonical,
+                ["name"] = titleCore,
+                ["description"] = description,
+                ["isPartOf"] = new Dictionary<string, string> { ["@id"] = Abs("/") + "#website" },
+                ["inLanguage"] = ar ? "ar" : "en",
+                ["primaryImageOfPage"] = new Dictionary<string, string> { ["@type"] = "ImageObject", ["url"] = ogImage! }
+            },
+            new Dictionary<string, object?>
+            {
+                ["@type"] = "ItemList",
+                ["@id"] = canonical + "#itemlist",
+                ["name"] = h1,
+                ["numberOfItems"] = Model.Deals.Count,
+                ["itemListElement"] = Model.Deals.Select((d, i) => new Dictionary<string, object?>
+                {
+                    ["@type"] = "ListItem",
+                    ["position"] = i + 1,
+                    ["item"] = new Dictionary<string, object?>
+                    {
+                        ["@type"] = "Product",
+                        ["name"] = d.DisplayName(ar),
+                        ["image"] = string.IsNullOrWhiteSpace(d.ImageUrl) ? null : d.ImageUrl,
+                        ["url"] = Abs(d.Url),
+                        ["offers"] = new Dictionary<string, object?>
+                        {
+                            ["@type"] = "Offer",
+                            ["price"] = d.Price,
+                            ["priceCurrency"] = string.IsNullOrWhiteSpace(d.Currency) ? "EGP" : d.Currency,
+                            ["availability"] = "https://schema.org/InStock",
+                            ["url"] = Abs(d.Url)
+                        }
+                    }
+                }).ToList()
+            }
+        }
+    };
+    var jsonLdText = JsonSerializer.Serialize(jsonLd, new JsonSerializerOptions
+    {
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+    });
+
+    var switchLang = ar ? "en" : "ar";
+    var switchLabel = ar ? "EN" : "ع";
+    var switchTitle = ar ? "English" : "العربية";
 }
 
-<div class="row g-3 feature-grid">
-    <div class="col-md-4">
-        <div class="card feature-card h-100 position-relative">
-            <div class="card-body">
-                <div class="feature-icon"><i class="bi bi-amazon"></i></div>
-                <h2 class="h5">لوحة أمازون</h2>
-                <ul class="list-unstyled text-muted mb-0">
-                    <li>المنتجات: <span class="num">@Model.AmazonProducts</span> (متوفر <span class="num">@Model.AmazonAvailable</span>)</li>
-                    <li>روابط مفعّلة: <span class="num">@Model.AmazonUrls</span></li>
-                </ul>
-                <a asp-controller="ScraperUrls" asp-action="Index" class="stretched-link" aria-label="لوحة أمازون"></a>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-4">
-        <div class="card feature-card h-100 position-relative">
-            <div class="card-body">
-                <div class="feature-icon"><i class="bi bi-bag"></i></div>
-                <h2 class="h5">لوحة نون</h2>
-                <ul class="list-unstyled text-muted mb-0">
-                    <li>المنتجات: <span class="num">@Model.NoonProducts</span> (متوفر <span class="num">@Model.NoonAvailable</span>)</li>
-                    <li>براندات مفعّلة: <span class="num">@Model.NoonBrands</span></li>
-                    <li>طلبات آخر ساعة: <span class="num">@Model.NoonRequestsLastHour</span> (فشل <span class="num">@Model.NoonFailedLastHour</span>)</li>
-                </ul>
-                <a asp-controller="NoonBrands" asp-action="Index" class="stretched-link" aria-label="لوحة نون"></a>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-4">
-        <div class="card feature-card h-100 position-relative">
-            <div class="card-body">
-                <div class="feature-icon"><i class="bi bi-link-45deg"></i></div>
-                <h2 class="h5">ربط أمازون ونون</h2>
-                <ul class="list-unstyled text-muted mb-0">
-                    <li>منتجات مربوطة: <span class="num">@Model.Links</span></li>
-                </ul>
-                <a asp-controller="ProductLinks" asp-action="Index" class="stretched-link" aria-label="ربط أمازون ونون"></a>
-            </div>
-        </div>
-    </div>
-</div>
+@section Head {
+    <link rel="canonical" href="@canonical" />
+    <link rel="alternate" hreflang="ar" href="@hreflangAr" />
+    <link rel="alternate" hreflang="en" href="@hreflangEn" />
+    <link rel="alternate" hreflang="x-default" href="@hreflangAr" />
+    @if (prevUrl != null)
+    {
+        <link rel="prev" href="@prevUrl" />
+    }
+    @if (nextUrl != null)
+    {
+        <link rel="next" href="@nextUrl" />
+    }
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="@brand" />
+    <meta property="og:title" content="@titleCore" />
+    <meta property="og:description" content="@description" />
+    <meta property="og:url" content="@canonical" />
+    <meta property="og:image" content="@ogImage" />
+    <meta property="og:locale" content="@(ar ? "ar_EG" : "en_US")" />
+    <meta property="og:locale:alternate" content="@(ar ? "en_US" : "ar_EG")" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="@titleCore" />
+    <meta name="twitter:description" content="@description" />
+    <meta name="twitter:image" content="@ogImage" />
+
+    <script type="application/ld+json">@Html.Raw(jsonLdText)</script>
+}
+
+<header class="pub-header">
+    <a class="pub-logo" href="@Url.Action("Index", Route(page: 1, clearTag: true))" aria-label="@brand">
+        <img src="~/images/sinbad-logo.png" alt="@brand" width="40" height="40" />
+    </a>
+    <a class="tg-promo" href="https://t.me/OrudElSindbad" target="_blank" rel="noopener">
+        <svg class="tg-icon" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path fill="currentColor" d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.788.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/>
+        </svg>
+        <span class="tg-promo-text">
+            @if (ar)
+            {
+                <span class="tg-promo-msg">انضم إلى قناتنا على تيليجرام — أحدث العروض والتخفيضات فور نزولها</span>
+                <span class="tg-promo-cta">اشترك الآن</span>
+            }
+            else
+            {
+                <span class="tg-promo-msg">Join our Telegram channel — latest deals as soon as they drop</span>
+                <span class="tg-promo-cta">Subscribe</span>
+            }
+        </span>
+    </a>
+    <button type="button" class="theme-toggle" id="theme-toggle"
+            title="@(ar ? "الوضع الليلي" : "Night mode")"
+            aria-label="@(ar ? "تبديل الوضع الليلي" : "Toggle night mode")"
+            data-label-day="@(ar ? "الوضع النهاري" : "Day mode")"
+            data-label-night="@(ar ? "الوضع الليلي" : "Night mode")">
+        <span class="theme-toggle-icon icon-moon" aria-hidden="true">☾</span>
+        <span class="theme-toggle-icon icon-sun" aria-hidden="true">☀</span>
+    </button>
+    <a class="lang-toggle" href="@Url.Action("Index", Route(page: 1, lang: switchLang))"
+       title="@switchTitle" aria-label="@switchTitle">
+        <span class="lang-toggle-icon" aria-hidden="true">🌐</span>
+        <span class="lang-toggle-code">@switchLabel</span>
+    </a>
+</header>
+
+<section class="pub-intro">
+    <h1>@h1</h1>
+    <p>@description</p>
+</section>
+
+@if (Model.Tags.Count > 0)
+{
+    <nav class="tag-bar" aria-label="@(ar ? "تصفية حسب الوسم" : "Filter by tag")">
+        <a class="tag-chip @(Model.SelectedTagId == null ? "is-active" : null)"
+           href="@Url.Action("Index", Route(page: 1, clearTag: true))">@(ar ? "الكل" : "All")</a>
+        @foreach (var tag in Model.Tags)
+        {
+            <a class="tag-chip @(Model.SelectedTagId == tag.Id ? "is-active" : null)"
+               href="@Url.Action("Index", Route(page: 1, tagId: tag.Id))">@tag.DisplayName(ar)</a>
+        }
+    </nav>
+}
+
+@if (Model.Deals.Count == 0)
+{
+    <section class="pub-empty">
+        <div class="pub-empty-mark" aria-hidden="true">%</div>
+        @if (ar)
+        {
+            <p class="pub-empty-title">لا توجد عروض الآن</p>
+            <p>ستظهر التخفيضات هنا فور توفرها. حاول مرة أخرى لاحقاً.</p>
+        }
+        else
+        {
+            <p class="pub-empty-title">No deals right now</p>
+            <p>Fresh price drops show up here as soon as they land. Check back soon.</p>
+        }
+    </section>
+}
+else
+{
+    <ul class="deal-grid" role="list">
+        @for (var i = 0; i < Model.Deals.Count; i++)
+        {
+            var d = Model.Deals[i];
+            var title = d.DisplayName(ar);
+            <li class="deal" style="--i:@i">
+                <a class="deal-link" href="@d.Url" target="_blank" rel="noopener sponsored">
+                    <div class="deal-media">
+                        @if (!string.IsNullOrEmpty(d.ImageUrl))
+                        {
+                            <img src="@d.ImageUrl" alt="@title" width="300" height="300" loading="@(i < 8 ? "eager" : "lazy")" decoding="async" />
+                        }
+                        else
+                        {
+                            <span class="deal-noimg" aria-hidden="true">@(ar ? "بدون صورة" : "No image")</span>
+                        }
+                    </div>
+                    <div class="deal-body">
+                        <h2 class="deal-name" dir="auto">@title</h2>
+                        <p class="deal-price">
+                            <span class="deal-currency">@(d.Currency ?? "EGP")</span>
+                            <span class="deal-amount">@d.Price.ToString("#,0.##", priceCulture)</span>
+                        </p>
+                    </div>
+                </a>
+            </li>
+        }
+    </ul>
+
+    @if (Model.TotalPages > 1)
+    {
+        var first = Math.Max(1, Model.Page - 2);
+        var last = Math.Min(Model.TotalPages, Model.Page + 2);
+        <nav class="pub-pager" aria-label="@(ar ? "الصفحات" : "Pages")">
+            @if (Model.Page > 1)
+            {
+                <a class="pager-btn" href="@Url.Action("Index", Route(page: Model.Page - 1))" rel="prev"
+                   aria-label="@(ar ? "الصفحة السابقة" : "Previous page")">&larr;</a>
+            }
+            @if (first > 1)
+            {
+                <a class="pager-btn" href="@Url.Action("Index", Route(page: 1))">1</a>
+                @if (first > 2) { <span class="pager-gap">&hellip;</span> }
+            }
+            @for (var n = first; n <= last; n++)
+            {
+                if (n == Model.Page)
+                {
+                    <span class="pager-btn is-current" aria-current="page">@n</span>
+                }
+                else
+                {
+                    <a class="pager-btn" href="@Url.Action("Index", Route(page: n))">@n</a>
+                }
+            }
+            @if (last < Model.TotalPages)
+            {
+                @if (last < Model.TotalPages - 1) { <span class="pager-gap">&hellip;</span> }
+                <a class="pager-btn" href="@Url.Action("Index", Route(page: Model.TotalPages))">@Model.TotalPages</a>
+            }
+            @if (Model.Page < Model.TotalPages)
+            {
+                <a class="pager-btn" href="@Url.Action("Index", Route(page: Model.Page + 1))" rel="next"
+                   aria-label="@(ar ? "الصفحة التالية" : "Next page")">&rarr;</a>
+            }
+        </nav>
+    }
+}

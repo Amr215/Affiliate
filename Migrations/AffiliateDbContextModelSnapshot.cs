@@ -184,6 +184,13 @@ namespace Affiliate.Migrations
                         .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
+                    b.Property<decimal?>("ExternalLowestPrice")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<DateTime?>("ExternalLowestPriceSetAt")
+                        .HasColumnType("datetime2");
+
                     b.Property<decimal?>("HighestPrice")
                         .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
@@ -226,6 +233,9 @@ namespace Affiliate.Migrations
 
                     b.Property<string>("Name")
                         .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("NameAr")
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<DateTime?>("NotAvailableDate")
@@ -412,6 +422,9 @@ namespace Affiliate.Migrations
                     b.Property<int>("StartPage")
                         .HasColumnType("int");
 
+                    b.Property<int?>("TagId")
+                        .HasColumnType("int");
+
                     b.Property<string>("Url")
                         .IsRequired()
                         .HasMaxLength(4000)
@@ -419,7 +432,34 @@ namespace Affiliate.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("TagId");
+
                     b.ToTable("ScraperUrls", (string)null);
+                });
+
+            modelBuilder.Entity("Affiliate.Models.SearchTag", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("NameAr")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("NameEn")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("NameEn");
+
+                    b.ToTable("SearchTags", (string)null);
                 });
 
             modelBuilder.Entity("Affiliate.Noon.Models.NoonBrandUrl", b =>
@@ -999,6 +1039,16 @@ namespace Affiliate.Migrations
                     b.Navigation("Product");
                 });
 
+            modelBuilder.Entity("Affiliate.Models.ScraperUrl", b =>
+                {
+                    b.HasOne("Affiliate.Models.SearchTag", "Tag")
+                        .WithMany("ScraperUrls")
+                        .HasForeignKey("TagId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Tag");
+                });
+
             modelBuilder.Entity("Affiliate.Noon.Models.NoonPriceHistory", b =>
                 {
                     b.HasOne("Affiliate.Noon.Models.NoonProduct", "NoonProduct")
@@ -1091,6 +1141,11 @@ namespace Affiliate.Migrations
                     b.Navigation("OxylabsRequestLogs");
 
                     b.Navigation("Products");
+                });
+
+            modelBuilder.Entity("Affiliate.Models.SearchTag", b =>
+                {
+                    b.Navigation("ScraperUrls");
                 });
 
             modelBuilder.Entity("Affiliate.Noon.Models.NoonBrandUrl", b =>

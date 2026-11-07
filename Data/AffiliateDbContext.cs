@@ -15,6 +15,7 @@ namespace Affiliate.Data
         public DbSet<Product> Products { get; set; }
         public DbSet<PriceHistory> PriceHistories { get; set; }
         public DbSet<ScraperUrl> ScraperUrls { get; set; }
+        public DbSet<SearchTag> SearchTags { get; set; }
         public DbSet<OxylabsRequestLog> OxylabsRequestLogs { get; set; }
         public DbSet<PublishAuditLog> PublishAuditLogs { get; set; }
         public DbSet<NoonBrandUrl> NoonBrandUrls { get; set; }
@@ -30,6 +31,14 @@ namespace Affiliate.Data
         {
             base.OnModelCreating(modelBuilder);
 
+            modelBuilder.Entity<SearchTag>(entity =>
+            {
+                entity.ToTable("SearchTags");
+                entity.Property(t => t.NameAr).HasMaxLength(100);
+                entity.Property(t => t.NameEn).HasMaxLength(100);
+                entity.HasIndex(t => t.NameEn);
+            });
+
             modelBuilder.Entity<ScraperUrl>(entity =>
             {
                 entity.ToTable("ScraperUrls");
@@ -37,6 +46,12 @@ namespace Affiliate.Data
                 entity.Property(s => s.Url).HasMaxLength(4000);
                 entity.Property(s => s.Domain).HasMaxLength(16);
                 entity.Property(s => s.DropAlertPercent).HasPrecision(5, 2);
+                entity.HasIndex(s => s.TagId);
+                entity.HasOne(s => s.Tag)
+                    .WithMany(t => t.ScraperUrls)
+                    .HasForeignKey(s => s.TagId)
+                    .IsRequired(false)
+                    .OnDelete(DeleteBehavior.SetNull);
             });
 
             modelBuilder.Entity<Product>(entity =>
@@ -47,6 +62,7 @@ namespace Affiliate.Data
                 entity.Property(p => p.DropPercent).HasPrecision(18, 2);
                 entity.Property(p => p.DropBaselinePrice).HasPrecision(18, 2);
                 entity.Property(p => p.LastDropAlertPercent).HasPrecision(18, 2);
+                entity.Property(p => p.ExternalLowestPrice).HasPrecision(18, 2);
                 entity.Property(p => p.LastComparePrice).HasPrecision(18, 2);
 
                 // ASIN is the natural product key and the scraper's hot lookup path.

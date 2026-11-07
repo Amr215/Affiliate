@@ -1,0 +1,228 @@
+@model ProductsIndexViewModel
+@{
+    ViewData["Title"] = "الأسعار الخارجية";
+    ViewData["FilterAction"] = "ExternalPrices";
+}
+
+<div class="page-toolbar">
+    <div>
+        <h1 class="h2">الأسعار الخارجية</h1>
+        <p class="text-muted mb-0">
+            <span class="stat-pill"><i class="bi bi-box-seam"></i> @Model.TotalCount نتيجة</span>
+            <span class="small ms-2">أقل سعر للمنتج خارج أمازون — يُستخدم لحساب نسبة الخصم في الصفحة العامة.</span>
+        </p>
+    </div>
+</div>
+
+<div id="externalPriceStatus" class="alert alert-dismissible fade d-none mb-3" role="alert">
+    <span id="externalPriceStatusText"></span>
+    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="إغلاق"></button>
+</div>
+
+@Html.AntiForgeryToken()
+
+<partial name="_ProductFilters" model="Model" />
+
+<div class="table-panel">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+            <thead>
+                <tr>
+                    <th style="width:100px"></th>
+                    <th>الاسم</th>
+                    <th>سعر أمازون</th>
+                    <th>الخصم</th>
+                    <th></th>
+                    <th style="min-width:260px">أقل سعر خارجي</th>
+                </tr>
+            </thead>
+            <tbody>
+            @foreach (var p in Model.Products)
+            {
+                decimal? discount = p.ExternalLowestPrice is > 0 && p.CurrentPrice.HasValue
+                    ? Math.Round((p.ExternalLowestPrice.Value - p.CurrentPrice.Value) / p.ExternalLowestPrice.Value * 100, 1)
+                    : null;
+                <tr id="product-@p.Id" data-product-id="@p.Id" data-current-price="@(p.CurrentPrice?.ToString(System.Globalization.CultureInfo.InvariantCulture))">
+                    <td style="width:100px">
+                        @if (!string.IsNullOrEmpty(p.ImageUrl))
+                        {
+                            <img src="@p.ImageUrl" alt="" class="product-thumb" width="88" height="88" loading="lazy" />
+                        }
+                    </td>
+                    <td style="min-width:180px;max-width:360px">
+                        <a asp-action="Details" asp-route-id="@p.Id" class="product-title arabic-text text-reset text-decoration-none">
+                            @(string.IsNullOrWhiteSpace(p.Name) ? "(بدون عنوان)" : p.Name)
+                        </a>
+                        @if (!string.IsNullOrWhiteSpace(p.Asin))
+                        {
+                            <div class="small text-muted">
+                                <a href="https://www.amazon.eg/dp/@p.Asin.Trim()" target="_blank" rel="noopener" class="asin">@p.Asin</a>
+                            </div>
+                        }
+                    </td>
+                    <td class="num text-nowrap">
+                        @if (p.CurrentPrice.HasValue)
+                        {
+                            <span class="fw-semibold">@p.CurrentPrice.Value.ToString("0.##") @p.Currency</span>
+                        }
+                        else
+                        {
+                            <span class="text-muted">—</span>
+                        }
+                    </td>
+                    <td class="num external-discount">
+                        @if (discount.HasValue)
+                        {
+                            <span class="badge @(discount > 0 ? "bg-success" : "bg-secondary")">@discount.Value.ToString("0.#")%</span>
+                        }
+                        else
+                        {
+                            <span class="text-muted">—</span>
+                        }
+                    </td>
+                    <td>
+                        <a href="https://www.google.com/search?q=@Uri.EscapeDataString(p.Name ?? "")" target="_blank" rel="noopener"
+                           class="btn btn-sm btn-outline-primary text-nowrap">
+                            <i class="bi bi-google"></i> بحث جوجل
+                        </a>
+                    </td>
+                    <td>
+                        <form class="external-price-form d-flex gap-2 align-items-center" data-product-id="@p.Id">
+                            <input type="text" inputmode="decimal" name="externalLowestPrice" class="form-control form-control-sm ltr external-price-input"
+                                   style="max-width:9rem" placeholder="—" aria-label="أقل سعر خارجي"
+                                   value="@(p.ExternalLowestPrice?.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture))" />
+                            <button type="submit" class="btn btn-sm btn-primary text-nowrap">
+                                <i class="bi bi-save"></i> حفظ
+                            </button>
+                        </form>
+                        <div class="small text-muted mt-1 num external-price-set-at">
+                            @(p.ExternalLowestPriceSetAt.HasValue
+                                ? p.ExternalLowestPriceSetAt.Value.ToString("yyyy-MM-dd HH:mm") + " UTC"
+                                : "")
+                        </div>
+                    </td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+@if (Model.Products.Count == 0)
+{
+    <div class="empty-state">
+        <i class="bi bi-inbox"></i>
+        <p class="mb-0">لا توجد منتجات مطابقة لعوامل التصفية.</p>
+    </div>
+}
+
+<partial name="_ProductPagination" model="Model" />
+
+@section Scripts {
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/css/tom-select.bootstrap5.min.css" />
+<script src="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/js/tom-select.complete.min.js"></script>
+<script>
+new TomSelect('#scraperUrlFilter', {
+    allowEmptyOption: true,
+    maxOptions: null,
+    render: {
+        no_results: () => '<div class="no-results">لا توجد نتائج</div>'
+    }
+});
+</script>
+<script>
+(() => {
+    const saveUrl = '@Url.Action("SaveExternalLowestPrice")';
+    const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value;
+    const statusEl = document.getElementById('externalPriceStatus');
+    const statusText = document.getElementById('externalPriceStatusText');
+
+    function showStatus(message, ok) {
+        statusText.textContent = message;
+        statusEl.classList.remove('d-none', 'alert-success', 'alert-danger', 'show');
+        statusEl.classList.add(ok ? 'alert-success' : 'alert-danger', 'show');
+    }
+
+    function formatUtc(iso) {
+        if (!iso) return '';
+        const d = new Date(iso);
+        const pad = n => String(n).padStart(2, '0');
+        return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())} UTC`;
+    }
+
+    function updateRow(row, data) {
+        const input = row.querySelector('.external-price-input');
+        if (input) {
+            input.value = data.externalLowestPrice == null
+                ? ''
+                : Number(data.externalLowestPrice).toLocaleString('en-US', {
+                    useGrouping: false,
+                    maximumFractionDigits: 2
+                });
+        }
+
+        const setAt = row.querySelector('.external-price-set-at');
+        if (setAt)
+            setAt.textContent = formatUtc(data.externalLowestPriceSetAt);
+
+        const discountCell = row.querySelector('.external-discount');
+        if (discountCell) {
+            if (data.discountPercent == null) {
+                discountCell.innerHTML = '<span class="text-muted">—</span>';
+            } else {
+                const pct = Number(data.discountPercent);
+                const cls = pct > 0 ? 'bg-success' : 'bg-secondary';
+                discountCell.innerHTML = `<span class="badge ${cls}">${pct.toLocaleString('en-US', { maximumFractionDigits: 1 })}%</span>`;
+            }
+        }
+
+        row.classList.add('table-success');
+        setTimeout(() => row.classList.remove('table-success'), 900);
+    }
+
+    document.querySelectorAll('.external-price-form').forEach(form => {
+        form.addEventListener('submit', async e => {
+            e.preventDefault();
+            const row = form.closest('tr');
+            const id = form.dataset.productId;
+            const input = form.querySelector('.external-price-input');
+            const btn = form.querySelector('button[type="submit"]');
+            if (!id || !input || !btn) return;
+
+            btn.disabled = true;
+            input.disabled = true;
+            try {
+                const body = new URLSearchParams();
+                body.set('id', id);
+                body.set('externalLowestPrice', input.value.trim());
+                if (token) body.set('__RequestVerificationToken', token);
+
+                const res = await fetch(saveUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+                        'RequestVerificationToken': token
+                    },
+                    body
+                });
+
+                const data = await res.json().catch(() => null);
+                if (!res.ok || !data?.success) {
+                    showStatus(data?.message || 'تعذر حفظ السعر.', false);
+                    return;
+                }
+
+                updateRow(row, data);
+                showStatus(data.message, true);
+            } catch {
+                showStatus('تعذر الاتصال بالخادم.', false);
+            } finally {
+                btn.disabled = false;
+                input.disabled = false;
+                input.focus();
+            }
+        });
+    });
+})();
+</script>
+}

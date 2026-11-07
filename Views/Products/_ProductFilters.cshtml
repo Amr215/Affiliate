@@ -1,0 +1,208 @@
+@model ProductsIndexViewModel
+@{
+    var f = Model.Filter;
+    var filterAction = ViewData["FilterAction"] as string ?? "Index";
+}
+
+<form method="get" asp-action="@filterAction" class="card filter-card mb-4">
+    <div class="card-header d-flex align-items-center justify-content-between">
+        <span><i class="bi bi-funnel"></i> عوامل التصفية</span>
+        <button class="btn btn-sm btn-outline-secondary d-md-none" type="button" data-bs-toggle="collapse" data-bs-target="#filtersBody" aria-expanded="true">
+            إظهار / إخفاء
+        </button>
+    </div>
+    <div class="collapse show" id="filtersBody">
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-sm-6 col-lg-4">
+                    <label asp-for="Filter.Search" class="form-label">بحث</label>
+                    <input asp-for="Filter.Search" name="Search" class="form-control" placeholder="الاسم، ASIN، الشركة…" />
+                </div>
+                <div class="col-sm-6 col-lg-2">
+                    <label asp-for="Filter.Asin" class="form-label">ASIN</label>
+                    <input asp-for="Filter.Asin" name="Asin" class="form-control ltr" />
+                </div>
+                <div class="col-sm-6 col-lg-3">
+                    <label asp-for="Filter.ScraperUrlId" class="form-label">رابط السكرابر</label>
+                    <select id="scraperUrlFilter" name="ScraperUrlId" class="form-select" placeholder="ابحث بالاسم…">
+                        <option value="">الكل</option>
+                        @foreach (var s in Model.Searches)
+                        {
+                            if (f.ScraperUrlId == s.Id)
+                                {
+                                    <option value="@s.Id" selected>@s.Name</option>
+                                }
+                                else
+                                {
+                                    <option value="@s.Id">@s.Name</option>
+                                }
+                        }
+                    </select>
+                </div>
+                <div class="col-sm-6 col-lg-3">
+                    <label asp-for="Filter.Manufacturer" class="form-label">الشركة المصنّعة</label>
+                    <select name="Manufacturer" class="form-select">
+                        <option value="">الكل</option>
+                        @foreach (var m in Model.Manufacturers)
+                        {
+                            if (f.Manufacturer == m)
+                            {
+                                <option value="@m" selected>@m</option>
+                            }
+                            else
+                            {
+                                <option value="@m">@m</option>
+                            }
+                        }
+                    </select>
+                </div>
+                <div class="col-sm-6 col-lg-3">
+                    <label asp-for="Filter.Status" class="form-label">الحالة</label>
+                    <select name="Status" class="form-select">
+                        <option value="">الكل</option>
+                        @foreach (var s in Model.Statuses)
+                        {
+                            if (f.Status == s)
+                            {
+                                <option value="@s" selected>@s</option>
+                            }
+                            else
+                            {
+                                <option value="@s">@s</option>
+                            }
+                        }
+                    </select>
+                </div>
+
+                <div class="col-6 col-md-2">
+                    <label asp-for="Filter.Currency" class="form-label">العملة</label>
+                    <select name="Currency" class="form-select">
+                        <option value="">الكل</option>
+                        @foreach (var c in Model.Currencies)
+                        {
+                            if (f.Currency == c)
+                            {
+                                <option value="@c" selected>@c</option>
+                            }
+                            else
+                            {
+                                <option value="@c">@c</option>
+                            }
+                        }
+                    </select>
+                </div>
+                <div class="col-6 col-md-2">
+                    <label asp-for="Filter.MinPrice" class="form-label">أقل سعر</label>
+                    <input asp-for="Filter.MinPrice" name="MinPrice" class="form-control ltr" type="number" step="1" min="0" />
+                </div>
+                <div class="col-6 col-md-2">
+                    <label asp-for="Filter.MaxPrice" class="form-label">أعلى سعر</label>
+                    <input asp-for="Filter.MaxPrice" name="MaxPrice" class="form-control ltr" type="number" step="1" min="0" />
+                </div>
+                <div class="col-6 col-md-2">
+                    <label asp-for="Filter.MinDropPercent" class="form-label">أقل انخفاض %</label>
+                    <input asp-for="Filter.MinDropPercent" name="MinDropPercent" class="form-control ltr" step="0.1" min="0" max="100" />
+                </div>
+                <div class="col-6 col-md-2">
+                    <label asp-for="Filter.MinRating" class="form-label">أقل تقييم</label>
+                    <input asp-for="Filter.MinRating" name="MinRating" class="form-control ltr" step="0.1" min="0" max="5" />
+                </div>
+                <div class="col-6 col-md-2">
+                    <label asp-for="Filter.MinReviews" class="form-label">أقل مراجعات</label>
+                    <input asp-for="Filter.MinReviews" name="MinReviews" class="form-control ltr" />
+                </div>
+                <div class="col-6 col-md-2">
+                    <label asp-for="Filter.PageSize" class="form-label">حجم الصفحة</label>
+                    <select name="PageSize" class="form-select" asp-for="Filter.PageSize">
+                        <option value="10">10</option>
+                        <option value="25">25</option>
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                        <option value="500">500</option>
+                    </select>
+                </div>
+
+                <div class="col-sm-6 col-lg-3">
+                    <label asp-for="Filter.LastCheckedFrom" class="form-label">آخر فحص من</label>
+                    <input asp-for="Filter.LastCheckedFrom" name="LastCheckedFrom" class="form-control" type="date" />
+                </div>
+                <div class="col-sm-6 col-lg-3">
+                    <label asp-for="Filter.LastCheckedTo" class="form-label">آخر فحص إلى</label>
+                    <input asp-for="Filter.LastCheckedTo" name="LastCheckedTo" class="form-control" type="date" />
+                </div>
+                <div class="col-sm-6 col-lg-3">
+                    <label asp-for="Filter.CreatedFrom" class="form-label">تاريخ الإنشاء من</label>
+                    <input asp-for="Filter.CreatedFrom" name="CreatedFrom" class="form-control" type="date" />
+                </div>
+                <div class="col-sm-6 col-lg-3">
+                    <label asp-for="Filter.CreatedTo" class="form-label">تاريخ الإنشاء إلى</label>
+                    <input asp-for="Filter.CreatedTo" name="CreatedTo" class="form-control" type="date" />
+                </div>
+
+                <div class="col-6 col-md-2">
+                    <label asp-for="Filter.IsAvailable" class="form-label">متوفر</label>
+                    <select name="IsAvailable" class="form-select">
+                        <option value="">الكل</option>
+                        @if (f.IsAvailable == true) { <option value="true" selected>نعم</option> } else { <option value="true">نعم</option> }
+                        @if (f.IsAvailable == false) { <option value="false" selected>لا</option> } else { <option value="false">لا</option> }
+                    </select>
+                </div>
+                <div class="col-6 col-md-2">
+                    <label asp-for="Filter.IsBlocked" class="form-label">محظور</label>
+                    <select name="IsBlocked" class="form-select">
+                        <option value="">الكل</option>
+                        @if (f.IsBlocked == true) { <option value="true" selected>نعم</option> } else { <option value="true">نعم</option> }
+                        @if (f.IsBlocked == false) { <option value="false" selected>لا</option> } else { <option value="false">لا</option> }
+                    </select>
+                </div>
+                <div class="col-6 col-md-2 d-flex align-items-end">
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="checkbox" name="HasNotAvailableDate" value="true"
+                               id="HasNotAvailableDate" @(f.HasNotAvailableDate ? "checked" : null) />
+                        <label class="form-check-label" for="HasNotAvailableDate">لديه تاريخ عدم توفر</label>
+                    </div>
+                </div>
+                <div class="col-6 col-md-2">
+                    <label asp-for="Filter.IsPrime" class="form-label">Prime</label>
+                    <select name="IsPrime" class="form-select">
+                        <option value="">الكل</option>
+                        @if (f.IsPrime == true) { <option value="true" selected>نعم</option> } else { <option value="true">نعم</option> }
+                        @if (f.IsPrime == false) { <option value="false" selected>لا</option> } else { <option value="false">لا</option> }
+                    </select>
+                </div>
+                <div class="col-6 col-md-2">
+                    <label asp-for="Filter.IsSponsored" class="form-label">مموّل</label>
+                    <select name="IsSponsored" class="form-select">
+                        <option value="">الكل</option>
+                        @if (f.IsSponsored == true) { <option value="true" selected>نعم</option> } else { <option value="true">نعم</option> }
+                        @if (f.IsSponsored == false) { <option value="false" selected>لا</option> } else { <option value="false">لا</option> }
+                    </select>
+                </div>
+                <div class="col-6 col-md-2">
+                    <label asp-for="Filter.IsBestSeller" class="form-label">الأكثر مبيعاً</label>
+                    <select name="IsBestSeller" class="form-select">
+                        <option value="">الكل</option>
+                        @if (f.IsBestSeller == true) { <option value="true" selected>نعم</option> } else { <option value="true">نعم</option> }
+                        @if (f.IsBestSeller == false) { <option value="false" selected>لا</option> } else { <option value="false">لا</option> }
+                    </select>
+                </div>
+                <div class="col-6 col-md-2">
+                    <label asp-for="Filter.SortBy" class="form-label">ترتيب حسب</label>
+                    <select name="SortBy" class="form-select" asp-items="ViewBag.SortByOptions"></select>
+                </div>
+                <div class="col-6 col-md-2">
+                    <label asp-for="Filter.SortDir" class="form-label">الاتجاه</label>
+                    <select name="SortDir" class="form-select">
+                        @if (f.SortDir == "desc") { <option value="desc" selected>تنازلي</option> } else { <option value="desc">تنازلي</option> }
+                        @if (f.SortDir == "asc") { <option value="asc" selected>تصاعدي</option> } else { <option value="asc">تصاعدي</option> }
+                    </select>
+                </div>
+            </div>
+
+            <div class="mt-3 d-flex flex-wrap gap-2">
+                <button type="submit" class="btn btn-primary"><i class="bi bi-check2"></i> تطبيق</button>
+                <a asp-action="@filterAction" class="btn btn-outline-secondary">إعادة تعيين</a>
+            </div>
+        </div>
+    </div>
+</form>

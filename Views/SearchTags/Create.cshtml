@@ -1,0 +1,32 @@
+@model SearchTag
+@{
+    ViewData["Title"] = "وسم جديد";
+}
+
+<div class="page-toolbar">
+    <div>
+        <h1 class="h2">وسم جديد</h1>
+    </div>
+</div>
+
+<form asp-action="Create" method="post" class="card">
+    <div class="card-body">
+        <div asp-validation-summary="ModelOnly" class="text-danger mb-3"></div>
+        <div class="row g-3">
+            <div class="col-md-6">
+                <label asp-for="NameAr" class="form-label"></label>
+                <input asp-for="NameAr" class="form-control arabic-text" />
+                <span asp-validation-for="NameAr" class="text-danger"></span>
+            </div>
+            <div class="col-md-6">
+                <label asp-for="NameEn" class="form-label"></label>
+                <input asp-for="NameEn" class="form-control ltr" />
+                <span asp-validation-for="NameEn" class="text-danger"></span>
+            </div>
+        </div>
+    </div>
+    <div class="card-footer d-flex gap-2">
+        <button type="submit" class="btn btn-primary">حفظ</button>
+        <a asp-action="Index" class="btn btn-outline-secondary">إلغاء</a>
+    </div>
+</form>

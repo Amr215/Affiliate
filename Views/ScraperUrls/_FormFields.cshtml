@@ -60,6 +60,14 @@
         <span asp-validation-for="Category" class="text-danger"></span>
         <div class="form-text">يحدد مجموعة تيليجرام. بدون تصنيف لا تُرسل تنبيهات.</div>
     </div>
+    <div class="col-md-3">
+        <label asp-for="TagId" class="form-label">وسم البحث</label>
+        <select asp-for="TagId" asp-items="ViewBag.TagOptions" class="form-select arabic-text">
+            <option value="">بدون وسم</option>
+        </select>
+        <span asp-validation-for="TagId" class="text-danger"></span>
+        <div class="form-text">يُستخدم لتصفية منتجات هذا الرابط في الصفحة العامة.</div>
+    </div>
     <div class="col-md-3 d-flex align-items-end">
         <div class="form-check mb-2">
             <input asp-for="IsEnabled" class="form-check-input" />

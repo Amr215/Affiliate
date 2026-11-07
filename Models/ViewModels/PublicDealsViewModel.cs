@@ -1,0 +1,44 @@
+namespace Affiliate.ViewModels
+{
+    public class PublicDealsViewModel
+    {
+        public IReadOnlyList<PublicDealItem> Deals { get; set; } = [];
+        public IReadOnlyList<PublicDealTagOption> Tags { get; set; } = [];
+        public int? SelectedTagId { get; set; }
+        public int Page { get; set; } = 1;
+        public int TotalPages { get; set; } = 1;
+        public int TotalCount { get; set; }
+
+        /// <summary><c>en</c> or <c>ar</c>. Defaults to Arabic.</summary>
+        public string Lang { get; set; } = "ar";
+
+        public bool IsArabic => string.Equals(Lang, "ar", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public class PublicDealTagOption
+    {
+        public int Id { get; set; }
+        public string NameEn { get; set; } = string.Empty;
+        public string NameAr { get; set; } = string.Empty;
+
+        public string DisplayName(bool arabic) =>
+            arabic
+                ? (string.IsNullOrWhiteSpace(NameAr) ? NameEn : NameAr)
+                : (string.IsNullOrWhiteSpace(NameEn) ? NameAr : NameEn);
+    }
+
+    public class PublicDealItem
+    {
+        public string Name { get; set; } = string.Empty;
+        public string? NameAr { get; set; }
+        public string? ImageUrl { get; set; }
+        public decimal Price { get; set; }
+        public string? Currency { get; set; }
+
+        /// <summary>Site-relative affiliate redirect (<c>/{code}</c>).</summary>
+        public string Url { get; set; } = string.Empty;
+
+        public string DisplayName(bool arabic) =>
+            arabic && !string.IsNullOrWhiteSpace(NameAr) ? NameAr! : Name;
+    }
+}

@@ -1,0 +1,45 @@
+@{
+    Layout = "_PublicLayout";
+    var ar = string.Equals(ViewData["Lang"] as string, "ar", StringComparison.OrdinalIgnoreCase);
+    var switchLang = ar ? "en" : "ar";
+    var switchLabel = ar ? "EN" : "ع";
+    var switchTitle = ar ? "English" : "العربية";
+}
+
+<header class="pub-header">
+    <a class="pub-logo" asp-controller="Home" asp-action="Index" asp-route-lang="@(ar ? "ar" : "en")" aria-label="@(ar ? "عروض السندباد" : "El Sindbad Deals")">
+        <img src="~/images/sinbad-logo.png" alt="@(ar ? "السندباد" : "El Sindbad")" width="40" height="40" />
+    </a>
+    <a class="pub-page-back" asp-controller="Home" asp-action="Index" asp-route-lang="@(ar ? "ar" : "en")">
+        @(ar ? "العودة للعروض" : "Back to deals")
+    </a>
+    <button type="button" class="theme-toggle" id="theme-toggle"
+            title="@(ar ? "الوضع الليلي" : "Night mode")"
+            aria-label="@(ar ? "تبديل الوضع الليلي" : "Toggle night mode")"
+            data-label-day="@(ar ? "الوضع النهاري" : "Day mode")"
+            data-label-night="@(ar ? "الوضع الليلي" : "Night mode")">
+        <span class="theme-toggle-icon icon-moon" aria-hidden="true">☾</span>
+        <span class="theme-toggle-icon icon-sun" aria-hidden="true">☀</span>
+    </button>
+    <a class="lang-toggle" asp-controller="Home" asp-action="About" asp-route-lang="@switchLang"
+       title="@switchTitle" aria-label="@switchTitle">
+        <span class="lang-toggle-icon" aria-hidden="true">🌐</span>
+        <span class="lang-toggle-code">@switchLabel</span>
+    </a>
+</header>
+
+<article class="pub-page">
+    <h1>@(ar ? "من نحن" : "About us")</h1>
+    @if (ar)
+    {
+        <p>عروض السندباد موقع يعرض تخفيضات مختارة بعناية، مع التركيز على وضوح السعر وسهولة المقارنة.</p>
+        <p>نجمع العروض المهمة ونحدّثها باستمرار، ونشارك الأحدث أيضاً عبر قناتنا على تيليجرام حتى يصلك التنبيه في وقته.</p>
+        <p>هدفنا أن تجد عرضاً يستحق وقتك — بدون ضوضاء وبدون تعقيد.</p>
+    }
+    else
+    {
+        <p>El Sindbad Deals is a site for carefully selected discounts, with a focus on clear prices and easy comparison.</p>
+        <p>We keep the list updated and also share the newest drops on our Telegram channel so you can catch them in time.</p>
+        <p>Our goal is simple: help you find a deal worth your time — without noise or clutter.</p>
+    }
+</article>

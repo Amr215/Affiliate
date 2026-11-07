@@ -1,0 +1,57 @@
+@model ProductsIndexViewModel
+@{
+    var f = Model.Filter;
+    var filterAction = ViewData["FilterAction"] as string ?? "Index";
+}
+
+@if (Model.TotalPages > 1)
+{
+    <nav class="mt-3 d-flex flex-wrap justify-content-center align-items-center gap-2" aria-label="صفحات المنتجات">
+        <ul class="pagination mb-0">
+            @{
+                var prevDisabled = f.Page <= 1 ? "disabled" : null;
+                var nextDisabled = f.Page >= Model.TotalPages ? "disabled" : null;
+                var lastDisabled = f.Page >= Model.TotalPages ? "disabled" : null;
+            }
+            <li class="page-item @prevDisabled">
+                <a class="page-link"
+                   asp-action="@filterAction"
+                   asp-all-route-data="@(f.ToRoute(f.Page - 1))">السابق</a>
+            </li>
+            <li class="page-item disabled">
+                <span class="page-link">صفحة @f.Page من @Model.TotalPages</span>
+            </li>
+            <li class="page-item @nextDisabled">
+                <a class="page-link"
+                   asp-action="@filterAction"
+                   asp-all-route-data="@(f.ToRoute(f.Page + 1))">التالي</a>
+            </li>
+            <li class="page-item @lastDisabled">
+                <a class="page-link"
+                   asp-action="@filterAction"
+                   asp-all-route-data="@(f.ToRoute(Model.TotalPages))">الأخيرة</a>
+            </li>
+        </ul>
+
+        <form method="get" asp-action="@filterAction" class="d-flex align-items-center gap-2" id="gotoPageForm">
+            @foreach (var kv in f.ToRoute(f.Page))
+            {
+                if (!string.Equals(kv.Key, "Page", StringComparison.OrdinalIgnoreCase))
+                {
+                    <input type="hidden" name="@kv.Key" value="@kv.Value" />
+                }
+            }
+            <label for="gotoPageInput" class="form-label mb-0 small text-muted text-nowrap">الذهاب إلى صفحة</label>
+            <input id="gotoPageInput"
+                   type="number"
+                   name="Page"
+                   class="form-control form-control-sm ltr"
+                   style="width:5rem"
+                   min="1"
+                   max="@Model.TotalPages"
+                   value="@f.Page"
+                   required />
+            <button type="submit" class="btn btn-sm btn-outline-primary">اذهب</button>
+        </form>
+    </nav>
+}

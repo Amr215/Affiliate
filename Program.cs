@@ -30,6 +30,9 @@ builder.Services.Configure<TelegramOptions>(
 builder.Services.Configure<AsinRecheckOptions>(
     builder.Configuration.GetSection(AsinRecheckOptions.SectionName));
 
+builder.Services.Configure<ArabicNameFillOptions>(
+    builder.Configuration.GetSection(ArabicNameFillOptions.SectionName));
+
 builder.Services.Configure<IspProxyOptions>(
     builder.Configuration.GetSection(IspProxyOptions.SectionName));
 
@@ -111,8 +114,10 @@ builder.Services.AddScoped<AmazonShortLinkService>();
 builder.Services.AddScoped<ITelegramNotifier, TelegramNotifier>();
 builder.Services.AddScoped<IPrepareForPublishService, PrepareForPublishService>();
 builder.Services.AddScoped<IAmazonScraperService, AmazonScraperService>();
+builder.Services.AddScoped<IArabicNameFillService, ArabicNameFillService>();
 builder.Services.AddHostedService<AmazonScraperBackgroundService>();
 builder.Services.AddHostedService<AsinRecheckBackgroundService>();
+builder.Services.AddHostedService<ArabicNameFillBackgroundService>();
 builder.Services.AddHostedService<KeepAliveBackgroundService>();
 builder.Services.AddHostedService<OxylabsRequestLogCleanupService>();
 builder.Services.AddHostedService<PublishAuditFlushService>();

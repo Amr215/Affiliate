@@ -1,0 +1,100 @@
+@{
+    var isArabic = string.Equals(ViewData["Lang"] as string, "ar", StringComparison.OrdinalIgnoreCase);
+    var htmlLang = isArabic ? "ar" : "en";
+    var htmlDir = isArabic ? "rtl" : "ltr";
+}
+<!DOCTYPE html>
+<html lang="@htmlLang" dir="@htmlDir">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#e8eef2" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#12161c" media="(prefers-color-scheme: dark)" />
+    <meta name="robots" content="@(ViewData["Robots"] as string ?? "index, follow, max-image-preview:large")" />
+    <meta name="author" content="@(isArabic ? "عروض السندباد" : "El Sindbad Deals")" />
+    <title>@(ViewData["Title"] ?? (isArabic ? "عروض السندباد" : "El Sindbad Deals"))</title>
+    @if (ViewData["MetaDescription"] is string metaDescription && !string.IsNullOrWhiteSpace(metaDescription))
+    {
+        <meta name="description" content="@metaDescription" />
+    }
+    @if (ViewData["MetaKeywords"] is string metaKeywords && !string.IsNullOrWhiteSpace(metaKeywords))
+    {
+        <meta name="keywords" content="@metaKeywords" />
+    }
+    <link rel="icon" href="~/favicon.ico" asp-append-version="true" />
+    <link rel="apple-touch-icon" href="~/images/sinbad-logo.png" asp-append-version="true" />
+    <script>
+        (function () {
+            try {
+                var saved = localStorage.getItem("pub-theme");
+                // Night mode is the default unless the user explicitly chose day.
+                var night = saved !== "day";
+                if (night) document.documentElement.classList.add("theme-night");
+            } catch (e) { }
+        })();
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Cairo:wght@500;600;700;800&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="~/css/public.css" asp-append-version="true" />
+    @await RenderSectionAsync("Head", required: false)
+</head>
+<body class="pub @(isArabic ? "is-ar" : "is-en")">
+    <main class="pub-main">
+        @RenderBody()
+    </main>
+    <footer class="pub-footer">
+        <div class="pub-footer-grid">
+            <section class="pub-footer-col" aria-labelledby="footer-about-title">
+                <h2 id="footer-about-title" class="pub-footer-heading">@(isArabic ? "من نحن" : "About us")</h2>
+                <p class="pub-footer-text">
+                    @(isArabic
+                        ? "عروض السندباد منصة لعرض أفضل التخفيضات المختارة يومياً، لتسهيل الوصول إلى الأسعار المناسبة بسرعة ووضوح."
+                        : "El Sindbad Deals highlights selected daily discounts so you can spot fair prices quickly and clearly.")
+                </p>
+                <a class="pub-footer-link" asp-controller="Home" asp-action="About" asp-route-lang="@htmlLang">
+                    @(isArabic ? "اقرأ المزيد" : "Read more")
+                </a>
+            </section>
+
+            <section class="pub-footer-col" aria-labelledby="footer-terms-title">
+                <h2 id="footer-terms-title" class="pub-footer-heading">@(isArabic ? "الشروط والأحكام" : "Terms & conditions")</h2>
+                <p class="pub-footer-text">
+                    @(isArabic
+                        ? "باستخدامك للموقع فإنك توافق على شروط الاستخدام المتعلقة بالعروض والروابط والأسعار المعروضة."
+                        : "By using this site you agree to the terms covering deals, outbound links, and displayed prices.")
+                </p>
+                <a class="pub-footer-link" asp-controller="Home" asp-action="Terms" asp-route-lang="@htmlLang">
+                    @(isArabic ? "عرض الشروط" : "View terms")
+                </a>
+            </section>
+
+            <section class="pub-footer-col" aria-labelledby="footer-telegram-title">
+                <h2 id="footer-telegram-title" class="pub-footer-heading">@(isArabic ? "تيليجرام" : "Telegram")</h2>
+                <p class="pub-footer-text">
+                    @(isArabic
+                        ? "انضم إلى قناتنا لتصل إليك أحدث العروض والتخفيضات فور نزولها."
+                        : "Join our channel for the latest deals and discounts as soon as they drop.")
+                </p>
+                <a class="pub-footer-link pub-footer-link-tg" href="https://t.me/OrudElSindbad" target="_blank" rel="noopener">
+                    <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <path fill="currentColor" d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.788.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/>
+                    </svg>
+                    @(isArabic ? "اشترك الآن" : "Subscribe now")
+                </a>
+            </section>
+
+            <section class="pub-footer-col" aria-labelledby="footer-rights-title">
+                <h2 id="footer-rights-title" class="pub-footer-heading">@(isArabic ? "الحقوق" : "Rights")</h2>
+                <p class="pub-footer-text">
+                    @(isArabic
+                        ? "جميع الحقوق محفوظة لعروض السندباد. لا يُسمح بنسخ المحتوى أو إعادة نشره دون إذن."
+                        : "All rights reserved to El Sindbad Deals. Content may not be copied or republished without permission.")
+                </p>
+                <p class="pub-footer-rights">&copy; @DateTime.UtcNow.Year @(isArabic ? "السندباد" : "El Sindbad")</p>
+            </section>
+        </div>
+    </footer>
+    <script src="~/js/public-theme.js" asp-append-version="true"></script>
+</body>
+</html>

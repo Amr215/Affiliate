@@ -2,6 +2,7 @@ using Affiliate.Data;
 using Affiliate.Models;
 using Affiliate.Services;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Rendering;
 using Microsoft.EntityFrameworkCore;
 
 namespace Affiliate.Controllers
@@ -87,8 +88,9 @@ namespace Affiliate.Controllers
             return View(item);
         }
 
-        public IActionResult Create()
+        public async Task<IActionResult> Create(CancellationToken cancellationToken)
         {
+            await PopulateTagOptionsAsync(cancellationToken);
             return View(new ScraperUrl());
         }
 
@@ -101,11 +103,16 @@ namespace Affiliate.Controllers
                 nameof(ScraperUrl.IsEnabled), nameof(ScraperUrl.IsAsinRecheckEnabled),
                 nameof(ScraperUrl.AsinRecheckIntervalMinutes),
                 nameof(ScraperUrl.LongUnavailableRecheckIntervalMinutes),
-                nameof(ScraperUrl.Category), nameof(ScraperUrl.DropAlertPercent))] ScraperUrl scraperUrl)
+                nameof(ScraperUrl.Category), nameof(ScraperUrl.DropAlertPercent),
+                nameof(ScraperUrl.TagId))] ScraperUrl scraperUrl,
+            CancellationToken cancellationToken)
         {
             Normalize(scraperUrl);
             if (!ModelState.IsValid)
+            {
+                await PopulateTagOptionsAsync(cancellationToken);
                 return View(scraperUrl);
+            }
 
             scraperUrl.CreatedAt = DateTime.UtcNow;
             _context.Add(scraperUrl);
@@ -114,15 +121,16 @@ namespace Affiliate.Controllers
             return RedirectToAction(nameof(Index));
         }
 
-        public async Task<IActionResult> Edit(int? id)
+        public async Task<IActionResult> Edit(int? id, CancellationToken cancellationToken)
         {
             if (id == null)
                 return NotFound();
 
-            var item = await _context.ScraperUrls.FindAsync(id);
+            var item = await _context.ScraperUrls.FindAsync([id.Value], cancellationToken);
             if (item == null)
                 return NotFound();
 
+            await PopulateTagOptionsAsync(cancellationToken, item.TagId);
             return View(item);
         }
 
@@ -138,14 +146,19 @@ namespace Affiliate.Controllers
                 nameof(ScraperUrl.AsinRecheckIntervalMinutes),
                 nameof(ScraperUrl.LongUnavailableRecheckIntervalMinutes),
                 nameof(ScraperUrl.Category),
-                nameof(ScraperUrl.DropAlertPercent))] ScraperUrl scraperUrl)
+                nameof(ScraperUrl.DropAlertPercent),
+                nameof(ScraperUrl.TagId))] ScraperUrl scraperUrl,
+            CancellationToken cancellationToken)
         {
             if (id != scraperUrl.Id)
                 return NotFound();
 
             Normalize(scraperUrl);
             if (!ModelState.IsValid)
+            {
+                await PopulateTagOptionsAsync(cancellationToken, scraperUrl.TagId);
                 return View(scraperUrl);
+            }
 
             var existing = await _context.ScraperUrls.AsNoTracking()
                 .FirstOrDefaultAsync(s => s.Id == id);
@@ -421,6 +434,16 @@ namespace Affiliate.Controllers
             return RedirectToAction(nameof(Details), new { id });
         }
 
+        private async Task PopulateTagOptionsAsync(CancellationToken cancellationToken, int? selectedTagId = null)
+        {
+            var tags = await _context.SearchTags.AsNoTracking()
+                .OrderBy(t => t.NameAr)
+                .Select(t => new { t.Id, Label = t.NameAr + " / " + t.NameEn })
+                .ToListAsync(cancellationToken);
+
+            ViewBag.TagOptions = new SelectList(tags, "Id", "Label", selectedTagId);
+        }
+
         private static void Normalize(ScraperUrl scraperUrl)
         {
             scraperUrl.Name = scraperUrl.Name?.Trim() ?? string.Empty;
@@ -430,6 +453,8 @@ namespace Affiliate.Controllers
                 : scraperUrl.Domain.Trim().Trim('.');
             if (scraperUrl.StartPage < 1)
                 scraperUrl.StartPage = 1;
+            if (scraperUrl.TagId is <= 0)
+                scraperUrl.TagId = null;
         }
 
         private static string InferDomain(string url)

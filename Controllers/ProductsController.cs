@@ -1,3 +1,4 @@
+using System.Globalization;
 using Affiliate.Data;
 using Affiliate.Models;
 using Affiliate.ViewModels;
@@ -26,6 +27,79 @@ namespace Affiliate.Controllers
 
         public async Task<IActionResult> Index([FromQuery] ProductFilterViewModel filter, CancellationToken cancellationToken)
         {
+            var model = await BuildIndexModelAsync(filter, cancellationToken);
+            ViewBag.SortByOptions = new SelectList(SortOptions, nameof(SelectListItem.Value), nameof(SelectListItem.Text), filter.SortBy);
+            return View(model);
+        }
+
+        public async Task<IActionResult> ExternalPrices([FromQuery] ProductFilterViewModel filter, CancellationToken cancellationToken)
+        {
+            var model = await BuildIndexModelAsync(filter, cancellationToken);
+            ViewBag.SortByOptions = new SelectList(SortOptions, nameof(SelectListItem.Value), nameof(SelectListItem.Text), filter.SortBy);
+            return View(model);
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SaveExternalLowestPrice(
+            int id,
+            string? externalLowestPrice,
+            CancellationToken cancellationToken)
+        {
+            var product = await _context.Products.FirstOrDefaultAsync(p => p.Id == id, cancellationToken);
+            if (product == null)
+                return NotFound(new { success = false, message = "لم يتم العثور على المنتج." });
+
+            if (!TryParsePrice(externalLowestPrice, out var price))
+                return BadRequest(new { success = false, message = "السعر الخارجي يجب أن يكون رقماً أكبر من صفر." });
+
+            if (product.ExternalLowestPrice != price)
+            {
+                product.ExternalLowestPrice = price;
+                product.ExternalLowestPriceSetAt = price.HasValue ? DateTime.UtcNow : null;
+                await _context.SaveChangesAsync(cancellationToken);
+            }
+
+            decimal? discountPercent = null;
+            if (price is > 0 && product.CurrentPrice is > 0)
+                discountPercent = Math.Round(
+                    (price.Value - product.CurrentPrice.Value) / price.Value * 100m,
+                    1,
+                    MidpointRounding.AwayFromZero);
+
+            return Ok(new
+            {
+                success = true,
+                message = price.HasValue
+                    ? $"تم حفظ السعر الخارجي ({price.Value.ToString("0.##", CultureInfo.InvariantCulture)})."
+                    : "تم حذف السعر الخارجي.",
+                id = product.Id,
+                externalLowestPrice = price,
+                externalLowestPriceSetAt = product.ExternalLowestPriceSetAt,
+                discountPercent,
+                currentPrice = product.CurrentPrice
+            });
+        }
+
+        /// <summary>Blank clears the price; otherwise must be a positive number ("." or "," decimal separator).</summary>
+        private static bool TryParsePrice(string? input, out decimal? price)
+        {
+            price = null;
+            if (string.IsNullOrWhiteSpace(input))
+                return true;
+
+            var text = input.Trim();
+            text = text.Contains('.') ? text.Replace(",", "") : text.Replace(',', '.');
+            if (!decimal.TryParse(text, NumberStyles.Number, CultureInfo.InvariantCulture, out var value)
+                || value <= 0)
+                return false;
+
+            price = Math.Round(value, 2, MidpointRounding.AwayFromZero);
+            return true;
+        }
+
+        private async Task<ProductsIndexViewModel> BuildIndexModelAsync(ProductFilterViewModel filter, CancellationToken cancellationToken)
+        {
             NormalizeFilter(filter);
 
             var query = ApplyFilters(_context.Products.AsNoTracking(), filter);
@@ -40,7 +114,7 @@ namespace Affiliate.Controllers
                 .Take(filter.PageSize)
                 .ToListAsync(cancellationToken);
 
-            var model = new ProductsIndexViewModel
+            return new ProductsIndexViewModel
             {
                 Filter = filter,
                 Products = products,
@@ -70,9 +144,6 @@ namespace Affiliate.Controllers
                     .Select(s => new ScraperUrlOption { Id = s.Id, Name = s.Name, Url = s.Url })
                     .ToListAsync(cancellationToken)
             };
-
-            ViewBag.SortByOptions = new SelectList(SortOptions, nameof(SelectListItem.Value), nameof(SelectListItem.Text), filter.SortBy);
-            return View(model);
         }
 
         private static readonly SelectListItem[] SortOptions =

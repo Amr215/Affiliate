@@ -4,6 +4,13 @@ namespace Affiliate.Models
     {
         public int Id { get; set; }
         public string Name { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Arabic product title from Amazon (<c>language=ar_AE</c>). Filled by
+        /// <c>ArabicNameFillService</c>; null until a successful Arabic search fetch.
+        /// </summary>
+        public string? NameAr { get; set; }
+
         public string Url { get; set; } = string.Empty;
         public string? Asin { get; set; } // Amazon Standard Identification Number
         public decimal? CurrentPrice { get; set; }
@@ -25,6 +32,15 @@ namespace Affiliate.Models
         /// Drop % (vs previous recorded price) of the last successfully sent Telegram alert.
         /// </summary>
         public decimal? LastDropAlertPercent { get; set; }
+
+        /// <summary>
+        /// Lowest price found outside Amazon, set manually by an admin. Public discount % is
+        /// (ExternalLowestPrice − CurrentPrice) / ExternalLowestPrice.
+        /// </summary>
+        public decimal? ExternalLowestPrice { get; set; }
+
+        /// <summary>UTC time <see cref="ExternalLowestPrice"/> was last changed.</summary>
+        public DateTime? ExternalLowestPriceSetAt { get; set; }
 
         /// <summary>
         /// The previous price when <see cref="CurrentPrice"/> last changed.

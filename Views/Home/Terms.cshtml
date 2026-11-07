@@ -1,0 +1,67 @@
+@{
+    Layout = "_PublicLayout";
+    var ar = string.Equals(ViewData["Lang"] as string, "ar", StringComparison.OrdinalIgnoreCase);
+    var switchLang = ar ? "en" : "ar";
+    var switchLabel = ar ? "EN" : "ع";
+    var switchTitle = ar ? "English" : "العربية";
+}
+
+<header class="pub-header">
+    <a class="pub-logo" asp-controller="Home" asp-action="Index" asp-route-lang="@(ar ? "ar" : "en")" aria-label="@(ar ? "عروض السندباد" : "El Sindbad Deals")">
+        <img src="~/images/sinbad-logo.png" alt="@(ar ? "السندباد" : "El Sindbad")" width="40" height="40" />
+    </a>
+    <a class="pub-page-back" asp-controller="Home" asp-action="Index" asp-route-lang="@(ar ? "ar" : "en")">
+        @(ar ? "العودة للعروض" : "Back to deals")
+    </a>
+    <button type="button" class="theme-toggle" id="theme-toggle"
+            title="@(ar ? "الوضع الليلي" : "Night mode")"
+            aria-label="@(ar ? "تبديل الوضع الليلي" : "Toggle night mode")"
+            data-label-day="@(ar ? "الوضع النهاري" : "Day mode")"
+            data-label-night="@(ar ? "الوضع الليلي" : "Night mode")">
+        <span class="theme-toggle-icon icon-moon" aria-hidden="true">☾</span>
+        <span class="theme-toggle-icon icon-sun" aria-hidden="true">☀</span>
+    </button>
+    <a class="lang-toggle" asp-controller="Home" asp-action="Terms" asp-route-lang="@switchLang"
+       title="@switchTitle" aria-label="@switchTitle">
+        <span class="lang-toggle-icon" aria-hidden="true">🌐</span>
+        <span class="lang-toggle-code">@switchLabel</span>
+    </a>
+</header>
+
+<article class="pub-page">
+    <h1>@(ar ? "الشروط والأحكام" : "Terms and conditions")</h1>
+    @if (ar)
+    {
+        <h2>١. طبيعة الخدمة</h2>
+        <p>يعرض الموقع عروضاً وأسعاراً لأغراض إعلامية. قد تتغير الأسعار أو تتوفر المنتجات بشكل مختلف على المتاجر الخارجية.</p>
+
+        <h2>٢. الروابط الخارجية</h2>
+        <p>عند الضغط على منتج قد يتم توجيهك إلى متجر خارجي. نحن غير مسؤولين عن محتوى تلك المواقع أو سياساتها أو عمليات الشراء فيها.</p>
+
+        <h2>٣. دقة المعلومات</h2>
+        <p>نسعى لعرض معلومات حديثة، لكن لا نضمن اكتمال أو دقة كل سعر أو وصف في كل لحظة.</p>
+
+        <h2>٤. الاستخدام المقبول</h2>
+        <p>يُمنع استخدام الموقع بطريقة تضر بالخدمة أو تحاول الوصول غير المصرح به أو نسخ المحتوى بشكل آلي مكثف دون إذن.</p>
+
+        <h2>٥. التعديلات</h2>
+        <p>قد نحدّث هذه الشروط من وقت لآخر. استمرارك في استخدام الموقع بعد التحديث يعني موافقتك على النسخة الأحدث.</p>
+    }
+    else
+    {
+        <h2>1. Nature of the service</h2>
+        <p>This site shows deals and prices for informational purposes. Prices and availability may change on external stores.</p>
+
+        <h2>2. External links</h2>
+        <p>Product links may take you to third-party stores. We are not responsible for their content, policies, or purchase process.</p>
+
+        <h2>3. Accuracy</h2>
+        <p>We aim to keep information current, but we do not guarantee every price or description is complete or exact at all times.</p>
+
+        <h2>4. Acceptable use</h2>
+        <p>You may not use the site in ways that harm the service, attempt unauthorized access, or scrape content at scale without permission.</p>
+
+        <h2>5. Changes</h2>
+        <p>These terms may be updated from time to time. Continued use after an update means you accept the latest version.</p>
+    }
+</article>

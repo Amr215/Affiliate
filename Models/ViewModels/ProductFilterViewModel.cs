@@ -77,6 +77,42 @@ namespace Affiliate.ViewModels
 
         [Display(Name = "Page size")]
         public int PageSize { get; set; } = 100;
+
+        /// <summary>Non-empty filter values as query-string route data for the given page.</summary>
+        public Dictionary<string, string?> ToRoute(int page)
+        {
+            var d = new Dictionary<string, string?>
+            {
+                ["Page"] = page.ToString(),
+                ["PageSize"] = PageSize.ToString(),
+                ["SortBy"] = SortBy,
+                ["SortDir"] = SortDir,
+                ["Search"] = Search,
+                ["Asin"] = Asin,
+                ["ScraperUrlId"] = ScraperUrlId?.ToString(),
+                ["Manufacturer"] = Manufacturer,
+                ["Currency"] = Currency,
+                ["Status"] = Status,
+                ["IsAvailable"] = IsAvailable?.ToString().ToLowerInvariant(),
+                ["IsBlocked"] = IsBlocked?.ToString().ToLowerInvariant(),
+                ["HasNotAvailableDate"] = HasNotAvailableDate ? "true" : null,
+                ["IsPrime"] = IsPrime?.ToString().ToLowerInvariant(),
+                ["IsSponsored"] = IsSponsored?.ToString().ToLowerInvariant(),
+                ["IsBestSeller"] = IsBestSeller?.ToString().ToLowerInvariant(),
+                ["MinPrice"] = MinPrice?.ToString(),
+                ["MaxPrice"] = MaxPrice?.ToString(),
+                ["MinDropPercent"] = MinDropPercent?.ToString(),
+                ["MinRating"] = MinRating?.ToString(),
+                ["MinReviews"] = MinReviews?.ToString(),
+                ["LastCheckedFrom"] = LastCheckedFrom?.ToString("yyyy-MM-dd"),
+                ["LastCheckedTo"] = LastCheckedTo?.ToString("yyyy-MM-dd"),
+                ["CreatedFrom"] = CreatedFrom?.ToString("yyyy-MM-dd"),
+                ["CreatedTo"] = CreatedTo?.ToString("yyyy-MM-dd")
+            };
+
+            return d.Where(kv => !string.IsNullOrEmpty(kv.Value))
+                .ToDictionary(kv => kv.Key, kv => kv.Value);
+        }
     }
 
     public class ProductsIndexViewModel

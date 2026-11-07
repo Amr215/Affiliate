@@ -57,6 +57,12 @@ namespace Affiliate.Models
         [Display(Name = "التصنيف")]
         public ScraperCategory? Category { get; set; }
 
+        /// <summary>Public homepage filter tag. When null, products from this URL are only shown under “All”.</summary>
+        [Display(Name = "وسم البحث")]
+        public int? TagId { get; set; }
+
+        public SearchTag? Tag { get; set; }
+
         /// <summary>
         /// Min drop % vs the previous price to send a Telegram alert. The same value is required
         /// below the average price when the drop is under 10%.

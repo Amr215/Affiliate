@@ -4,7 +4,7 @@
     // Each dashboard has its own navbar; the home page only shows the dashboard cards.
     var dashboardNav = controller switch
     {
-        "Home" when action == "Index" => null,
+        "Home" when action == "Dashboard" => null,
         "NoonBrands" or "NoonProducts" or "NoonLogs" or "NoonPublishAuditLogs" or "NoonReports" => "_NoonNav",
         "ProductLinks" => "_LinksNav",
         _ => "_AmazonNav"
@@ -28,7 +28,8 @@
     <header class="app-header">
         <nav class="navbar navbar-expand-lg navbar-dark app-navbar">
             <div class="container">
-                <a class="navbar-brand d-flex align-items-center gap-2" asp-area="" asp-controller="Home" asp-action="Index">
+                <a class="navbar-brand d-flex align-items-center gap-2" asp-area="" asp-controller="Home"
+                   asp-action="@(User.Identity?.IsAuthenticated == true ? "Dashboard" : "Index")">
                     <span class="brand-icon"><i class="bi bi-graph-up-arrow"></i></span>
                     <span>Affiliate</span>
                 </a>

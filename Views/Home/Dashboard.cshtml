@@ -1,0 +1,46 @@
+﻿@model HomeDashboardViewModel
+@{
+    ViewData["Title"] = "الرئيسية";
+}
+
+<div class="row g-3 feature-grid">
+    <div class="col-md-4">
+        <div class="card feature-card h-100 position-relative">
+            <div class="card-body">
+                <div class="feature-icon"><i class="bi bi-amazon"></i></div>
+                <h2 class="h5">لوحة أمازون</h2>
+                <ul class="list-unstyled text-muted mb-0">
+                    <li>المنتجات: <span class="num">@Model.AmazonProducts</span> (متوفر <span class="num">@Model.AmazonAvailable</span>)</li>
+                    <li>روابط مفعّلة: <span class="num">@Model.AmazonUrls</span></li>
+                </ul>
+                <a asp-controller="ScraperUrls" asp-action="Index" class="stretched-link" aria-label="لوحة أمازون"></a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card feature-card h-100 position-relative">
+            <div class="card-body">
+                <div class="feature-icon"><i class="bi bi-bag"></i></div>
+                <h2 class="h5">لوحة نون</h2>
+                <ul class="list-unstyled text-muted mb-0">
+                    <li>المنتجات: <span class="num">@Model.NoonProducts</span> (متوفر <span class="num">@Model.NoonAvailable</span>)</li>
+                    <li>براندات مفعّلة: <span class="num">@Model.NoonBrands</span></li>
+                    <li>طلبات آخر ساعة: <span class="num">@Model.NoonRequestsLastHour</span> (فشل <span class="num">@Model.NoonFailedLastHour</span>)</li>
+                </ul>
+                <a asp-controller="NoonBrands" asp-action="Index" class="stretched-link" aria-label="لوحة نون"></a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card feature-card h-100 position-relative">
+            <div class="card-body">
+                <div class="feature-icon"><i class="bi bi-link-45deg"></i></div>
+                <h2 class="h5">ربط أمازون ونون</h2>
+                <ul class="list-unstyled text-muted mb-0">
+                    <li>منتجات مربوطة: <span class="num">@Model.Links</span></li>
+                </ul>
+                <a asp-controller="ProductLinks" asp-action="Index" class="stretched-link" aria-label="ربط أمازون ونون"></a>
+            </div>
+        </div>
+    </div>
+</div>
