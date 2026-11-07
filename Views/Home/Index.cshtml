@@ -204,6 +204,9 @@
         <span class="theme-toggle-icon icon-moon" aria-hidden="true">☾</span>
         <span class="theme-toggle-icon icon-sun" aria-hidden="true">☀</span>
     </button>
+    <a class="tracker-header-link" asp-controller="PriceTracker" asp-action="Index" asp-route-lang="@Model.Lang">
+        @(ar ? "تتبع الأسعار" : "Tracker")
+    </a>
     <a class="lang-toggle" href="@Url.Action("Index", Route(page: 1, lang: switchLang))"
        title="@switchTitle" aria-label="@switchTitle">
         <span class="lang-toggle-icon" aria-hidden="true">🌐</span>
@@ -235,13 +238,13 @@
         <div class="pub-empty-mark" aria-hidden="true">%</div>
         @if (ar)
         {
-            <p class="pub-empty-title">لا توجد عروض الآن</p>
-            <p>ستظهر التخفيضات هنا فور توفرها. حاول مرة أخرى لاحقاً.</p>
+            <p class="pub-empty-title">لا توجد منتجات الآن</p>
+            <p>ستظهر العروض ومنتجات التتبع هنا فور توفرها. يمكنك أيضاً فتح <a asp-controller="PriceTracker" asp-action="Index" asp-route-lang="@Model.Lang">تتبع الأسعار</a>.</p>
         }
         else
         {
-            <p class="pub-empty-title">No deals right now</p>
-            <p>Fresh price drops show up here as soon as they land. Check back soon.</p>
+            <p class="pub-empty-title">No products right now</p>
+            <p>Deals and tracked products will show up here soon. You can also open the <a asp-controller="PriceTracker" asp-action="Index" asp-route-lang="@Model.Lang">price tracker</a>.</p>
         }
     </section>
 }
@@ -253,7 +256,9 @@ else
             var d = Model.Deals[i];
             var title = d.DisplayName(ar);
             <li class="deal" style="--i:@i">
-                <a class="deal-link" href="@d.Url" target="_blank" rel="noopener sponsored">
+                <a class="deal-link" href="@d.Url"
+                   target="@(d.IsDeal ? "_blank" : null)"
+                   rel="@(d.IsDeal ? "noopener sponsored" : null)">
                     <div class="deal-media">
                         @if (!string.IsNullOrEmpty(d.ImageUrl))
                         {
@@ -262,6 +267,14 @@ else
                         else
                         {
                             <span class="deal-noimg" aria-hidden="true">@(ar ? "بدون صورة" : "No image")</span>
+                        }
+                        @if (d.IsDeal)
+                        {
+                            <span class="tracker-badge home-deal-badge">@(ar ? "عرض" : "Deal")</span>
+                        }
+                        else if (d.IsAtLowestPrice)
+                        {
+                            <span class="tracker-badge">@(ar ? "عند أقل سعر" : "At lowest")</span>
                         }
                     </div>
                     <div class="deal-body">

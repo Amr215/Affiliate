@@ -22,8 +22,9 @@ namespace Affiliate.Controllers
         }
 
         /// <summary>
-        /// Public deals: products whose Amazon price is below the admin-set external lowest price,
-        /// ordered by discount % = (external − amazon) / external, highest first.
+        /// Public homepage feed in one grid:
+        /// 1) external-price deals (highest discount % first),
+        /// 2) then tracker products (same eligibility/sort as /tracker), excluding deal ASINs.
         /// </summary>
         [AllowAnonymous]
         public async Task<IActionResult> Index(
@@ -52,7 +53,7 @@ namespace Affiliate.Controllers
             if (tagId.HasValue && tags.All(t => t.Id != tagId.Value))
                 tagId = null;
 
-            var query = db.Products.AsNoTracking()
+            var dealsQuery = db.Products.AsNoTracking()
                 .Where(p => p.IsAvailable && p.IsBlocked != true
                     && p.NotAvailableDate == null
                     && p.Asin != null
@@ -61,36 +62,157 @@ namespace Affiliate.Controllers
                     && p.CurrentPrice < p.ExternalLowestPrice);
 
             if (tagId.HasValue)
-                query = query.Where(p => p.ScraperUrl != null && p.ScraperUrl.TagId == tagId.Value);
+                dealsQuery = dealsQuery.Where(p => p.ScraperUrl != null && p.ScraperUrl.TagId == tagId.Value);
 
-            var totalCount = await query.CountAsync(cancellationToken);
-            var totalPages = Math.Max(1, (int)Math.Ceiling(totalCount / (double)DealsPageSize));
-            page = Math.Clamp(page, 1, totalPages);
-
-            var rows = await query
+            var dealRows = await dealsQuery
                 .OrderByDescending(p => (p.ExternalLowestPrice!.Value - p.CurrentPrice!.Value) / p.ExternalLowestPrice!.Value)
                 .ThenBy(p => p.Id)
-                .Skip((page - 1) * DealsPageSize)
-                .Take(DealsPageSize)
-                .Select(p => new { p.Name, p.NameAr, p.ImageUrl, p.CurrentPrice, p.Currency, p.Asin })
+                .Select(p => new
+                {
+                    p.Id,
+                    p.Name,
+                    p.NameAr,
+                    p.ImageUrl,
+                    p.CurrentPrice,
+                    p.LowestPrice,
+                    p.Currency,
+                    p.Asin
+                })
                 .ToListAsync(cancellationToken);
 
-            var deals = rows
-                .Where(r => AsinLinkCodec.IsValidAsin(AsinLinkCodec.NormalizeAsin(r.Asin!)))
-                .Select(r => new PublicDealItem
+            var dealItems = new List<PublicDealItem>();
+            var dealIds = new HashSet<int>();
+            foreach (var r in dealRows)
+            {
+                var asin = AsinLinkCodec.NormalizeAsin(r.Asin!);
+                if (!AsinLinkCodec.IsValidAsin(asin))
+                    continue;
+
+                dealIds.Add(r.Id);
+                string url;
+                try { url = "/" + codec.Encode(asin); }
+                catch { url = $"https://www.amazon.eg/dp/{asin}"; }
+
+                dealItems.Add(new PublicDealItem
                 {
                     Name = r.Name,
                     NameAr = r.NameAr,
                     ImageUrl = r.ImageUrl,
                     Price = r.CurrentPrice!.Value,
                     Currency = r.Currency,
-                    Url = "/" + codec.Encode(r.Asin!)
+                    Url = url,
+                    IsDeal = true,
+                    IsAtLowestPrice = r.CurrentPrice is > 0
+                        && r.LowestPrice is > 0
+                        && r.CurrentPrice.Value <= r.LowestPrice.Value
+                });
+            }
+
+            var trackerQuery = db.Products.AsNoTracking()
+                .Where(p => p.IsBlocked != true
+                    && p.NotAvailableDate == null
+                    && p.Asin != null
+                    && p.CurrentPrice > 0
+                    && p.ScraperUrl != null
+                    && p.ScraperUrl.TagId != null);
+
+            if (tagId.HasValue)
+                trackerQuery = trackerQuery.Where(p => p.ScraperUrl!.TagId == tagId.Value);
+
+            if (dealIds.Count > 0)
+            {
+                var excludeIds = dealIds.ToList();
+                trackerQuery = trackerQuery.Where(p => !excludeIds.Contains(p.Id));
+            }
+
+            var trackerCandidates = await trackerQuery
+                .Select(p => new
+                {
+                    p.Id,
+                    p.Name,
+                    p.NameAr,
+                    p.ImageUrl,
+                    p.CurrentPrice,
+                    p.LowestPrice,
+                    p.Currency,
+                    p.Asin
                 })
+                .ToListAsync(cancellationToken);
+
+            trackerCandidates = trackerCandidates
+                .Where(r => AsinLinkCodec.IsValidAsin(AsinLinkCodec.NormalizeAsin(r.Asin!)))
+                .ToList();
+
+            var trackerIds = trackerCandidates.Select(c => c.Id).ToList();
+            var historyByProduct = new Dictionary<int, List<decimal>>();
+            if (trackerIds.Count > 0)
+            {
+                const int chunkSize = 500;
+                for (var offset = 0; offset < trackerIds.Count; offset += chunkSize)
+                {
+                    var chunk = trackerIds.Skip(offset).Take(chunkSize).ToList();
+                    var histRows = await db.PriceHistories.AsNoTracking()
+                        .Where(h => chunk.Contains(h.ProductId) && h.Price != null && h.Price > 0)
+                        .Select(h => new { h.ProductId, Price = h.Price!.Value })
+                        .ToListAsync(cancellationToken);
+
+                    foreach (var row in histRows)
+                    {
+                        if (!historyByProduct.TryGetValue(row.ProductId, out var list))
+                        {
+                            list = [];
+                            historyByProduct[row.ProductId] = list;
+                        }
+                        list.Add(row.Price);
+                    }
+                }
+            }
+
+            var trackerItems = trackerCandidates
+                .Select(r =>
+                {
+                    var current = r.CurrentPrice ?? 0m;
+                    historyByProduct.TryGetValue(r.Id, out var hist);
+                    hist ??= [];
+                    var (tier, rank) = PriceTrackerSort.Compute(current, hist, r.LowestPrice);
+                    return (Row: r, Tier: tier, Rank: rank);
+                })
+                .OrderBy(x => x.Tier)
+                .ThenByDescending(x => x.Tier <= PriceTrackerSort.TierAllTimeLow ? x.Rank : 0m)
+                .ThenBy(x => x.Tier == PriceTrackerSort.TierClosestToAllTimeLow ? x.Rank : 0m)
+                .ThenBy(x => x.Row.Id)
+                .Select(x =>
+                {
+                    var r = x.Row;
+                    var asin = AsinLinkCodec.NormalizeAsin(r.Asin!);
+                    var display = isArabic && !string.IsNullOrWhiteSpace(r.NameAr) ? r.NameAr! : r.Name;
+                    var slug = PriceTrackerSlug.FromName(display);
+                    return new PublicDealItem
+                    {
+                        Name = r.Name,
+                        NameAr = r.NameAr,
+                        ImageUrl = r.ImageUrl,
+                        Price = r.CurrentPrice!.Value,
+                        Currency = r.Currency,
+                        Url = $"/tracker/{asin}/{Uri.EscapeDataString(slug)}?lang={normalizedLang}",
+                        IsDeal = false,
+                        IsAtLowestPrice = x.Tier <= PriceTrackerSort.TierAllTimeLow
+                    };
+                })
+                .ToList();
+
+            var combined = dealItems.Concat(trackerItems).ToList();
+            var totalCount = combined.Count;
+            var totalPages = Math.Max(1, (int)Math.Ceiling(totalCount / (double)DealsPageSize));
+            page = Math.Clamp(page, 1, totalPages);
+            var pageItems = combined
+                .Skip((page - 1) * DealsPageSize)
+                .Take(DealsPageSize)
                 .ToList();
 
             return View(new PublicDealsViewModel
             {
-                Deals = deals,
+                Deals = pageItems,
                 Tags = tags,
                 SelectedTagId = tagId,
                 Page = page,

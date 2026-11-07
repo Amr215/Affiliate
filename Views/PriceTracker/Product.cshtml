@@ -1,0 +1,201 @@
+@model PriceTrackerProductViewModel
+@using System.Globalization
+@using System.Text.Json
+@using Affiliate.Options
+@inject Microsoft.Extensions.Options.IOptions<TelegramOptions> TelegramOptions
+@{
+    Layout = "_PublicLayout";
+    var ar = Model.IsArabic;
+    ViewData["Lang"] = Model.Lang;
+    var brand = ar ? "عروض السندباد" : "El Sindbad Deals";
+    var name = Model.DisplayName(ar);
+    var currency = Model.Currency ?? "EGP";
+    var priceCulture = CultureInfo.InvariantCulture;
+    var currentText = Model.Stats.CurrentPrice?.ToString("#,0.##", priceCulture) ?? "—";
+    var lowText = Model.Stats.LowestPrice?.ToString("#,0.##", priceCulture) ?? "—";
+    var highText = Model.Stats.HighestPrice?.ToString("#,0.##", priceCulture) ?? "—";
+
+    var title = ar
+        ? $"{name} | تتبع السعر | {brand}"
+        : $"{name} | Price Tracker | {brand}";
+    ViewData["Title"] = title;
+
+    var badgeText = Model.Stats.IsLowestEver
+        ? (ar ? "هذا أقل سعر مسجّل للمنتج." : "This is the lowest recorded price.")
+        : Model.Stats.IsLowestIn30DaysOrMore
+            ? (ar ? $"السعر الحالي هو الأقل منذ {Model.Stats.LowestPriceDays} يومًا." : $"Current price is the lowest in {Model.Stats.LowestPriceDays} days.")
+            : null;
+
+    var description = ar
+        ? $"تتبع سعر {name}. السعر الحالي {currentText} {currency}. أقل سعر {lowText} وأعلى سعر {highText}."
+        : $"Track the price of {name}. Current {currentText} {currency}. Lowest {lowText}, highest {highText}.";
+    if (badgeText != null)
+        description = $"{description} {badgeText}";
+    ViewData["MetaDescription"] = description;
+    ViewData["MetaKeywords"] = ar
+        ? $"{name}, تتبع سعر, أقل سعر, {brand}"
+        : $"{name}, price tracker, lowest price, {brand}";
+
+    var site = (ViewData["SiteBaseUrl"] as string
+        ?? TelegramOptions.Value.PublishLinkBaseUrl
+        ?? "https://el-sindbad.com").Trim().TrimEnd('/');
+    var path = $"/tracker/{Model.Asin}/{Uri.EscapeDataString(Model.Slug)}";
+    var canonical = $"{site}{path}?lang={Model.Lang}";
+    var hreflangAr = $"{site}{path}?lang=ar";
+    var hreflangEn = $"{site}{path}?lang=en";
+    var ogImage = string.IsNullOrWhiteSpace(Model.ImageUrl) ? $"{site}/images/sinbad-logo.png" : Model.ImageUrl;
+
+    var chartDataJson = JsonSerializer.Serialize(new
+    {
+        labels = Model.Stats.ChartPoints.Select(p => p.Label).ToList(),
+        prices = Model.Stats.ChartPoints.Select(p => p.Price).ToList(),
+        currency,
+        seriesLabel = ar ? "السعر" : "Price"
+    });
+
+    var jsonLd = new Dictionary<string, object?>
+    {
+        ["@context"] = "https://schema.org",
+        ["@type"] = "Product",
+        ["name"] = name,
+        ["sku"] = Model.Asin,
+        ["image"] = string.IsNullOrWhiteSpace(Model.ImageUrl) ? null : Model.ImageUrl,
+        ["url"] = canonical,
+        ["brand"] = new Dictionary<string, string> { ["@type"] = "Brand", ["name"] = brand },
+        ["offers"] = new Dictionary<string, object?>
+        {
+            ["@type"] = "Offer",
+            ["url"] = $"{site}{Model.BuyUrl}",
+            ["priceCurrency"] = currency,
+            ["price"] = Model.Stats.CurrentPrice,
+            ["availability"] = "https://schema.org/InStock"
+        }
+    };
+    var jsonLdText = JsonSerializer.Serialize(jsonLd, new JsonSerializerOptions
+    {
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+    });
+
+    var switchLang = ar ? "en" : "ar";
+    var switchLabel = ar ? "EN" : "ع";
+    var switchTitle = ar ? "English" : "العربية";
+}
+
+@section Head {
+    <link rel="canonical" href="@canonical" />
+    <link rel="alternate" hreflang="ar" href="@hreflangAr" />
+    <link rel="alternate" hreflang="en" href="@hreflangEn" />
+    <link rel="alternate" hreflang="x-default" href="@hreflangAr" />
+    <meta property="og:type" content="product" />
+    <meta property="og:title" content="@title" />
+    <meta property="og:description" content="@description" />
+    <meta property="og:url" content="@canonical" />
+    <meta property="og:image" content="@ogImage" />
+    <meta property="og:locale" content="@(ar ? "ar_EG" : "en_US")" />
+    <meta property="product:price:amount" content="@(Model.Stats.CurrentPrice?.ToString(priceCulture))" />
+    <meta property="product:price:currency" content="@currency" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="@title" />
+    <meta name="twitter:description" content="@description" />
+    <meta name="twitter:image" content="@ogImage" />
+    <script type="application/ld+json">@Html.Raw(jsonLdText)</script>
+}
+
+<header class="pub-header">
+    <a class="pub-logo" asp-controller="Home" asp-action="Index" asp-route-lang="@Model.Lang" aria-label="@brand">
+        <img src="~/images/sinbad-logo.png" alt="@brand" width="40" height="40" />
+    </a>
+    <span class="tracker-nav-current">@(ar ? "تتبع الأسعار" : "Price tracker")</span>
+    <button type="button" class="theme-toggle" id="theme-toggle"
+            title="@(ar ? "الوضع الليلي" : "Night mode")"
+            aria-label="@(ar ? "تبديل الوضع الليلي" : "Toggle night mode")"
+            data-label-day="@(ar ? "الوضع النهاري" : "Day mode")"
+            data-label-night="@(ar ? "الوضع الليلي" : "Night mode")">
+        <span class="theme-toggle-icon icon-moon" aria-hidden="true">☾</span>
+        <span class="theme-toggle-icon icon-sun" aria-hidden="true">☀</span>
+    </button>
+    <a class="lang-toggle" asp-controller="PriceTracker" asp-action="Product"
+       asp-route-asin="@Model.Asin" asp-route-slug="@Model.Slug" asp-route-lang="@switchLang"
+       title="@switchTitle" aria-label="@switchTitle">
+        <span class="lang-toggle-icon" aria-hidden="true">🌐</span>
+        <span class="lang-toggle-code">@switchLabel</span>
+    </a>
+</header>
+
+<nav class="tracker-breadcrumb" aria-label="@(ar ? "مسار التنقل" : "Breadcrumb")">
+    <a asp-controller="Home" asp-action="Index" asp-route-lang="@Model.Lang">@(ar ? "العروض" : "Deals")</a>
+    <span class="tracker-breadcrumb-sep" aria-hidden="true">/</span>
+    <a asp-controller="PriceTracker" asp-action="Index" asp-route-lang="@Model.Lang">@(ar ? "تتبع الأسعار" : "Price tracker")</a>
+    <span class="tracker-breadcrumb-sep" aria-hidden="true">/</span>
+    <span class="tracker-breadcrumb-current" dir="auto">@name</span>
+</nav>
+
+<article class="tracker-product">
+    <div class="tracker-product-hero">
+        <div class="tracker-product-media">
+            @if (!string.IsNullOrEmpty(Model.ImageUrl))
+            {
+                <img src="@Model.ImageUrl" alt="@name" width="400" height="400" loading="eager" decoding="async" />
+            }
+            else
+            {
+                <span class="deal-noimg">@(ar ? "بدون صورة" : "No image")</span>
+            }
+        </div>
+        <div class="tracker-product-main">
+            <h1 dir="auto">@name</h1>
+            <p class="tracker-asin ltr">ASIN: @Model.Asin</p>
+
+            @if (Model.Stats.IsLowestEver)
+            {
+                <p class="tracker-flag is-best">@(ar ? "أقل سعر على الإطلاق" : "Lowest price ever")</p>
+            }
+            else if (Model.Stats.IsLowestIn30DaysOrMore)
+            {
+                <p class="tracker-flag is-good">@(ar ? $"أقل سعر منذ {Model.Stats.LowestPriceDays} يومًا" : $"Lowest in {Model.Stats.LowestPriceDays} days")</p>
+            }
+
+            <dl class="tracker-stats">
+                <div>
+                    <dt>@(ar ? "السعر الحالي" : "Current")</dt>
+                    <dd><span class="ltr">@currentText</span> @currency</dd>
+                </div>
+                <div>
+                    <dt>@(ar ? "أقل سعر" : "Lowest")</dt>
+                    <dd><span class="ltr">@lowText</span> @currency</dd>
+                </div>
+                <div>
+                    <dt>@(ar ? "أعلى سعر" : "Highest")</dt>
+                    <dd><span class="ltr">@highText</span> @currency</dd>
+                </div>
+                <div>
+                    <dt>@(ar ? "المتوسط" : "Average")</dt>
+                    <dd><span class="ltr">@(Model.Stats.AveragePrice?.ToString("#,0.##", priceCulture) ?? "—")</span> @currency</dd>
+                </div>
+            </dl>
+
+            <a class="tracker-buy" href="@Model.BuyUrl" target="_blank" rel="noopener sponsored">
+                @(ar ? "شراء من أمازون" : "Buy on Amazon")
+            </a>
+        </div>
+    </div>
+
+    <section class="tracker-chart-block" aria-labelledby="tracker-chart-title">
+        <h2 id="tracker-chart-title">@(ar ? "تغيّر السعر" : "Price history")</h2>
+        @if (Model.Stats.ChartPoints.Count < 2)
+        {
+            <p class="tracker-chart-empty">@(ar ? "لا توجد نقاط كافية لرسم المخطط بعد." : "Not enough history points to draw a chart yet.")</p>
+        }
+        else
+        {
+            <div class="tracker-chart-wrap"
+                 data-error-load="@(ar ? "تعذر تحميل المخطط." : "Could not load the chart.")">
+                <canvas id="price-chart" aria-label="@(ar ? "مخطط السعر" : "Price chart")"></canvas>
+            </div>
+            <script type="application/json" id="price-chart-data">@Html.Raw(chartDataJson)</script>
+            <script src="~/lib/chartjs/chart.umd.min.js" asp-append-version="true"></script>
+            <script src="~/js/price-tracker-chart.js" asp-append-version="true"></script>
+        }
+    </section>
+</article>

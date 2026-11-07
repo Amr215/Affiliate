@@ -35,8 +35,16 @@ namespace Affiliate.ViewModels
         public decimal Price { get; set; }
         public string? Currency { get; set; }
 
-        /// <summary>Site-relative affiliate redirect (<c>/{code}</c>).</summary>
+        /// <summary>
+        /// Card link: affiliate short URL for deals, tracker detail URL for tracker fillers.
+        /// </summary>
         public string Url { get; set; } = string.Empty;
+
+        /// <summary>True when this row is an external-price deal (listed before tracker products).</summary>
+        public bool IsDeal { get; set; }
+
+        /// <summary>True when current price is at the recorded all-time low.</summary>
+        public bool IsAtLowestPrice { get; set; }
 
         public string DisplayName(bool arabic) =>
             arabic && !string.IsNullOrWhiteSpace(NameAr) ? NameAr! : Name;

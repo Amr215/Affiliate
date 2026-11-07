@@ -27,8 +27,8 @@
         (function () {
             try {
                 var saved = localStorage.getItem("pub-theme");
-                // Night mode is the default unless the user explicitly chose day.
-                var night = saved !== "day";
+                // Light mode is the default unless the user explicitly chose night.
+                var night = saved === "night";
                 if (night) document.documentElement.classList.add("theme-night");
             } catch (e) { }
         })();
@@ -45,6 +45,18 @@
     </main>
     <footer class="pub-footer">
         <div class="pub-footer-grid">
+            <section class="pub-footer-col" aria-labelledby="footer-tracker-title">
+                <h2 id="footer-tracker-title" class="pub-footer-heading">@(isArabic ? "تتبع الأسعار" : "Price tracker")</h2>
+                <p class="pub-footer-text">
+                    @(isArabic
+                        ? "ابحث عن المنتجات وشاهد تغيّر السعر وأقل وأعلى قيمة مسجّلة."
+                        : "Search products and see price history with lowest and highest recorded values.")
+                </p>
+                <a class="pub-footer-link" asp-controller="PriceTracker" asp-action="Index" asp-route-lang="@htmlLang">
+                    @(isArabic ? "فتح التتبع" : "Open tracker")
+                </a>
+            </section>
+
             <section class="pub-footer-col" aria-labelledby="footer-about-title">
                 <h2 id="footer-about-title" class="pub-footer-heading">@(isArabic ? "من نحن" : "About us")</h2>
                 <p class="pub-footer-text">

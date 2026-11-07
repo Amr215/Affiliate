@@ -17,7 +17,7 @@ namespace Affiliate.Options
         public int BatchSize { get; set; } = 48;
 
         /// <summary>Max products without <c>NameAr</c> to process in one run.</summary>
-        public int MaxProductsPerRun { get; set; } = 5000;
+        public int MaxProductsPerRun { get; set; } = 20000;
 
         /// <summary>Batches fetched concurrently within one run.</summary>
         public int MaxParallelBatches { get; set; } = 8;

@@ -1,0 +1,192 @@
+@model PriceTrackerIndexViewModel
+@using System.Globalization
+@using Affiliate.Options
+@inject Microsoft.Extensions.Options.IOptions<TelegramOptions> TelegramOptions
+@{
+    Layout = "_PublicLayout";
+    var ar = Model.IsArabic;
+    ViewData["Lang"] = Model.Lang;
+    var brand = ar ? "عروض السندباد" : "El Sindbad Deals";
+    var selectedTag = Model.SelectedTagId is int sid
+        ? Model.Tags.FirstOrDefault(t => t.Id == sid)
+        : null;
+    var tagName = selectedTag?.DisplayName(ar);
+
+    var title = !string.IsNullOrWhiteSpace(tagName)
+        ? (ar ? $"تتبع أسعار {tagName} | {brand}" : $"{tagName} Price Tracker | {brand}")
+        : string.IsNullOrWhiteSpace(Model.Query)
+            ? (ar ? $"تتبع الأسعار | {brand}" : $"Price Tracker | {brand}")
+            : (ar ? $"بحث: {Model.Query} | تتبع الأسعار | {brand}" : $"Search: {Model.Query} | Price Tracker | {brand}");
+    ViewData["Title"] = title;
+    ViewData["MetaDescription"] = ar
+        ? "تتبع أسعار المنتجات في مصر — ابحث عن أي منتج وشاهد أقل وأعلى سعر ورسم التغير عبر الوقت."
+        : "Track product prices in Egypt — search any item and see the lowest, highest, and price history over time.";
+    ViewData["MetaKeywords"] = ar
+        ? "تتبع أسعار, أسعار أمازون, أقل سعر, عروض السندباد"
+        : "price tracker, Amazon prices, lowest price, El Sindbad";
+
+    var site = (ViewData["SiteBaseUrl"] as string
+        ?? TelegramOptions.Value.PublishLinkBaseUrl
+        ?? "https://el-sindbad.com").Trim().TrimEnd('/');
+    var canonical = $"{site}/tracker?lang={Model.Lang}"
+        + (Model.SelectedTagId is int tid ? $"&tagId={tid}" : "")
+        + (string.IsNullOrWhiteSpace(Model.Query) ? "" : $"&q={Uri.EscapeDataString(Model.Query)}")
+        + (Model.Page > 1 ? $"&page={Model.Page}" : "");
+    var priceCulture = CultureInfo.InvariantCulture;
+    var switchLang = ar ? "en" : "ar";
+    var switchLabel = ar ? "EN" : "ع";
+    var switchTitle = ar ? "English" : "العربية";
+}
+
+@section Head {
+    <link rel="canonical" href="@canonical" />
+    <link rel="alternate" hreflang="ar" href="@($"{site}/tracker?lang=ar")" />
+    <link rel="alternate" hreflang="en" href="@($"{site}/tracker?lang=en")" />
+    <link rel="alternate" hreflang="x-default" href="@($"{site}/tracker?lang=ar")" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="@title" />
+    <meta property="og:description" content="@ViewData["MetaDescription"]" />
+    <meta property="og:url" content="@canonical" />
+    <meta property="og:locale" content="@(ar ? "ar_EG" : "en_US")" />
+}
+
+<header class="pub-header">
+    <a class="pub-logo" asp-controller="Home" asp-action="Index" asp-route-lang="@Model.Lang" aria-label="@brand">
+        <img src="~/images/sinbad-logo.png" alt="@brand" width="40" height="40" />
+    </a>
+    <a class="pub-page-back" asp-controller="Home" asp-action="Index" asp-route-lang="@Model.Lang">
+        @(ar ? "العروض" : "Deals")
+    </a>
+    <span class="tracker-nav-current">@(ar ? "تتبع الأسعار" : "Price tracker")</span>
+    <button type="button" class="theme-toggle" id="theme-toggle"
+            title="@(ar ? "الوضع الليلي" : "Night mode")"
+            aria-label="@(ar ? "تبديل الوضع الليلي" : "Toggle night mode")"
+            data-label-day="@(ar ? "الوضع النهاري" : "Day mode")"
+            data-label-night="@(ar ? "الوضع الليلي" : "Night mode")">
+        <span class="theme-toggle-icon icon-moon" aria-hidden="true">☾</span>
+        <span class="theme-toggle-icon icon-sun" aria-hidden="true">☀</span>
+    </button>
+    <a class="lang-toggle" asp-controller="PriceTracker" asp-action="Index"
+       asp-route-lang="@switchLang" asp-route-q="@Model.Query" asp-route-tagId="@Model.SelectedTagId"
+       title="@switchTitle" aria-label="@switchTitle">
+        <span class="lang-toggle-icon" aria-hidden="true">🌐</span>
+        <span class="lang-toggle-code">@switchLabel</span>
+    </a>
+</header>
+
+<section class="pub-intro tracker-intro">
+    <h1>@(string.IsNullOrWhiteSpace(tagName)
+        ? (ar ? "تتبع الأسعار" : "Price tracker")
+        : (ar ? $"تتبع أسعار {tagName}" : $"{tagName} price tracker"))</h1>
+    <p>@(ar
+        ? "ابحث عن منتج، ثم افتح التفاصيل لرؤية الرسم البياني وأقل وأعلى سعر."
+        : "Search for a product, then open details for the chart, lowest price, and highest price.")</p>
+</section>
+
+@if (Model.Tags.Count > 0)
+{
+    <nav class="tag-bar" aria-label="@(ar ? "تصفية حسب الوسم" : "Filter by tag")">
+        <a class="tag-chip @(Model.SelectedTagId == null ? "is-active" : null)"
+           asp-controller="PriceTracker" asp-action="Index"
+           asp-route-lang="@Model.Lang" asp-route-q="@Model.Query">@(ar ? "الكل" : "All")</a>
+        @foreach (var tag in Model.Tags)
+        {
+            <a class="tag-chip @(Model.SelectedTagId == tag.Id ? "is-active" : null)"
+               asp-controller="PriceTracker" asp-action="Index"
+               asp-route-lang="@Model.Lang" asp-route-tagId="@tag.Id" asp-route-q="@Model.Query">@tag.DisplayName(ar)</a>
+        }
+    </nav>
+}
+
+<form class="tracker-search" method="get" asp-controller="PriceTracker" asp-action="Index" role="search">
+    <input type="hidden" name="lang" value="@Model.Lang" />
+    @if (Model.SelectedTagId is int selectedTagId)
+    {
+        <input type="hidden" name="tagId" value="@selectedTagId" />
+    }
+    <label class="visually-hidden" for="tracker-q">@(ar ? "بحث" : "Search")</label>
+    <input id="tracker-q" class="tracker-search-input" type="search" name="q" value="@Model.Query"
+           placeholder="@(ar ? "اسم المنتج أو ASIN..." : "Product name or ASIN...")"
+           autocomplete="off" />
+    <button class="tracker-search-btn" type="submit">@(ar ? "بحث" : "Search")</button>
+</form>
+
+@if (Model.Items.Count == 0)
+{
+    <section class="pub-empty">
+        <p class="pub-empty-title">@(ar ? "لا توجد نتائج" : "No results")</p>
+        <p>@(ar ? "جرّب كلمات بحث أخرى." : "Try a different search.")</p>
+    </section>
+}
+else
+{
+    <p class="tracker-count">
+        @(ar ? $"{Model.TotalCount} منتج" : $"{Model.TotalCount} products")
+    </p>
+    <ul class="deal-grid tracker-grid" role="list">
+        @for (var i = 0; i < Model.Items.Count; i++)
+        {
+            var item = Model.Items[i];
+            var name = item.DisplayName(ar);
+            <li class="deal" style="--i:@i">
+                <a class="deal-link" asp-controller="PriceTracker" asp-action="Product"
+                   asp-route-asin="@item.Asin" asp-route-slug="@item.Slug" asp-route-lang="@Model.Lang">
+                    <div class="deal-media">
+                        @if (!string.IsNullOrEmpty(item.ImageUrl))
+                        {
+                            <img src="@item.ImageUrl" alt="@name" width="300" height="300" loading="@(i < 8 ? "eager" : "lazy")" decoding="async" />
+                        }
+                        else
+                        {
+                            <span class="deal-noimg" aria-hidden="true">@(ar ? "بدون صورة" : "No image")</span>
+                        }
+                        @if (item.IsLowestEver)
+                        {
+                            <span class="tracker-badge">@(ar ? "عند أقل سعر" : "At lowest")</span>
+                        }
+                    </div>
+                    <div class="deal-body">
+                        <h2 class="deal-name" dir="auto">@name</h2>
+                        <p class="deal-price">
+                            <span class="deal-currency">@(item.Currency ?? "EGP")</span>
+                            <span class="deal-amount">@(item.CurrentPrice?.ToString("#,0.##", priceCulture) ?? "—")</span>
+                        </p>
+                    </div>
+                </a>
+            </li>
+        }
+    </ul>
+
+    @if (Model.TotalPages > 1)
+    {
+        var first = Math.Max(1, Model.Page - 2);
+        var last = Math.Min(Model.TotalPages, Model.Page + 2);
+        <nav class="pub-pager" aria-label="@(ar ? "الصفحات" : "Pages")">
+            @if (Model.Page > 1)
+            {
+                <a class="pager-btn" asp-controller="PriceTracker" asp-action="Index"
+                   asp-route-lang="@Model.Lang" asp-route-q="@Model.Query" asp-route-tagId="@Model.SelectedTagId"
+                   asp-route-page="@(Model.Page - 1)" rel="prev">&larr;</a>
+            }
+            @for (var n = first; n <= last; n++)
+            {
+                if (n == Model.Page)
+                {
+                    <span class="pager-btn is-current" aria-current="page">@n</span>
+                }
+                else
+                {
+                    <a class="pager-btn" asp-controller="PriceTracker" asp-action="Index"
+                       asp-route-lang="@Model.Lang" asp-route-q="@Model.Query" asp-route-tagId="@Model.SelectedTagId"
+                       asp-route-page="@n">@n</a>
+                }
+            }
+            @if (Model.Page < Model.TotalPages)
+            {
+                <a class="pager-btn" asp-controller="PriceTracker" asp-action="Index"
+                   asp-route-lang="@Model.Lang" asp-route-q="@Model.Query" asp-route-tagId="@Model.SelectedTagId"
+                   asp-route-page="@(Model.Page + 1)" rel="next">&rarr;</a>
+            }
+        </nav>
+    }
+}

@@ -1,0 +1,73 @@
+@model PriceTrackerUnavailableViewModel
+@{
+    Layout = "_PublicLayout";
+    var ar = Model.IsArabic;
+    ViewData["Lang"] = Model.Lang;
+    ViewData["Robots"] = "noindex, follow";
+    var brand = ar ? "عروض السندباد" : "El Sindbad Deals";
+    var name = Model.DisplayName(ar);
+    ViewData["Title"] = ar
+        ? $"{name} | لم يعد متاحًا للتتبع | {brand}"
+        : $"{name} | No longer tracked | {brand}";
+    ViewData["MetaDescription"] = ar
+        ? "هذا المنتج لم يعد متاحًا في تتبع الأسعار. تصفح منتجات أخرى أو ارجع إلى قائمة التتبع."
+        : "This product is no longer available in the price tracker. Browse other products or return to the tracker list.";
+
+    var switchLang = ar ? "en" : "ar";
+    var switchLabel = ar ? "EN" : "ع";
+    var switchTitle = ar ? "English" : "العربية";
+}
+
+<header class="pub-header">
+    <a class="pub-logo" asp-controller="Home" asp-action="Index" asp-route-lang="@Model.Lang" aria-label="@brand">
+        <img src="~/images/sinbad-logo.png" alt="@brand" width="40" height="40" />
+    </a>
+    <span class="tracker-nav-current">@(ar ? "تتبع الأسعار" : "Price tracker")</span>
+    <button type="button" class="theme-toggle" id="theme-toggle"
+            title="@(ar ? "الوضع الليلي" : "Night mode")"
+            aria-label="@(ar ? "تبديل الوضع الليلي" : "Toggle night mode")"
+            data-label-day="@(ar ? "الوضع النهاري" : "Day mode")"
+            data-label-night="@(ar ? "الوضع الليلي" : "Night mode")">
+        <span class="theme-toggle-icon icon-moon" aria-hidden="true">☾</span>
+        <span class="theme-toggle-icon icon-sun" aria-hidden="true">☀</span>
+    </button>
+    <a class="lang-toggle" asp-controller="PriceTracker" asp-action="Product"
+       asp-route-asin="@Model.Asin" asp-route-lang="@switchLang"
+       title="@switchTitle" aria-label="@switchTitle">
+        <span class="lang-toggle-icon" aria-hidden="true">🌐</span>
+        <span class="lang-toggle-code">@switchLabel</span>
+    </a>
+</header>
+
+<nav class="tracker-breadcrumb" aria-label="@(ar ? "مسار التنقل" : "Breadcrumb")">
+    <a asp-controller="Home" asp-action="Index" asp-route-lang="@Model.Lang">@(ar ? "العروض" : "Deals")</a>
+    <span class="tracker-breadcrumb-sep" aria-hidden="true">/</span>
+    <a asp-controller="PriceTracker" asp-action="Index" asp-route-lang="@Model.Lang">@(ar ? "تتبع الأسعار" : "Price tracker")</a>
+    <span class="tracker-breadcrumb-sep" aria-hidden="true">/</span>
+    <span class="tracker-breadcrumb-current" dir="auto">@name</span>
+</nav>
+
+<section class="tracker-unavailable">
+    @if (!string.IsNullOrEmpty(Model.ImageUrl))
+    {
+        <div class="tracker-unavailable-media">
+            <img src="@Model.ImageUrl" alt="@name" width="160" height="160" loading="eager" decoding="async" />
+        </div>
+    }
+    <h1>@(ar ? "هذا المنتج لم يعد متاحًا للتتبع" : "This product is no longer tracked")</h1>
+    <p class="tracker-unavailable-name" dir="auto">@name</p>
+    <p class="tracker-unavailable-text">
+        @(ar
+            ? "ربما أصبح غير متوفر أو توقف تحديث سعره. يمكنك الرجوع إلى قائمة التتبع أو البحث عن منتج آخر."
+            : "It may be unavailable or no longer price-updated. You can return to the tracker list or search for another product.")
+    </p>
+    <p class="tracker-asin ltr">ASIN: @Model.Asin</p>
+    <div class="tracker-unavailable-actions">
+        <a class="tracker-buy" asp-controller="PriceTracker" asp-action="Index" asp-route-lang="@Model.Lang">
+            @(ar ? "الرجوع لقائمة التتبع" : "Back to price tracker")
+        </a>
+        <a class="tracker-header-link" asp-controller="Home" asp-action="Index" asp-route-lang="@Model.Lang">
+            @(ar ? "العروض" : "Deals")
+        </a>
+    </div>
+</section>

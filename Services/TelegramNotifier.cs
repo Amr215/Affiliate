@@ -221,8 +221,9 @@ namespace Affiliate.Services
             }
 
             var productUrl = BuildProductUrl(alert.Product.Asin);
+            var displayName = AmazonDisplayName(alert.Product);
             var replyMarkup = BuildAlertReplyMarkupJson(
-                alert.Product.Name,
+                displayName,
                 productUrl,
                 alert.Product.Asin,
                 alert.CurrentPrice);
@@ -1044,9 +1045,13 @@ namespace Affiliate.Services
             return sb.ToString().TrimEnd();
         }
 
+        /// <summary>Prefer Arabic title when filled; otherwise English <see cref="Product.Name"/>.</summary>
+        private static string AmazonDisplayName(Product product) =>
+            !string.IsNullOrWhiteSpace(product.NameAr) ? product.NameAr! : product.Name;
+
         private static string AmazonProductHeader(Product product)
         {
-            var name = Html(product.Name);
+            var name = Html(AmazonDisplayName(product));
             var link = string.IsNullOrWhiteSpace(product.Asin)
                 ? $"<b>{name}</b>"
                 : $"<a href=\"{Html(BuildProductUrl(product.Asin))}\">{name}</a>";
