@@ -30,6 +30,7 @@ namespace Affiliate.ViewModels
 
     public class PublicDealItem
     {
+        public int ProductId { get; set; }
         public string Name { get; set; } = string.Empty;
         public string? NameAr { get; set; }
         public string? ImageUrl { get; set; }
@@ -46,6 +47,9 @@ namespace Affiliate.ViewModels
 
         /// <summary>True when current price is at the recorded all-time low.</summary>
         public bool IsAtLowestPrice { get; set; }
+
+        /// <summary>Recent prices oldest→newest for the card sparkline (empty when unknown).</summary>
+        public IReadOnlyList<decimal> PriceSpark { get; set; } = [];
 
         public string DisplayName(bool arabic) =>
             arabic && !string.IsNullOrWhiteSpace(NameAr) ? NameAr! : Name;

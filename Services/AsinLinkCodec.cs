@@ -1,6 +1,7 @@
 using System.Numerics;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using Affiliate.Options;
 using Microsoft.Extensions.Options;
 
@@ -19,6 +20,13 @@ namespace Affiliate.Services
         public const int CodeLength = 9;
 
         private const int AsinLength = 10;
+
+        /// <summary>
+        /// Matches ASIN in Amazon product paths: <c>/dp/</c>, <c>/gp/product/</c>, <c>/gp/aw/d/</c>.
+        /// </summary>
+        private static readonly Regex AsinInUrl = new(
+            @"/(?:dp|gp/product|gp/aw/d)/([A-Za-z0-9]{10})(?![A-Za-z0-9])",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         /// <summary>36^10 — full ASIN space as an integer.</summary>
         private static readonly ulong Modulus = Pow(36, AsinLength);
@@ -126,6 +134,32 @@ namespace Affiliate.Services
 
         internal static bool IsValidAsin(string asin) =>
             asin.Length == AsinLength && asin.All(c => char.IsAsciiLetterOrDigit(c));
+
+        /// <summary>
+        /// If <paramref name="text"/> is (or contains) an Amazon product URL, extracts the ASIN.
+        /// Also accepts a bare 10-character ASIN. Returns false for plain product names.
+        /// </summary>
+        internal static bool TryExtractAsin(string? text, out string asin)
+        {
+            asin = string.Empty;
+            if (string.IsNullOrWhiteSpace(text))
+                return false;
+
+            var trimmed = text.Trim();
+            var normalized = NormalizeAsin(trimmed);
+            if (IsValidAsin(normalized))
+            {
+                asin = normalized;
+                return true;
+            }
+
+            var match = AsinInUrl.Match(trimmed);
+            if (!match.Success)
+                return false;
+
+            asin = NormalizeAsin(match.Groups[1].Value);
+            return IsValidAsin(asin);
+        }
 
         private static ulong ParseBase36(string value)
         {

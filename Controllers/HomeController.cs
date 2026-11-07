@@ -40,8 +40,20 @@ namespace Affiliate.Controllers
                 tagId = null;
 
             var queryText = (q ?? string.Empty).Trim();
-            if (queryText.Length > 120)
+            // Amazon URLs are long; keep enough to extract ASIN, then normalize.
+            if (queryText.Length > 500)
+                queryText = queryText[..500];
+
+            // Paste Amazon product URL → search by extracted ASIN.
+            if (AsinLinkCodec.TryExtractAsin(queryText, out var asinFromQuery)
+                && LooksLikeAmazonUrlOrAsin(queryText))
+            {
+                queryText = asinFromQuery;
+            }
+            else if (queryText.Length > 120)
+            {
                 queryText = queryText[..120];
+            }
 
             // Arabic is the default; English only when explicitly requested.
             var isArabic = !string.Equals(lang, "en", StringComparison.OrdinalIgnoreCase);
@@ -109,6 +121,7 @@ namespace Affiliate.Controllers
 
                 dealItems.Add(new PublicDealItem
                 {
+                    ProductId = r.Id,
                     Name = r.Name,
                     NameAr = r.NameAr,
                     ImageUrl = r.ImageUrl,
@@ -212,6 +225,7 @@ namespace Affiliate.Controllers
                     var slug = PriceTrackerSlug.FromName(display);
                     return new PublicDealItem
                     {
+                        ProductId = r.Id,
                         Name = r.Name,
                         NameAr = r.NameAr,
                         ImageUrl = r.ImageUrl,
@@ -232,6 +246,14 @@ namespace Affiliate.Controllers
                 .Skip((page - 1) * DealsPageSize)
                 .Take(DealsPageSize)
                 .ToList();
+
+            var pageIds = pageItems.Select(d => d.ProductId).Where(id => id > 0).Distinct().ToList();
+            var sparks = await PriceSparkline.LoadAmazonAsync(db, pageIds, cancellationToken: cancellationToken);
+            foreach (var item in pageItems)
+            {
+                if (sparks.TryGetValue(item.ProductId, out var points))
+                    item.PriceSpark = points;
+            }
 
             return View(new PublicDealsViewModel
             {
@@ -306,5 +328,25 @@ namespace Affiliate.Controllers
                 .Replace("[", "[[]", StringComparison.Ordinal)
                 .Replace("%", "[%]", StringComparison.Ordinal)
                 .Replace("_", "[_]", StringComparison.Ordinal);
+
+        /// <summary>
+        /// True when the deals search looks like a pasted Amazon URL or bare ASIN,
+        /// not a product name that happens to contain a 10-char alphanumeric token.
+        /// </summary>
+        private static bool LooksLikeAmazonUrlOrAsin(string? text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+                return false;
+
+            var t = text.Trim();
+            if (AsinLinkCodec.IsValidAsin(AsinLinkCodec.NormalizeAsin(t)))
+                return true;
+
+            return t.Contains("amazon.", StringComparison.OrdinalIgnoreCase)
+                   || t.Contains("/dp/", StringComparison.OrdinalIgnoreCase)
+                   || t.Contains("/gp/product/", StringComparison.OrdinalIgnoreCase)
+                   || t.Contains("/gp/aw/d/", StringComparison.OrdinalIgnoreCase)
+                   || t.Contains("amzn.", StringComparison.OrdinalIgnoreCase);
+        }
     }
 }

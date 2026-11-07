@@ -722,6 +722,48 @@ html.theme-night .tg-promo-cta {
     transition: color 0.3s ease;
 }
 
+/* Price history sparkline on deal cards */
+.price-spark {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 2px;
+    min-width: 0;
+}
+
+.price-spark-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 0.68rem;
+    font-weight: 600;
+    line-height: 1.2;
+    white-space: nowrap;
+}
+
+.price-spark-arrow {
+    font-size: 0.72rem;
+    font-weight: 700;
+}
+
+.price-spark-chart {
+    flex: 0 0 auto;
+    display: block;
+    overflow: visible;
+}
+
+.price-spark.is-down {
+    color: #1f8f5f;
+}
+
+.price-spark.is-up {
+    color: #d64545;
+}
+
+.price-spark.is-flat {
+    color: var(--ink-soft);
+}
+
 @media (hover: hover) {
     .deal-link:hover {
         transform: translateY(-3px);

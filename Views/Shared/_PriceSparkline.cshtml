@@ -1,0 +1,17 @@
+@model Affiliate.Services.PriceSparklineModel
+@{
+    var arabic = ViewData["SparklineArabic"] as bool? ?? true;
+    var compact = ViewData["SparklineCompact"] as bool? ?? false;
+}
+<div class="price-spark @Model.CssClass@(compact ? " is-compact" : null)" title="@Model.Label(arabic)">
+    <span class="price-spark-label">
+        <span class="price-spark-arrow" aria-hidden="true">@Model.Arrow</span>
+        @Model.Label(arabic)
+    </span>
+    <svg class="price-spark-chart" width="@Model.Width" height="@Model.Height"
+         viewBox="0 0 @Model.Width @Model.Height" aria-hidden="true" focusable="false">
+        <polyline fill="none" stroke="currentColor" stroke-width="1.75"
+                  stroke-linecap="round" stroke-linejoin="round"
+                  points="@Model.PolylinePoints" />
+    </svg>
+</div>
