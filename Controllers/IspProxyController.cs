@@ -74,11 +74,13 @@ namespace Affiliate.Controllers
             if (filter.To.HasValue)
                 query = query.Where(l => l.RequestedAt < filter.To.Value.Date.AddDays(1));
 
+            // Group by host+port so the same port on different proxy IPs stays separate.
             var ports = await query
-                .GroupBy(l => l.Port)
+                .GroupBy(l => new { l.ProxyHost, l.Port })
                 .Select(g => new PortStatisticsRow
                 {
-                    Port = g.Key,
+                    ProxyHost = g.Key.ProxyHost,
+                    Port = g.Key.Port,
                     TotalRequests = g.Count(),
                     SuccessCount = g.Count(l => l.StatusCode == 200),
                     FailedCount = g.Count(l => l.StatusCode != 200),
@@ -101,10 +103,31 @@ namespace Affiliate.Controllers
                 })
                 .ToListAsync(cancellationToken);
 
+            // Older logs without ProxyHost: fill from the configured list when the port maps to one IP.
+            var hostsByPort = _ispProxy.GetPortStatuses()
+                .Where(p => !string.IsNullOrWhiteSpace(p.Host))
+                .GroupBy(p => p.Port)
+                .ToDictionary(
+                    g => g.Key,
+                    g => g.Select(p => p.Host!).Distinct(StringComparer.OrdinalIgnoreCase).ToList());
+
+            foreach (var row in ports)
+            {
+                if (!string.IsNullOrWhiteSpace(row.ProxyHost))
+                    continue;
+                if (row.Port is int port
+                    && hostsByPort.TryGetValue(port, out var hosts)
+                    && hosts.Count == 1)
+                {
+                    row.ProxyHost = hosts[0];
+                }
+            }
+
             ports = ports
                 .OrderBy(r => r.Port == null)
                 .ThenBy(r => r.SuccessRate)
                 .ThenByDescending(r => r.FailedCount)
+                .ThenBy(r => r.ProxyHost)
                 .ThenBy(r => r.Port)
                 .ToList();
 

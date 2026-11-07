@@ -13,6 +13,9 @@ namespace Affiliate.ViewModels
 
     public class PortStatisticsRow
     {
+        /// <summary>Proxy IP from the request log; null when not recorded or direct (no proxy).</summary>
+        public string? ProxyHost { get; set; }
+
         /// <summary>Null = direct / Oxylabs API (no ISP proxy port).</summary>
         public int? Port { get; set; }
 

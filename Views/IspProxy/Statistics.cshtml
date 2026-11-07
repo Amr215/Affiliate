@@ -109,6 +109,7 @@
         <table id="port-stats" class="table table-hover mb-0 align-middle">
             <thead>
                 <tr>
+                    <th class="ltr sortable">IP البروكسي <i class="bi sort-icon"></i></th>
                     <th class="ltr sortable">المنفذ <i class="bi sort-icon"></i></th>
                     <th class="ltr sortable">إجمالي الطلبات <i class="bi sort-icon"></i></th>
                     <th class="ltr sortable">نجاح <i class="bi sort-icon"></i></th>
@@ -127,7 +128,7 @@
             @if (Model.Ports.Count == 0)
             {
                 <tr>
-                    <td colspan="12" class="text-center text-muted py-4">لا توجد سجلات مطابقة</td>
+                    <td colspan="13" class="text-center text-muted py-4">لا توجد سجلات مطابقة</td>
                 </tr>
             }
             else
@@ -146,6 +147,16 @@
                         : row.AmazonSuccessRate >= 70 ? "text-warning"
                         : "text-danger";
                     <tr>
+                        <td class="ltr num" data-sort="@(row.ProxyHost ?? "")">
+                            @if (!string.IsNullOrWhiteSpace(row.ProxyHost))
+                            {
+                                @row.ProxyHost
+                            }
+                            else
+                            {
+                                <span class="text-muted">—</span>
+                            }
+                        </td>
                         <td class="fw-semibold ltr" data-sort="@row.Port">
                             @if (row.Port.HasValue)
                             {
@@ -171,9 +182,11 @@
                         </td>
                         <td class="ltr num fw-semibold @rateClass" data-sort="@row.SuccessRate.ToString(System.Globalization.CultureInfo.InvariantCulture)">@row.SuccessRate.ToString("0.00")%</td>
                         <td class="text-nowrap">
-                            @if (row.Port.HasValue)
+                            @if (row.Port.HasValue || !string.IsNullOrWhiteSpace(row.ProxyHost))
                             {
-                                <a asp-controller="OxylabsLogs" asp-action="Index" asp-route-Port="@row.Port"
+                                <a asp-controller="OxylabsLogs" asp-action="Index"
+                                   asp-route-Port="@row.Port"
+                                   asp-route-ProxyHost="@row.ProxyHost"
                                    class="btn btn-sm btn-outline-primary">السجلات</a>
                             }
                             else
@@ -206,12 +219,13 @@
             const tbody = table.tBodies[0];
             const headers = Array.from(table.tHead.rows[0].cells);
 
-            // Rows with no proxy port (no numeric value in the port cell) stay at the bottom either way.
+            // Empty / missing values stay at the bottom. Numbers sort numerically; otherwise localeCompare.
             function value(row, index) {
                 const cell = row.cells[index];
-                const raw = cell.dataset.sort !== undefined ? cell.dataset.sort : cell.textContent;
-                const n = parseFloat(raw.trim());
-                return isNaN(n) ? null : n;
+                const raw = (cell.dataset.sort !== undefined ? cell.dataset.sort : cell.textContent).trim();
+                if (!raw || raw === '—') return { n: null, s: '' };
+                const n = parseFloat(raw);
+                return { n: isNaN(n) ? null : n, s: raw };
             }
 
             headers.forEach((th, index) => {
@@ -228,10 +242,14 @@
 
                     rows.sort((a, b) => {
                         const va = value(a, index), vb = value(b, index);
-                        if (va === null && vb === null) return 0;
-                        if (va === null) return 1;
-                        if (vb === null) return -1;
-                        return desc ? vb - va : va - vb;
+                        const aEmpty = !va.s, bEmpty = !vb.s;
+                        if (aEmpty && bEmpty) return 0;
+                        if (aEmpty) return 1;
+                        if (bEmpty) return -1;
+                        if (va.n !== null && vb.n !== null)
+                            return desc ? vb.n - va.n : va.n - vb.n;
+                        const cmp = va.s.localeCompare(vb.s, undefined, { numeric: true });
+                        return desc ? -cmp : cmp;
                     });
                     rows.forEach(r => tbody.appendChild(r));
                 });
