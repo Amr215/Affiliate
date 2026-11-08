@@ -1,10 +1,14 @@
+using Affiliate.Models;
+
 namespace Affiliate.ViewModels
 {
     public class PublicDealsViewModel
     {
         public IReadOnlyList<PublicDealItem> Deals { get; set; } = [];
         public IReadOnlyList<PublicDealTagOption> Tags { get; set; } = [];
+        public IReadOnlyList<PublicDealTagGroup> TagGroups { get; set; } = [];
         public int? SelectedTagId { get; set; }
+        public SearchTagCategory? SelectedCategory { get; set; }
         public string? Query { get; set; }
         public int Page { get; set; } = 1;
         public int TotalPages { get; set; } = 1;
@@ -16,11 +20,20 @@ namespace Affiliate.ViewModels
         public bool IsArabic => string.Equals(Lang, "ar", StringComparison.OrdinalIgnoreCase);
     }
 
+    public class PublicDealTagGroup
+    {
+        public SearchTagCategory Category { get; set; }
+        public IReadOnlyList<PublicDealTagOption> Tags { get; set; } = [];
+
+        public string DisplayName(bool arabic) => Category.DisplayName(arabic);
+    }
+
     public class PublicDealTagOption
     {
         public int Id { get; set; }
         public string NameEn { get; set; } = string.Empty;
         public string NameAr { get; set; } = string.Empty;
+        public SearchTagCategory Category { get; set; }
 
         public string DisplayName(bool arabic) =>
             arabic

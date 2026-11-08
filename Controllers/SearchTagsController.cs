@@ -7,20 +7,47 @@ namespace Affiliate.Controllers
 {
     public class SearchTagsController(AffiliateDbContext context) : Controller
     {
-        public async Task<IActionResult> Index(CancellationToken cancellationToken)
+        public async Task<IActionResult> Index(string? category, CancellationToken cancellationToken)
         {
-            var tags = await context.SearchTags.AsNoTracking()
-                .OrderBy(t => t.NameAr)
+            var query = context.SearchTags.AsNoTracking().AsQueryable();
+            if (Enum.TryParse<SearchTagCategory>(category, ignoreCase: true, out var cat) && Enum.IsDefined(cat))
+                query = query.Where(t => t.Category == cat);
+
+            var tags = await query
+                .OrderBy(t => t.Category)
+                .ThenBy(t => t.Position)
+                .ThenBy(t => t.NameAr)
                 .Select(t => new SearchTagListItem
                 {
                     Id = t.Id,
                     NameAr = t.NameAr,
                     NameEn = t.NameEn,
+                    Category = t.Category,
+                    Position = t.Position,
                     ScraperUrlCount = t.ScraperUrls.Count
                 })
                 .ToListAsync(cancellationToken);
 
+            ViewData["Category"] = category;
             return View(tags);
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SavePosition(
+            [FromBody] SaveSearchTagPositionRequest request,
+            CancellationToken cancellationToken)
+        {
+            var updated = await context.SearchTags
+                .Where(t => t.Id == request.Id)
+                .ExecuteUpdateAsync(
+                    t => t.SetProperty(x => x.Position, request.Position),
+                    cancellationToken);
+
+            if (updated == 0)
+                return BadRequest(new { success = false, message = "لم يتم العثور على الوسم." });
+
+            return Ok(new { success = true, position = request.Position });
         }
 
         public IActionResult Create() => View(new SearchTag());
@@ -28,7 +55,7 @@ namespace Affiliate.Controllers
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> Create(
-            [Bind(nameof(SearchTag.NameAr), nameof(SearchTag.NameEn))] SearchTag tag,
+            [Bind(nameof(SearchTag.NameAr), nameof(SearchTag.NameEn), nameof(SearchTag.Category), nameof(SearchTag.Position))] SearchTag tag,
             CancellationToken cancellationToken)
         {
             Normalize(tag);
@@ -54,7 +81,7 @@ namespace Affiliate.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> Edit(
             int id,
-            [Bind(nameof(SearchTag.Id), nameof(SearchTag.NameAr), nameof(SearchTag.NameEn))] SearchTag tag,
+            [Bind(nameof(SearchTag.Id), nameof(SearchTag.NameAr), nameof(SearchTag.NameEn), nameof(SearchTag.Category), nameof(SearchTag.Position))] SearchTag tag,
             CancellationToken cancellationToken)
         {
             if (id != tag.Id)
@@ -84,6 +111,8 @@ namespace Affiliate.Controllers
                     Id = t.Id,
                     NameAr = t.NameAr,
                     NameEn = t.NameEn,
+                    Category = t.Category,
+                    Position = t.Position,
                     ScraperUrlCount = t.ScraperUrls.Count
                 })
                 .FirstOrDefaultAsync(t => t.Id == id, cancellationToken);
@@ -118,6 +147,14 @@ namespace Affiliate.Controllers
         public int Id { get; set; }
         public string NameAr { get; set; } = string.Empty;
         public string NameEn { get; set; } = string.Empty;
+        public SearchTagCategory Category { get; set; }
+        public int Position { get; set; }
         public int ScraperUrlCount { get; set; }
+    }
+
+    public class SaveSearchTagPositionRequest
+    {
+        public int Id { get; set; }
+        public int Position { get; set; }
     }
 }

@@ -32,12 +32,17 @@ namespace Affiliate.Controllers
             [FromServices] AsinLinkCodec codec,
             string? q = null,
             int? tagId = null,
+            int? cat = null,
             string? lang = null,
             int page = 1,
             CancellationToken cancellationToken = default)
         {
             if (tagId is <= 0)
                 tagId = null;
+
+            SearchTagCategory? selectedCategory = null;
+            if (cat.HasValue && Enum.IsDefined(typeof(SearchTagCategory), cat.Value))
+                selectedCategory = (SearchTagCategory)cat.Value;
 
             var queryText = (q ?? string.Empty).Trim();
             // Amazon URLs are long; keep enough to extract ASIN, then normalize.
@@ -61,14 +66,31 @@ namespace Affiliate.Controllers
 
             var tagsBase = db.SearchTags.AsNoTracking();
             var tagsOrdered = isArabic
-                ? tagsBase.OrderBy(t => t.NameAr).ThenBy(t => t.NameEn)
-                : tagsBase.OrderBy(t => t.NameEn).ThenBy(t => t.NameAr);
+                ? tagsBase.OrderBy(t => t.Category).ThenBy(t => t.Position).ThenBy(t => t.NameAr).ThenBy(t => t.NameEn)
+                : tagsBase.OrderBy(t => t.Category).ThenBy(t => t.Position).ThenBy(t => t.NameEn).ThenBy(t => t.NameAr);
             var tags = await tagsOrdered
-                .Select(t => new PublicDealTagOption { Id = t.Id, NameEn = t.NameEn, NameAr = t.NameAr })
+                .Select(t => new PublicDealTagOption
+                {
+                    Id = t.Id,
+                    NameEn = t.NameEn,
+                    NameAr = t.NameAr,
+                    Category = t.Category
+                })
                 .ToListAsync(cancellationToken);
+
+            var tagGroups = tags
+                .GroupBy(t => t.Category)
+                .OrderBy(g => (int)g.Key)
+                .Select(g => new PublicDealTagGroup { Category = g.Key, Tags = g.ToList() })
+                .ToList();
 
             if (tagId.HasValue && tags.All(t => t.Id != tagId.Value))
                 tagId = null;
+
+            if (tagId.HasValue)
+                selectedCategory = tags.First(t => t.Id == tagId.Value).Category;
+            else if (selectedCategory.HasValue && tagGroups.All(g => g.Category != selectedCategory.Value))
+                selectedCategory = null;
 
             var dealsQuery = db.Products.AsNoTracking()
                 .Where(p => p.IsAvailable && p.IsBlocked != true
@@ -76,10 +98,16 @@ namespace Affiliate.Controllers
                     && p.Asin != null
                     && p.ExternalLowestPrice > 0
                     && p.CurrentPrice > 0
-                    && p.CurrentPrice < p.ExternalLowestPrice);
+                    && p.CurrentPrice < p.ExternalLowestPrice
+                    && p.ScraperUrl != null
+                    && p.ScraperUrl.IsAsinRecheckEnabled);
 
             if (tagId.HasValue)
                 dealsQuery = dealsQuery.Where(p => p.ScraperUrl != null && p.ScraperUrl.TagId == tagId.Value);
+            else if (selectedCategory.HasValue)
+                dealsQuery = dealsQuery.Where(p => p.ScraperUrl != null
+                    && p.ScraperUrl.Tag != null
+                    && p.ScraperUrl.Tag.Category == selectedCategory.Value);
 
             if (!string.IsNullOrEmpty(queryText))
             {
@@ -141,10 +169,14 @@ namespace Affiliate.Controllers
                     && p.Asin != null
                     && p.CurrentPrice > 0
                     && p.ScraperUrl != null
+                    && p.ScraperUrl.IsAsinRecheckEnabled
                     && p.ScraperUrl.TagId != null);
 
             if (tagId.HasValue)
                 trackerQuery = trackerQuery.Where(p => p.ScraperUrl!.TagId == tagId.Value);
+            else if (selectedCategory.HasValue)
+                trackerQuery = trackerQuery.Where(p => p.ScraperUrl!.Tag != null
+                    && p.ScraperUrl.Tag.Category == selectedCategory.Value);
 
             if (!string.IsNullOrEmpty(queryText))
             {
@@ -259,7 +291,9 @@ namespace Affiliate.Controllers
             {
                 Deals = pageItems,
                 Tags = tags,
+                TagGroups = tagGroups,
                 SelectedTagId = tagId,
+                SelectedCategory = selectedCategory,
                 Query = queryText,
                 Page = page,
                 TotalPages = totalPages,

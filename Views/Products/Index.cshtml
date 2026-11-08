@@ -83,7 +83,12 @@
                         </td>
                         <td style="min-width:180px;max-width:320px">
                             <span class="product-title arabic-text">
-                                @(string.IsNullOrWhiteSpace(p.Name) ? "(بدون عنوان)" : p.Name)
+                                @{
+                                    var displayName = !string.IsNullOrWhiteSpace(p.NameAr) ? p.NameAr
+                                        : !string.IsNullOrWhiteSpace(p.Name) ? p.Name
+                                        : null;
+                                }
+                                @(displayName ?? "(بدون عنوان)")
                             </span>
                             @if (!string.IsNullOrEmpty(p.Manufacturer))
                             {

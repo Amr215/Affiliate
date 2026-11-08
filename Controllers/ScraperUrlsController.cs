@@ -21,15 +21,21 @@ namespace Affiliate.Controllers
         }
 
         public async Task<IActionResult> Index(
-            string? search, string? category, bool? isEnabled, bool? isAsinRecheckEnabled, string? sort)
+            string? search, string? category, string? tag, bool? isEnabled, bool? isAsinRecheckEnabled, string? sort)
         {
-            var query = _context.ScraperUrls.AsQueryable();
+            IQueryable<ScraperUrl> query = _context.ScraperUrls.Include(s => s.Tag);
             if (!string.IsNullOrWhiteSpace(search))
                 query = query.Where(s => s.Name.Contains(search.Trim()));
             if (string.Equals(category, "none", StringComparison.OrdinalIgnoreCase))
                 query = query.Where(s => s.Category == null);
             else if (Enum.TryParse<ScraperCategory>(category, ignoreCase: true, out var cat) && Enum.IsDefined(cat))
                 query = query.Where(s => s.Category == cat);
+            if (string.Equals(tag, "none", StringComparison.OrdinalIgnoreCase))
+                query = query.Where(s => s.TagId == null);
+            else if (string.Equals(tag, "any", StringComparison.OrdinalIgnoreCase))
+                query = query.Where(s => s.TagId != null);
+            else if (int.TryParse(tag, out var tagId) && tagId > 0)
+                query = query.Where(s => s.TagId == tagId);
             if (isEnabled.HasValue)
                 query = query.Where(s => s.IsEnabled == isEnabled.Value);
             if (isAsinRecheckEnabled.HasValue)
@@ -46,12 +52,26 @@ namespace Affiliate.Controllers
 
             ViewData["Search"] = search;
             ViewData["Category"] = category;
+            ViewData["Tag"] = tag;
             ViewData["IsEnabled"] = isEnabled;
             ViewData["IsAsinRecheckEnabled"] = isAsinRecheckEnabled;
             ViewData["Sort"] = sort;
             ViewData["AllNames"] = await _context.ScraperUrls
                 .OrderBy(s => s.Name)
                 .Select(s => s.Name)
+                .ToListAsync();
+            ViewData["SearchTags"] = await _context.SearchTags.AsNoTracking()
+                .OrderBy(t => t.Category)
+                .ThenBy(t => t.Position)
+                .ThenBy(t => t.NameAr)
+                .Select(t => new SearchTagListItem
+                {
+                    Id = t.Id,
+                    NameAr = t.NameAr,
+                    NameEn = t.NameEn,
+                    Category = t.Category,
+                    Position = t.Position
+                })
                 .ToListAsync();
             ViewData["ProductCounts"] = await _context.Products.AsNoTracking()
                 .Where(p => p.ScraperUrlId != null)
@@ -295,6 +315,49 @@ namespace Affiliate.Controllers
 
         [HttpPost]
         [ValidateAntiForgeryToken]
+        public async Task<IActionResult> BulkAssignTag(
+            [FromBody] BulkAssignTagRequest request,
+            CancellationToken cancellationToken)
+        {
+            if (request.Ids is not { Length: > 0 })
+                return BadRequest(new { success = false, message = "لم يتم تحديد أي روابط." });
+
+            string? tagLabel = null;
+            if (request.TagId is { } tagId)
+            {
+                if (tagId <= 0)
+                    return BadRequest(new { success = false, message = "وسم غير معروف." });
+
+                var tag = await _context.SearchTags.AsNoTracking()
+                    .Where(t => t.Id == tagId)
+                    .Select(t => new { t.Id, t.NameAr })
+                    .FirstOrDefaultAsync(cancellationToken);
+                if (tag == null)
+                    return BadRequest(new { success = false, message = "وسم غير معروف." });
+
+                tagLabel = tag.NameAr;
+            }
+
+            var updated = await _context.ScraperUrls
+                .Where(s => request.Ids.Contains(s.Id))
+                .ExecuteUpdateAsync(
+                    s => s.SetProperty(x => x.TagId, request.TagId),
+                    cancellationToken);
+
+            if (updated == 0)
+                return BadRequest(new { success = false, message = "لم يتم العثور على الروابط المحددة." });
+
+            return Ok(new
+            {
+                success = true,
+                message = tagLabel != null
+                    ? $"تم تعيين الوسم \"{tagLabel}\" لـ {updated} رابط."
+                    : $"تم إزالة الوسم من {updated} رابط."
+            });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
         public async Task<IActionResult> SaveDropAlertPercents(
             [FromBody] SaveDropAlertPercentsRequest request,
             CancellationToken cancellationToken)
@@ -339,6 +402,36 @@ namespace Affiliate.Controllers
                 return BadRequest(new { success = false, message = "لم يتم العثور على الرابط." });
 
             return Ok(new { success = true, minutes = request.Minutes });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SaveTag(
+            [FromBody] SaveScraperUrlTagRequest request,
+            CancellationToken cancellationToken)
+        {
+            int? tagId = request.TagId is <= 0 ? null : request.TagId;
+            string? tagLabel = null;
+            if (tagId is { } id)
+            {
+                tagLabel = await _context.SearchTags.AsNoTracking()
+                    .Where(t => t.Id == id)
+                    .Select(t => t.NameAr)
+                    .FirstOrDefaultAsync(cancellationToken);
+                if (tagLabel == null)
+                    return BadRequest(new { success = false, message = "وسم غير معروف." });
+            }
+
+            var updated = await _context.ScraperUrls
+                .Where(s => s.Id == request.Id)
+                .ExecuteUpdateAsync(
+                    s => s.SetProperty(x => x.TagId, tagId),
+                    cancellationToken);
+
+            if (updated == 0)
+                return BadRequest(new { success = false, message = "لم يتم العثور على الرابط." });
+
+            return Ok(new { success = true, tagId, tagLabel });
         }
 
         [HttpPost]
@@ -437,7 +530,8 @@ namespace Affiliate.Controllers
         private async Task PopulateTagOptionsAsync(CancellationToken cancellationToken, int? selectedTagId = null)
         {
             var tags = await _context.SearchTags.AsNoTracking()
-                .OrderBy(t => t.NameAr)
+                .OrderBy(t => t.Position)
+                .ThenBy(t => t.NameAr)
                 .Select(t => new { t.Id, Label = t.NameAr + " / " + t.NameEn })
                 .ToListAsync(cancellationToken);
 
@@ -486,6 +580,22 @@ namespace Affiliate.Controllers
 
         /// <summary>Null clears the category, which stops Telegram alerts for these URLs.</summary>
         public ScraperCategory? Category { get; set; }
+    }
+
+    public class BulkAssignTagRequest
+    {
+        public int[] Ids { get; set; } = [];
+
+        /// <summary>Null clears the search tag.</summary>
+        public int? TagId { get; set; }
+    }
+
+    public class SaveScraperUrlTagRequest
+    {
+        public int Id { get; set; }
+
+        /// <summary>Null or &lt;= 0 clears the search tag.</summary>
+        public int? TagId { get; set; }
     }
 
     public class SaveDropAlertPercentsRequest

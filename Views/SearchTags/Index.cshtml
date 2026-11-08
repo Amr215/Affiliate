@@ -1,6 +1,9 @@
 @model IReadOnlyList<Affiliate.Controllers.SearchTagListItem>
 @{
     ViewData["Title"] = "وسوم البحث";
+    var category = ViewData["Category"] as string;
+    var isFiltered = !string.IsNullOrWhiteSpace(category);
+    var categoryOptions = Html.GetEnumSelectList<SearchTagCategory>().ToList();
 }
 
 <div class="page-toolbar">
@@ -13,6 +16,20 @@
     </div>
 </div>
 
+<form asp-action="Index" method="get" class="d-flex flex-wrap gap-2 mb-3">
+    <select name="category" class="form-select w-auto arabic-text" aria-label="تصفية حسب التصنيف" onchange="this.form.submit()">
+        <option value="" selected="@(string.IsNullOrEmpty(category))">كل التصنيفات</option>
+        @foreach (var option in categoryOptions)
+        {
+            <option value="@option.Value" selected="@(string.Equals(category, option.Value, StringComparison.OrdinalIgnoreCase))">@option.Text</option>
+        }
+    </select>
+    @if (isFiltered)
+    {
+        <a asp-action="Index" class="btn btn-outline-secondary">مسح التصفية</a>
+    }
+</form>
+
 @if (TempData["StatusMessage"] is string statusMessage)
 {
     <div class="alert alert-info alert-dismissible fade show" role="alert">
@@ -21,11 +38,15 @@
     </div>
 }
 
+@Html.AntiForgeryToken()
+
 <div class="table-panel">
     <div class="table-responsive">
-        <table class="table table-hover align-middle mb-0">
+        <table class="table table-hover align-middle mb-0" id="searchTagsTable">
             <thead>
                 <tr>
+                    <th style="min-width:8rem">الترتيب</th>
+                    <th>التصنيف</th>
                     <th>العربي</th>
                     <th>English</th>
                     <th>روابط السكرابر</th>
@@ -35,7 +56,22 @@
             <tbody>
             @foreach (var t in Model)
             {
-                <tr>
+                <tr data-tag-id="@t.Id">
+                    <td>
+                        <div class="d-flex gap-1 align-items-center">
+                            <input type="number" class="form-control form-control-sm ltr tag-position-input"
+                                   data-id="@t.Id"
+                                   data-original="@t.Position"
+                                   value="@t.Position"
+                                   aria-label="ترتيب @t.NameAr"
+                                   style="width:5rem" />
+                            <button type="button" class="btn btn-sm btn-outline-primary save-tag-position"
+                                    data-id="@t.Id" disabled title="حفظ الترتيب">
+                                <i class="bi bi-save"></i>
+                            </button>
+                        </div>
+                    </td>
+                    <td class="arabic-text">@t.Category.DisplayName()</td>
                     <td class="arabic-text">@t.NameAr</td>
                     <td class="ltr">@t.NameEn</td>
                     <td class="num">@t.ScraperUrlCount</td>
@@ -50,10 +86,69 @@
     </div>
 </div>
 
-@if (Model.Count == 0)
+@if (Model.Count == 0 && isFiltered)
+{
+    <div class="empty-state">
+        <i class="bi bi-tags"></i>
+        <p class="mb-2">لا توجد وسوم في هذا التصنيف.</p>
+        <a asp-action="Index" class="btn btn-outline-secondary">عرض كل الوسوم</a>
+    </div>
+}
+else if (Model.Count == 0)
 {
     <div class="empty-state">
         <i class="bi bi-tags"></i>
         <p class="mb-0">لا توجد وسوم بعد. أنشئ وسماً ثم اربطه بروابط السكرابر.</p>
     </div>
+}
+
+@section Scripts {
+<script>
+(() => {
+    const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value;
+    const saveUrl = '@Url.Action("SavePosition")';
+    const table = document.getElementById('searchTagsTable');
+
+    function syncSaveBtn(input) {
+        const btn = input.closest('td')?.querySelector('.save-tag-position');
+        if (!btn) return;
+        const position = Number(input.value);
+        btn.disabled = !Number.isFinite(position) || position === Number(input.dataset.original);
+    }
+
+    table?.addEventListener('input', e => {
+        if (e.target.classList.contains('tag-position-input'))
+            syncSaveBtn(e.target);
+    });
+
+    table?.addEventListener('click', async e => {
+        const btn = e.target.closest('.save-tag-position');
+        if (!btn || !token) return;
+        const input = btn.closest('td')?.querySelector('.tag-position-input');
+        if (!input) return;
+        const position = Number(input.value);
+        if (!Number.isFinite(position)) {
+            alert('الترتيب يجب أن يكون رقماً.');
+            return;
+        }
+        btn.disabled = true;
+        const res = await fetch(saveUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': token
+            },
+            body: JSON.stringify({ id: Number(btn.dataset.id), position })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.success) {
+            alert(data.message || 'فشل التحديث');
+            syncSaveBtn(input);
+            return;
+        }
+        input.dataset.original = String(data.position ?? position);
+        syncSaveBtn(input);
+    });
+})();
+</script>
 }

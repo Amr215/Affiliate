@@ -330,6 +330,7 @@ namespace Affiliate.Controllers
                 var term = filter.Search;
                 query = query.Where(p =>
                     p.Name.Contains(term) ||
+                    (p.NameAr != null && p.NameAr.Contains(term)) ||
                     (p.Asin != null && p.Asin.Contains(term)) ||
                     (p.Manufacturer != null && p.Manufacturer.Contains(term)));
             }

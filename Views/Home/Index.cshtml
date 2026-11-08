@@ -12,45 +12,71 @@
         ? Model.Tags.FirstOrDefault(t => t.Id == sid)
         : null;
     var tagName = selectedTag?.DisplayName(ar);
+    var categoryName = Model.SelectedCategory?.DisplayName(ar);
+    var filterLabel = !string.IsNullOrWhiteSpace(tagName) ? tagName
+        : !string.IsNullOrWhiteSpace(categoryName) ? categoryName
+        : null;
 
     var brand = ar ? "عروض السندباد" : "El Sindbad Deals";
-    var h1 = !string.IsNullOrWhiteSpace(tagName)
-        ? (ar ? $"عروض {tagName}" : $"{tagName} deals")
+    var h1 = !string.IsNullOrWhiteSpace(filterLabel)
+        ? (ar ? $"عروض {filterLabel}" : $"{filterLabel} deals")
         : (ar ? "أفضل العروض والتخفيضات اليوم" : "Best deals and discounts today");
 
     var titleCore = !string.IsNullOrWhiteSpace(Model.Query)
         ? (ar ? $"بحث: {Model.Query} | {brand}" : $"Search: {Model.Query} | {brand}")
-        : !string.IsNullOrWhiteSpace(tagName)
-            ? (ar ? $"عروض {tagName} | {brand}" : $"{tagName} Deals | {brand}")
+        : !string.IsNullOrWhiteSpace(filterLabel)
+            ? (ar ? $"عروض {filterLabel} | {brand}" : $"{filterLabel} Deals | {brand}")
             : (ar ? $"{brand} | تخفيضات وعروض يومية" : $"{brand} | Daily discounts & deals");
     if (Model.Page > 1)
         titleCore = ar ? $"{titleCore} — صفحة {Model.Page}" : $"{titleCore} — Page {Model.Page}";
     ViewData["Title"] = titleCore;
 
     var description = ar
-        ? (!string.IsNullOrWhiteSpace(tagName)
-            ? $"تصفح أحدث عروض {tagName} على عروض السندباد. أسعار مخفضة مختارة يومياً في مصر، مع تحديث مستمر لأفضل التخفيضات."
+        ? (!string.IsNullOrWhiteSpace(filterLabel)
+            ? $"تصفح أحدث عروض {filterLabel} على عروض السندباد. أسعار مخفضة مختارة يومياً في مصر، مع تحديث مستمر لأفضل التخفيضات."
             : "عروض السندباد — اكتشف أحدث التخفيضات والعروض اليومية في مصر. أسعار مخفضة مختارة بعناية، مع تحديث مستمر عبر الموقع وقناة تيليجرام.")
-        : (!string.IsNullOrWhiteSpace(tagName)
-            ? $"Browse the latest {tagName} deals on El Sindbad. Selected discounted prices in Egypt, updated daily."
+        : (!string.IsNullOrWhiteSpace(filterLabel)
+            ? $"Browse the latest {filterLabel} deals on El Sindbad. Selected discounted prices in Egypt, updated daily."
             : "El Sindbad Deals — discover the latest daily discounts in Egypt. Hand-picked price drops, updated continuously on the site and Telegram.");
     ViewData["MetaDescription"] = description;
     ViewData["MetaKeywords"] = ar
         ? "عروض, تخفيضات, عروض مصر, عروض السندباد, أسعار مخفضة, تيليجرام عروض"
         : "deals, discounts, Egypt deals, El Sindbad, price drops, Telegram deals";
 
-    object Route(int? page = null, int? tagId = null, string? lang = null, string? q = null, bool clearTag = false, bool clearQuery = false)
+    object Route(
+        int? page = null,
+        int? tagId = null,
+        SearchTagCategory? category = null,
+        string? lang = null,
+        string? q = null,
+        bool clearTag = false,
+        bool clearCategory = false,
+        bool clearQuery = false)
     {
         var p = page ?? Model.Page;
         var l = lang ?? Model.Lang;
         var query = clearQuery ? null : (q ?? Model.Query);
         if (string.IsNullOrWhiteSpace(query))
             query = null;
-        var t = clearTag ? null : (tagId ?? Model.SelectedTagId);
+
+        int? t = clearTag || clearCategory ? null : (tagId ?? Model.SelectedTagId);
+        int? c = null;
+        if (!clearCategory)
+        {
+            if (category.HasValue)
+                c = (int)category.Value;
+            else if (!t.HasValue && Model.SelectedCategory.HasValue)
+                c = (int)Model.SelectedCategory.Value;
+        }
+
         if (t.HasValue && query != null)
             return new { page = p, tagId = t, lang = l, q = query };
         if (t.HasValue)
             return new { page = p, tagId = t, lang = l };
+        if (c.HasValue && query != null)
+            return new { page = p, cat = c, lang = l, q = query };
+        if (c.HasValue)
+            return new { page = p, cat = c, lang = l };
         if (query != null)
             return new { page = p, lang = l, q = query };
         return new { page = p, lang = l };
@@ -183,7 +209,7 @@
 }
 
 <header class="pub-header">
-    <a class="pub-logo" href="@Url.Action("Index", Route(page: 1, clearTag: true))" aria-label="@brand">
+    <a class="pub-logo" href="@Url.Action("Index", Route(page: 1, clearTag: true, clearCategory: true))" aria-label="@brand">
         <img src="~/images/sinbad-logo.png" alt="@brand" width="40" height="40" />
     </a>
     <a class="tg-promo" href="https://t.me/OrudElSindbad" target="_blank" rel="noopener">
@@ -223,15 +249,51 @@
     <p>@description</p>
 </section>
 
-@if (Model.Tags.Count > 0)
+@if (Model.TagGroups.Count > 0)
 {
-    <nav class="tag-bar" aria-label="@(ar ? "تصفية حسب الوسم" : "Filter by tag")">
-        <a class="tag-chip @(Model.SelectedTagId == null ? "is-active" : null)"
-           href="@Url.Action("Index", Route(page: 1, clearTag: true))">@(ar ? "الكل" : "All")</a>
-        @foreach (var tag in Model.Tags)
+    var activeGroup = Model.SelectedCategory is SearchTagCategory sc
+        ? Model.TagGroups.FirstOrDefault(g => g.Category == sc)
+        : null;
+
+    <nav class="deal-filters" aria-label="@(ar ? "تصفية العروض" : "Filter deals")" data-deal-filters>
+        <div class="filter-rail-wrap">
+            <div class="filter-rail" role="tablist" aria-label="@(ar ? "التصنيفات" : "Categories")">
+                <a class="filter-chip filter-chip-cat @(Model.SelectedCategory == null && Model.SelectedTagId == null ? "is-active" : null)"
+                   role="tab"
+                   aria-selected="@(Model.SelectedCategory == null && Model.SelectedTagId == null ? "true" : "false")"
+                   href="@Url.Action("Index", Route(page: 1, clearTag: true, clearCategory: true))">@(ar ? "الكل" : "All")</a>
+                @foreach (var group in Model.TagGroups)
+                {
+                    var isCatActive = Model.SelectedCategory == group.Category;
+                    <a class="filter-chip filter-chip-cat @(isCatActive ? "is-active" : null)"
+                       role="tab"
+                       aria-selected="@(isCatActive ? "true" : "false")"
+                       href="@Url.Action("Index", Route(page: 1, category: group.Category, clearTag: true))">@group.DisplayName(ar)</a>
+                }
+            </div>
+        </div>
+
+        @if (activeGroup != null)
         {
-            <a class="tag-chip @(Model.SelectedTagId == tag.Id ? "is-active" : null)"
-               href="@Url.Action("Index", Route(page: 1, tagId: tag.Id))">@tag.DisplayName(ar)</a>
+            <div class="filter-refine" aria-label="@(ar ? "تضييق التصنيف" : "Refine category")">
+                <div class="filter-refine-head">
+                    <span class="filter-refine-label">@(ar ? "ضيّق النتائج" : "Refine")</span>
+                    @if (Model.SelectedTagId != null)
+                    {
+                        <a class="filter-refine-clear"
+                           href="@Url.Action("Index", Route(page: 1, category: activeGroup.Category, clearTag: true))">@(ar ? "إزالة التصفية" : "Clear tag")</a>
+                    }
+                </div>
+                <div class="filter-rail-wrap">
+                    <div class="filter-rail filter-rail-tags">
+                        @foreach (var tag in activeGroup.Tags)
+                        {
+                            <a class="filter-chip filter-chip-tag @(Model.SelectedTagId == tag.Id ? "is-active" : null)"
+                               href="@Url.Action("Index", Route(page: 1, tagId: tag.Id))">@tag.DisplayName(ar)</a>
+                        }
+                    </div>
+                </div>
+            </div>
         }
     </nav>
 }
@@ -241,6 +303,10 @@
     @if (Model.SelectedTagId is int selectedTagId)
     {
         <input type="hidden" name="tagId" value="@selectedTagId" />
+    }
+    else if (Model.SelectedCategory is SearchTagCategory selectedCat)
+    {
+        <input type="hidden" name="cat" value="@((int)selectedCat)" />
     }
     <label class="visually-hidden" for="deals-q">@(ar ? "بحث" : "Search")</label>
     <input id="deals-q" class="tracker-search-input" type="search" name="q" value="@Model.Query"
@@ -358,4 +424,8 @@ else
             }
         </nav>
     }
+}
+
+@section Scripts {
+    <script src="~/js/public-filters.js" asp-append-version="true"></script>
 }

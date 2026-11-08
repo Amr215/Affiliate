@@ -36,7 +36,9 @@ namespace Affiliate.Data
                 entity.ToTable("SearchTags");
                 entity.Property(t => t.NameAr).HasMaxLength(100);
                 entity.Property(t => t.NameEn).HasMaxLength(100);
+                entity.Property(t => t.Category).HasConversion<int>();
                 entity.HasIndex(t => t.NameEn);
+                entity.HasIndex(t => t.Category);
             });
 
             modelBuilder.Entity<ScraperUrl>(entity =>

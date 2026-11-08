@@ -3,14 +3,17 @@
     ViewData["Title"] = "روابط السكرابر";
     var search = ViewData["Search"] as string;
     var category = ViewData["Category"] as string;
+    var tag = ViewData["Tag"] as string;
     var isEnabled = ViewData["IsEnabled"] as bool?;
     var isAsinRecheckEnabled = ViewData["IsAsinRecheckEnabled"] as bool?;
     var sort = ViewData["Sort"] as string;
     var allNames = ViewData["AllNames"] as List<string> ?? [];
+    var searchTags = ViewData["SearchTags"] as List<Affiliate.Controllers.SearchTagListItem> ?? [];
     var productCounts = ViewData["ProductCounts"] as Dictionary<int, int> ?? new();
     var categoryProductCounts = ViewData["CategoryProductCounts"] as Dictionary<ScraperCategory, int> ?? new();
     var uncategorizedProductCount = ViewData["UncategorizedProductCount"] as int? ?? 0;
     var isFiltered = !string.IsNullOrWhiteSpace(search) || !string.IsNullOrWhiteSpace(category)
+        || !string.IsNullOrWhiteSpace(tag)
         || isEnabled.HasValue || isAsinRecheckEnabled.HasValue;
     var totalProducts = categoryProductCounts.Values.Sum() + uncategorizedProductCount;
 }
@@ -53,6 +56,17 @@
         @foreach (var option in Html.GetEnumSelectList<ScraperCategory>())
         {
             <option value="@option.Value" selected="@(string.Equals(category, option.Value, StringComparison.OrdinalIgnoreCase))">@option.Text</option>
+        }
+    </select>
+    <select name="tag" class="form-select w-auto arabic-text" aria-label="تصفية حسب وسم البحث" onchange="this.form.submit()">
+        <option value="" selected="@(string.IsNullOrEmpty(tag))">كل الوسوم</option>
+        <option value="none" selected="@(string.Equals(tag, "none", StringComparison.OrdinalIgnoreCase))">بدون وسم</option>
+        <option value="any" selected="@(string.Equals(tag, "any", StringComparison.OrdinalIgnoreCase))">له وسم</option>
+        @foreach (var t in searchTags)
+        {
+            <option value="@t.Id" selected="@(string.Equals(tag, t.Id.ToString(), StringComparison.Ordinal))">
+                @t.Category.DisplayName() — @t.NameAr
+            </option>
         }
     </select>
     <select name="isEnabled" class="form-select w-auto arabic-text" aria-label="تصفية حسب التفعيل" onchange="this.form.submit()">
@@ -112,7 +126,17 @@
             }
         </select>
         <button type="button" class="btn btn-sm btn-outline-primary" id="bulkAssignCategory" disabled>
-            <i class="bi bi-tag"></i> تعيين التصنيف
+            <i class="bi bi-bookmark"></i> تعيين التصنيف
+        </button>
+        <select class="form-select form-select-sm w-auto arabic-text" id="bulkTag" disabled aria-label="تعيين وسم البحث">
+            <option value="">بدون وسم</option>
+            @foreach (var t in searchTags)
+            {
+                <option value="@t.Id">@t.Category.DisplayName() — @t.NameAr</option>
+            }
+        </select>
+        <button type="button" class="btn btn-sm btn-outline-primary" id="bulkAssignTag" disabled>
+            <i class="bi bi-tags"></i> تعيين الوسم
         </button>
         <input type="number" class="form-control form-control-sm ltr" id="bulkAsinRecheckInterval"
                min="0" max="10080" value="0" style="width:5rem" disabled
@@ -145,6 +169,7 @@
                     </th>
                     <th>الاسم</th>
                     <th>التصنيف</th>
+                    <th>وسم البحث</th>
                     <th>المنتجات</th>
                     <th>حد التنبيه %</th>
                     <th>فاصل فحص ASIN</th>
@@ -177,6 +202,24 @@
                         {
                             <span class="badge text-bg-warning">بدون تصنيف</span>
                         }
+                    </td>
+                    <td style="min-width:14rem">
+                        <div class="d-flex gap-1 align-items-center">
+                            <select class="form-select form-select-sm arabic-text row-tag-input"
+                                    data-id="@item.Id"
+                                    data-original="@(item.TagId?.ToString() ?? "")"
+                                    aria-label="وسم البحث لـ @item.Name">
+                                <option value="" selected="@(item.TagId == null)">بدون وسم</option>
+                                @foreach (var t in searchTags)
+                                {
+                                    <option value="@t.Id" selected="@(item.TagId == t.Id)">@t.Category.DisplayName() — @t.NameAr</option>
+                                }
+                            </select>
+                            <button type="button" class="btn btn-sm btn-outline-primary save-row-tag"
+                                    data-id="@item.Id" disabled title="حفظ الوسم">
+                                <i class="bi bi-save"></i>
+                            </button>
+                        </div>
                     </td>
                     <td class="num">
                         <a asp-controller="Products" asp-action="Index" asp-route-ScraperUrlId="@item.Id">@productCount</a>
@@ -288,6 +331,8 @@ else if (!Model.Any())
     const disableRecheckBtn = document.getElementById('bulkDisableRecheck');
     const categorySelect = document.getElementById('bulkCategory');
     const categoryBtn = document.getElementById('bulkAssignCategory');
+    const tagSelect = document.getElementById('bulkTag');
+    const tagBtn = document.getElementById('bulkAssignTag');
     const bulkAsinIntervalInput = document.getElementById('bulkAsinRecheckInterval');
     const bulkAsinIntervalBtn = document.getElementById('bulkApplyAsinRecheckInterval');
     const bulkLongUnavailableInput = document.getElementById('bulkLongUnavailableInterval');
@@ -315,6 +360,8 @@ else if (!Model.Any())
         if (disableRecheckBtn) disableRecheckBtn.disabled = n === 0;
         if (categorySelect) categorySelect.disabled = n === 0;
         if (categoryBtn) categoryBtn.disabled = n === 0;
+        if (tagSelect) tagSelect.disabled = n === 0;
+        if (tagBtn) tagBtn.disabled = n === 0;
         if (bulkAsinIntervalInput) bulkAsinIntervalInput.disabled = n === 0;
         if (bulkAsinIntervalBtn) bulkAsinIntervalBtn.disabled = n === 0;
         if (bulkLongUnavailableInput) bulkLongUnavailableInput.disabled = n === 0;
@@ -367,6 +414,9 @@ else if (!Model.Any())
     categoryBtn?.addEventListener('click', () => bulk('@Url.Action("BulkAssignCategory")', {
         category: categorySelect.value === '' ? null : Number(categorySelect.value)
     }));
+    tagBtn?.addEventListener('click', () => bulk('@Url.Action("BulkAssignTag")', {
+        tagId: tagSelect.value === '' ? null : Number(tagSelect.value)
+    }));
     bulkAsinIntervalBtn?.addEventListener('click', () => {
         const minutes = Number(bulkAsinIntervalInput?.value);
         if (!Number.isFinite(minutes) || minutes < 0 || minutes > 10080) {
@@ -405,11 +455,17 @@ else if (!Model.Any())
 
     const saveAsinRecheckIntervalUrl = '@Url.Action("SaveAsinRecheckInterval")';
     const saveLongUnavailableIntervalUrl = '@Url.Action("SaveLongUnavailableRecheckInterval")';
+    const saveTagUrl = '@Url.Action("SaveTag")';
     function syncIntervalSaveBtn(input, btnSelector) {
         const btn = input.closest('td')?.querySelector(btnSelector);
         if (!btn) return;
         const minutes = Number(input.value);
         btn.disabled = !Number.isFinite(minutes) || minutes === Number(input.dataset.original);
+    }
+    function syncRowTagSaveBtn(select) {
+        const btn = select.closest('td')?.querySelector('.save-row-tag');
+        if (!btn) return;
+        btn.disabled = String(select.value) === String(select.dataset.original ?? '');
     }
     document.getElementById('searchesTable')?.addEventListener('input', e => {
         if (e.target.classList.contains('asin-recheck-interval-input'))
@@ -417,7 +473,38 @@ else if (!Model.Any())
         if (e.target.classList.contains('long-unavailable-interval-input'))
             syncIntervalSaveBtn(e.target, '.save-long-unavailable-interval');
     });
+    document.getElementById('searchesTable')?.addEventListener('change', e => {
+        if (e.target.classList.contains('row-tag-input'))
+            syncRowTagSaveBtn(e.target);
+    });
     document.getElementById('searchesTable')?.addEventListener('click', async e => {
+        const tagBtn = e.target.closest('.save-row-tag');
+        if (tagBtn && token) {
+            const select = tagBtn.closest('td')?.querySelector('.row-tag-input');
+            if (!select) return;
+            const raw = select.value;
+            const tagId = raw === '' ? null : Number(raw);
+            if (tagId !== null && !Number.isFinite(tagId)) {
+                alert('وسم غير معروف.');
+                return;
+            }
+            tagBtn.disabled = true;
+            const res = await fetch(saveTagUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+                body: JSON.stringify({ id: Number(tagBtn.dataset.id), tagId })
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok || !data.success) {
+                alert(data.message || 'فشل التحديث');
+                syncRowTagSaveBtn(select);
+                return;
+            }
+            select.dataset.original = data.tagId == null ? '' : String(data.tagId);
+            syncRowTagSaveBtn(select);
+            return;
+        }
+
         const asinBtn = e.target.closest('.save-asin-recheck-interval');
         if (asinBtn && token) {
             const input = asinBtn.closest('td')?.querySelector('.asin-recheck-interval-input');
