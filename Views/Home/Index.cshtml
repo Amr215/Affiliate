@@ -49,9 +49,13 @@
         SearchTagCategory? category = null,
         string? lang = null,
         string? q = null,
+        string? sort = null,
+        decimal? minPrice = null,
+        decimal? maxPrice = null,
         bool clearTag = false,
         bool clearCategory = false,
-        bool clearQuery = false)
+        bool clearQuery = false,
+        bool clearPrice = false)
     {
         var p = page ?? Model.Page;
         var l = lang ?? Model.Lang;
@@ -69,17 +73,25 @@
                 c = (int)Model.SelectedCategory.Value;
         }
 
-        if (t.HasValue && query != null)
-            return new { page = p, tagId = t, lang = l, q = query };
-        if (t.HasValue)
-            return new { page = p, tagId = t, lang = l };
-        if (c.HasValue && query != null)
-            return new { page = p, cat = c, lang = l, q = query };
-        if (c.HasValue)
-            return new { page = p, cat = c, lang = l };
-        if (query != null)
-            return new { page = p, lang = l, q = query };
-        return new { page = p, lang = l };
+        var sortKey = sort ?? Model.Sort;
+        if (string.IsNullOrWhiteSpace(sortKey) || string.Equals(sortKey, "best", StringComparison.OrdinalIgnoreCase))
+            sortKey = null;
+
+        decimal? min = clearPrice ? null : (minPrice ?? Model.MinPrice);
+        decimal? max = clearPrice ? null : (maxPrice ?? Model.MaxPrice);
+
+        var values = new Dictionary<string, object?>
+        {
+            ["page"] = p,
+            ["lang"] = l
+        };
+        if (t.HasValue) values["tagId"] = t.Value;
+        else if (c.HasValue) values["cat"] = c.Value;
+        if (query != null) values["q"] = query;
+        if (sortKey != null) values["sort"] = sortKey;
+        if (min.HasValue) values["minPrice"] = min.Value;
+        if (max.HasValue) values["maxPrice"] = max.Value;
+        return values;
     }
 
     string Abs(string? path)
@@ -308,12 +320,70 @@
     {
         <input type="hidden" name="cat" value="@((int)selectedCat)" />
     }
+    @if (!string.Equals(Model.Sort, "best", StringComparison.OrdinalIgnoreCase))
+    {
+        <input type="hidden" name="sort" value="@Model.Sort" />
+    }
+    @if (Model.MinPrice is decimal keepMin)
+    {
+        <input type="hidden" name="minPrice" value="@keepMin.ToString(priceCulture)" />
+    }
+    @if (Model.MaxPrice is decimal keepMax)
+    {
+        <input type="hidden" name="maxPrice" value="@keepMax.ToString(priceCulture)" />
+    }
     <label class="visually-hidden" for="deals-q">@(ar ? "بحث" : "Search")</label>
     <input id="deals-q" class="tracker-search-input" type="search" name="q" value="@Model.Query"
            placeholder="@(ar ? "اسم المنتج، ASIN، أو رابط أمازون..." : "Name, ASIN, or Amazon URL...")"
            autocomplete="off" />
     <button class="tracker-search-btn" type="submit">@(ar ? "بحث" : "Search")</button>
 </form>
+
+<section class="deal-tools" aria-label="@(ar ? "ترتيب ونطاق السعر" : "Sort and price range")">
+    <div class="deal-sort" role="group" aria-label="@(ar ? "الترتيب" : "Sort")">
+        <a class="deal-sort-chip @(Model.Sort == "best" ? "is-active" : null)"
+           href="@Url.Action("Index", Route(page: 1, sort: "best"))">@(ar ? "أفضل تخفيض" : "Best")</a>
+        <a class="deal-sort-chip @(Model.Sort == "price_asc" ? "is-active" : null)"
+           href="@Url.Action("Index", Route(page: 1, sort: "price_asc"))">@(ar ? "الأقل سعر" : "Lowest")</a>
+        <a class="deal-sort-chip @(Model.Sort == "price_desc" ? "is-active" : null)"
+           href="@Url.Action("Index", Route(page: 1, sort: "price_desc"))">@(ar ? "الأعلى سعر" : "Highest")</a>
+    </div>
+
+    <form class="deal-price-range" method="get" asp-controller="Home" asp-action="Index" aria-label="@(ar ? "نطاق السعر" : "Price range")">
+        <input type="hidden" name="lang" value="@Model.Lang" />
+        <input type="hidden" name="page" value="1" />
+        @if (Model.SelectedTagId is int priceTagId)
+        {
+            <input type="hidden" name="tagId" value="@priceTagId" />
+        }
+        else if (Model.SelectedCategory is SearchTagCategory priceCat)
+        {
+            <input type="hidden" name="cat" value="@((int)priceCat)" />
+        }
+        @if (!string.IsNullOrWhiteSpace(Model.Query))
+        {
+            <input type="hidden" name="q" value="@Model.Query" />
+        }
+        @if (!string.Equals(Model.Sort, "best", StringComparison.OrdinalIgnoreCase))
+        {
+            <input type="hidden" name="sort" value="@Model.Sort" />
+        }
+        <label class="visually-hidden" for="deals-min-price">@(ar ? "من" : "From")</label>
+        <input id="deals-min-price" class="deal-price-input" type="number" name="minPrice" min="0" step="1" inputmode="decimal"
+               value="@(Model.MinPrice?.ToString("0.##", priceCulture))"
+               placeholder="@(ar ? "من سعر" : "Min")" />
+        <span class="deal-price-sep" aria-hidden="true">–</span>
+        <label class="visually-hidden" for="deals-max-price">@(ar ? "إلى" : "To")</label>
+        <input id="deals-max-price" class="deal-price-input" type="number" name="maxPrice" min="0" step="1" inputmode="decimal"
+               value="@(Model.MaxPrice?.ToString("0.##", priceCulture))"
+               placeholder="@(ar ? "إلى سعر" : "Max")" />
+        <button class="deal-price-apply" type="submit">@(ar ? "تطبيق" : "Go")</button>
+        @if (Model.HasPriceFilter)
+        {
+            <a class="deal-price-clear" href="@Url.Action("Index", Route(page: 1, clearPrice: true))" title="@(ar ? "مسح السعر" : "Clear price")">×</a>
+        }
+    </form>
+</section>
 
 @if (Model.Deals.Count == 0)
 {

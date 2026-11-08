@@ -33,6 +33,9 @@ namespace Affiliate.Controllers
             string? q = null,
             int? tagId = null,
             int? cat = null,
+            string? sort = null,
+            decimal? minPrice = null,
+            decimal? maxPrice = null,
             string? lang = null,
             int page = 1,
             CancellationToken cancellationToken = default)
@@ -43,6 +46,12 @@ namespace Affiliate.Controllers
             SearchTagCategory? selectedCategory = null;
             if (cat.HasValue && Enum.IsDefined(typeof(SearchTagCategory), cat.Value))
                 selectedCategory = (SearchTagCategory)cat.Value;
+
+            var sortKey = NormalizeDealSort(sort);
+            if (minPrice is <= 0) minPrice = null;
+            if (maxPrice is <= 0) maxPrice = null;
+            if (minPrice.HasValue && maxPrice.HasValue && minPrice.Value > maxPrice.Value)
+                (minPrice, maxPrice) = (maxPrice, minPrice);
 
             var queryText = (q ?? string.Empty).Trim();
             // Amazon URLs are long; keep enough to extract ASIN, then normalize.
@@ -118,9 +127,21 @@ namespace Affiliate.Controllers
                     || (p.Asin != null && EF.Functions.Like(p.Asin, like)));
             }
 
+            if (minPrice.HasValue)
+                dealsQuery = dealsQuery.Where(p => p.CurrentPrice >= minPrice.Value);
+            if (maxPrice.HasValue)
+                dealsQuery = dealsQuery.Where(p => p.CurrentPrice <= maxPrice.Value);
+
+            dealsQuery = sortKey switch
+            {
+                "price_asc" => dealsQuery.OrderBy(p => p.CurrentPrice).ThenBy(p => p.Id),
+                "price_desc" => dealsQuery.OrderByDescending(p => p.CurrentPrice).ThenBy(p => p.Id),
+                _ => dealsQuery
+                    .OrderByDescending(p => (p.ExternalLowestPrice!.Value - p.CurrentPrice!.Value) / p.ExternalLowestPrice!.Value)
+                    .ThenBy(p => p.Id)
+            };
+
             var dealRows = await dealsQuery
-                .OrderByDescending(p => (p.ExternalLowestPrice!.Value - p.CurrentPrice!.Value) / p.ExternalLowestPrice!.Value)
-                .ThenBy(p => p.Id)
                 .Select(p => new
                 {
                     p.Id,
@@ -187,6 +208,11 @@ namespace Affiliate.Controllers
                     || (p.Asin != null && EF.Functions.Like(p.Asin, like)));
             }
 
+            if (minPrice.HasValue)
+                trackerQuery = trackerQuery.Where(p => p.CurrentPrice >= minPrice.Value);
+            if (maxPrice.HasValue)
+                trackerQuery = trackerQuery.Where(p => p.CurrentPrice <= maxPrice.Value);
+
             if (dealIds.Count > 0)
             {
                 var excludeIds = dealIds.ToList();
@@ -236,7 +262,7 @@ namespace Affiliate.Controllers
                 }
             }
 
-            var trackerItems = trackerCandidates
+            var trackerRanked = trackerCandidates
                 .Select(r =>
                 {
                     var current = r.CurrentPrice ?? 0m;
@@ -245,10 +271,25 @@ namespace Affiliate.Controllers
                     var (tier, rank) = PriceTrackerSort.Compute(current, hist, r.LowestPrice);
                     return (Row: r, Tier: tier, Rank: rank);
                 })
-                .OrderBy(x => x.Tier)
-                .ThenByDescending(x => x.Tier <= PriceTrackerSort.TierAllTimeLow ? x.Rank : 0m)
-                .ThenBy(x => x.Tier == PriceTrackerSort.TierClosestToAllTimeLow ? x.Rank : 0m)
-                .ThenBy(x => x.Row.Id)
+                .ToList();
+
+            if (sortKey is "price_asc" or "price_desc")
+            {
+                trackerRanked = sortKey == "price_asc"
+                    ? trackerRanked.OrderBy(x => x.Row.CurrentPrice).ThenBy(x => x.Row.Id).ToList()
+                    : trackerRanked.OrderByDescending(x => x.Row.CurrentPrice).ThenBy(x => x.Row.Id).ToList();
+            }
+            else
+            {
+                trackerRanked = trackerRanked
+                    .OrderBy(x => x.Tier)
+                    .ThenByDescending(x => x.Tier <= PriceTrackerSort.TierAllTimeLow ? x.Rank : 0m)
+                    .ThenBy(x => x.Tier == PriceTrackerSort.TierClosestToAllTimeLow ? x.Rank : 0m)
+                    .ThenBy(x => x.Row.Id)
+                    .ToList();
+            }
+
+            var trackerItems = trackerRanked
                 .Select(x =>
                 {
                     var r = x.Row;
@@ -270,7 +311,20 @@ namespace Affiliate.Controllers
                 })
                 .ToList();
 
-            var combined = dealItems.Concat(trackerItems).ToList();
+            List<PublicDealItem> combined;
+            if (sortKey is "price_asc" or "price_desc")
+            {
+                var merged = dealItems.Concat(trackerItems);
+                combined = (sortKey == "price_asc"
+                        ? merged.OrderBy(d => d.Price).ThenBy(d => d.ProductId)
+                        : merged.OrderByDescending(d => d.Price).ThenBy(d => d.ProductId))
+                    .ToList();
+            }
+            else
+            {
+                combined = dealItems.Concat(trackerItems).ToList();
+            }
+
             var totalCount = combined.Count;
             var totalPages = Math.Max(1, (int)Math.Ceiling(totalCount / (double)DealsPageSize));
             page = Math.Clamp(page, 1, totalPages);
@@ -295,12 +349,20 @@ namespace Affiliate.Controllers
                 SelectedTagId = tagId,
                 SelectedCategory = selectedCategory,
                 Query = queryText,
+                Sort = sortKey,
+                MinPrice = minPrice,
+                MaxPrice = maxPrice,
                 Page = page,
                 TotalPages = totalPages,
                 TotalCount = totalCount,
                 Lang = normalizedLang
             });
         }
+
+        private static string NormalizeDealSort(string? sort) =>
+            string.Equals(sort, "price_asc", StringComparison.OrdinalIgnoreCase) ? "price_asc"
+            : string.Equals(sort, "price_desc", StringComparison.OrdinalIgnoreCase) ? "price_desc"
+            : "best";
 
         [HttpGet("/Dashboard")]
         public async Task<IActionResult> Dashboard([FromServices] AffiliateDbContext db)

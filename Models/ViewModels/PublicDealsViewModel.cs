@@ -10,6 +10,13 @@ namespace Affiliate.ViewModels
         public int? SelectedTagId { get; set; }
         public SearchTagCategory? SelectedCategory { get; set; }
         public string? Query { get; set; }
+
+        /// <summary><c>best</c> (default), <c>price_asc</c>, or <c>price_desc</c>.</summary>
+        public string Sort { get; set; } = "best";
+
+        public decimal? MinPrice { get; set; }
+        public decimal? MaxPrice { get; set; }
+
         public int Page { get; set; } = 1;
         public int TotalPages { get; set; } = 1;
         public int TotalCount { get; set; }
@@ -18,6 +25,8 @@ namespace Affiliate.ViewModels
         public string Lang { get; set; } = "ar";
 
         public bool IsArabic => string.Equals(Lang, "ar", StringComparison.OrdinalIgnoreCase);
+
+        public bool HasPriceFilter => MinPrice.HasValue || MaxPrice.HasValue;
     }
 
     public class PublicDealTagGroup

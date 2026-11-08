@@ -1075,7 +1075,121 @@ html[dir="rtl"] .filter-rail-wrap::after {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
-    margin: 0 0 14px;
+    margin: 0 0 12px;
+}
+
+/* ---------- Deal sort + price range (compact) ---------- */
+
+.deal-tools {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 10px;
+    margin: 0 0 12px;
+}
+
+.deal-sort {
+    display: inline-flex;
+    flex-wrap: nowrap;
+    gap: 4px;
+}
+
+.deal-sort-chip {
+    display: inline-flex;
+    align-items: center;
+    min-height: 28px;
+    padding: 0 10px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: var(--card);
+    color: var(--ink);
+    text-decoration: none;
+    font-weight: 700;
+    font-size: 0.75rem;
+    white-space: nowrap;
+}
+
+.deal-sort-chip:hover {
+    border-color: rgba(228, 87, 46, 0.45);
+}
+
+.deal-sort-chip:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+}
+
+.deal-sort-chip.is-active {
+    background: var(--ink);
+    border-color: var(--ink);
+    color: var(--paper);
+}
+
+.deal-price-range {
+    display: inline-flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 4px;
+    margin-inline-start: auto;
+}
+
+.deal-price-input {
+    width: 5.4rem;
+    min-height: 28px;
+    padding: 0 7px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    background: var(--card);
+    color: var(--ink);
+    font: inherit;
+    font-size: 0.78rem;
+    font-variant-numeric: tabular-nums;
+    direction: ltr;
+}
+
+.deal-price-input:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+}
+
+.deal-price-sep {
+    color: var(--ink-soft);
+    font-size: 0.75rem;
+    font-weight: 700;
+}
+
+.deal-price-apply {
+    min-height: 28px;
+    padding: 0 10px;
+    border: 0;
+    border-radius: 8px;
+    background: var(--accent);
+    color: #fff;
+    font: inherit;
+    font-size: 0.75rem;
+    font-weight: 800;
+    cursor: pointer;
+}
+
+.deal-price-apply:hover {
+    filter: brightness(1.06);
+}
+
+.deal-price-clear {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 999px;
+    color: var(--ink-soft);
+    text-decoration: none;
+    font-size: 1rem;
+    line-height: 1;
+}
+
+.deal-price-clear:hover {
+    color: var(--accent-ink);
+    background: rgba(228, 87, 46, 0.08);
 }
 
 .tracker-search-input {
