@@ -15,6 +15,7 @@ namespace Affiliate.Controllers
     {
         private readonly AffiliateDbContext _db;
         private readonly AsinLinkCodec _codec;
+        private readonly TelegramOptions _telegramOptions;
         private readonly string _siteBase;
 
         public PriceTrackerController(
@@ -24,7 +25,8 @@ namespace Affiliate.Controllers
         {
             _db = db;
             _codec = codec;
-            _siteBase = (telegramOptions.Value.PublishLinkBaseUrl ?? "https://el-sindbad.com").Trim().TrimEnd('/');
+            _telegramOptions = telegramOptions.Value;
+            _siteBase = (_telegramOptions.PublishLinkBaseUrl ?? "https://el-sindbad.com").Trim().TrimEnd('/');
         }
 
         /// <summary>List moved to the deals homepage; keep /tracker as a permanent redirect.</summary>
@@ -158,11 +160,16 @@ namespace Affiliate.Controllers
             string buyUrl;
             try
             {
-                buyUrl = "/" + _codec.Encode(asin);
+                buyUrl = "/d/" + _codec.Encode(asin);
             }
             catch
             {
-                buyUrl = $"https://www.amazon.eg/dp/{asin}";
+                var dealsTag = _telegramOptions.DealsAffiliateTag?.Trim();
+                if (string.IsNullOrEmpty(dealsTag))
+                    dealsTag = _telegramOptions.AffiliateTag?.Trim();
+                buyUrl = string.IsNullOrEmpty(dealsTag)
+                    ? $"https://www.amazon.eg/dp/{asin}"
+                    : $"https://www.amazon.eg/dp/{asin}?tag={Uri.EscapeDataString(dealsTag)}";
             }
 
             ViewData["SiteBaseUrl"] = _siteBase;

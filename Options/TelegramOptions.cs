@@ -62,10 +62,16 @@ namespace Affiliate.Options
         public string PublishLogChatId { get; set; } = string.Empty;
 
         /// <summary>
-        /// Amazon Associates tracking id applied by the public <c>/{code}</c> redirect
-        /// (not shown in publish captions).
+        /// Amazon Associates tracking id for publish / Telegram short links
+        /// (<c>/{code}</c> redirects; not shown in publish captions).
         /// </summary>
         public string AffiliateTag { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Amazon Associates tracking id for deals / price-tracker buy links
+        /// (<c>/d/{code}</c>).
+        /// </summary>
+        public string DealsAffiliateTag { get; set; } = string.Empty;
 
         /// <summary>
         /// Public site base used in publish captions (e.g. <c>https://el-sindbad.com</c>).

@@ -2,11 +2,13 @@ using System.Diagnostics;
 using Affiliate.Data;
 using Affiliate.Models;
 using Affiliate.Noon.Models;
+using Affiliate.Options;
 using Affiliate.Services;
 using Affiliate.ViewModels;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace Affiliate.Controllers
 {
@@ -30,6 +32,7 @@ namespace Affiliate.Controllers
         public async Task<IActionResult> Index(
             [FromServices] AffiliateDbContext db,
             [FromServices] AsinLinkCodec codec,
+            [FromServices] IOptions<TelegramOptions> telegramOptions,
             string? q = null,
             int? tagId = null,
             int? cat = null,
@@ -165,8 +168,16 @@ namespace Affiliate.Controllers
 
                 dealIds.Add(r.Id);
                 string url;
-                try { url = "/" + codec.Encode(asin); }
-                catch { url = $"https://www.amazon.eg/dp/{asin}"; }
+                try { url = "/d/" + codec.Encode(asin); }
+                catch
+                {
+                    var dealsTag = telegramOptions.Value.DealsAffiliateTag?.Trim();
+                    if (string.IsNullOrEmpty(dealsTag))
+                        dealsTag = telegramOptions.Value.AffiliateTag?.Trim();
+                    url = string.IsNullOrEmpty(dealsTag)
+                        ? $"https://www.amazon.eg/dp/{asin}"
+                        : $"https://www.amazon.eg/dp/{asin}?tag={Uri.EscapeDataString(dealsTag)}";
+                }
 
                 dealItems.Add(new PublicDealItem
                 {
