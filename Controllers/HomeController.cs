@@ -76,7 +76,7 @@ namespace Affiliate.Controllers
             var isArabic = !string.Equals(lang, "en", StringComparison.OrdinalIgnoreCase);
             var normalizedLang = isArabic ? "ar" : "en";
 
-            var tagsBase = db.SearchTags.AsNoTracking();
+            var tagsBase = db.SearchTags.AsNoTracking().Where(t => t.ShowInDeals);
             var tagsOrdered = isArabic
                 ? tagsBase.OrderBy(t => t.Category).ThenBy(t => t.Position).ThenBy(t => t.NameAr).ThenBy(t => t.NameEn)
                 : tagsBase.OrderBy(t => t.Category).ThenBy(t => t.Position).ThenBy(t => t.NameEn).ThenBy(t => t.NameAr);
@@ -112,7 +112,8 @@ namespace Affiliate.Controllers
                     && p.CurrentPrice > 0
                     && p.CurrentPrice < p.ExternalLowestPrice
                     && p.ScraperUrl != null
-                    && p.ScraperUrl.IsAsinRecheckEnabled);
+                    && p.ScraperUrl.IsAsinRecheckEnabled
+                    && (p.ScraperUrl.Tag == null || p.ScraperUrl.Tag.ShowInDeals));
 
             if (tagId.HasValue)
                 dealsQuery = dealsQuery.Where(p => p.ScraperUrl != null && p.ScraperUrl.TagId == tagId.Value);
@@ -202,7 +203,9 @@ namespace Affiliate.Controllers
                     && p.CurrentPrice > 0
                     && p.ScraperUrl != null
                     && p.ScraperUrl.IsAsinRecheckEnabled
-                    && p.ScraperUrl.TagId != null);
+                    && p.ScraperUrl.TagId != null
+                    && p.ScraperUrl.Tag != null
+                    && p.ScraperUrl.Tag.ShowInDeals);
 
             if (tagId.HasValue)
                 trackerQuery = trackerQuery.Where(p => p.ScraperUrl!.TagId == tagId.Value);

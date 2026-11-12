@@ -24,6 +24,7 @@ namespace Affiliate.Controllers
                     NameEn = t.NameEn,
                     Category = t.Category,
                     Position = t.Position,
+                    ShowInDeals = t.ShowInDeals,
                     ScraperUrlCount = t.ScraperUrls.Count
                 })
                 .ToListAsync(cancellationToken);
@@ -55,7 +56,7 @@ namespace Affiliate.Controllers
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> Create(
-            [Bind(nameof(SearchTag.NameAr), nameof(SearchTag.NameEn), nameof(SearchTag.Category), nameof(SearchTag.Position))] SearchTag tag,
+            [Bind(nameof(SearchTag.NameAr), nameof(SearchTag.NameEn), nameof(SearchTag.Category), nameof(SearchTag.Position), nameof(SearchTag.ShowInDeals))] SearchTag tag,
             CancellationToken cancellationToken)
         {
             Normalize(tag);
@@ -81,7 +82,7 @@ namespace Affiliate.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> Edit(
             int id,
-            [Bind(nameof(SearchTag.Id), nameof(SearchTag.NameAr), nameof(SearchTag.NameEn), nameof(SearchTag.Category), nameof(SearchTag.Position))] SearchTag tag,
+            [Bind(nameof(SearchTag.Id), nameof(SearchTag.NameAr), nameof(SearchTag.NameEn), nameof(SearchTag.Category), nameof(SearchTag.Position), nameof(SearchTag.ShowInDeals))] SearchTag tag,
             CancellationToken cancellationToken)
         {
             if (id != tag.Id)
@@ -113,6 +114,7 @@ namespace Affiliate.Controllers
                     NameEn = t.NameEn,
                     Category = t.Category,
                     Position = t.Position,
+                    ShowInDeals = t.ShowInDeals,
                     ScraperUrlCount = t.ScraperUrls.Count
                 })
                 .FirstOrDefaultAsync(t => t.Id == id, cancellationToken);
@@ -149,6 +151,7 @@ namespace Affiliate.Controllers
         public string NameEn { get; set; } = string.Empty;
         public SearchTagCategory Category { get; set; }
         public int Position { get; set; }
+        public bool ShowInDeals { get; set; } = true;
         public int ScraperUrlCount { get; set; }
     }
 

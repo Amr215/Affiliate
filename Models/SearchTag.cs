@@ -87,6 +87,10 @@ namespace Affiliate.Models
         [Display(Name = "الترتيب")]
         public int Position { get; set; }
 
+        /// <summary>When false, tag is hidden from public deals filters and its products are excluded from the deals list. Product tracker pages are unaffected.</summary>
+        [Display(Name = "إظهار في العروض")]
+        public bool ShowInDeals { get; set; } = true;
+
         public ICollection<ScraperUrl> ScraperUrls { get; set; } = new List<ScraperUrl>();
     }
 }

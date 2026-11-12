@@ -461,6 +461,9 @@ namespace Affiliate.Migrations
                     b.Property<int>("Position")
                         .HasColumnType("int");
 
+                    b.Property<bool>("ShowInDeals")
+                        .HasColumnType("bit");
+
                     b.HasKey("Id");
 
                     b.HasIndex("Category");

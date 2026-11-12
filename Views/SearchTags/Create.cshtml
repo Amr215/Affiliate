@@ -34,6 +34,13 @@
                 <span asp-validation-for="Position" class="text-danger"></span>
                 <div class="form-text">الأصغر يظهر أولاً في فلاتر صفحة العروض.</div>
             </div>
+            <div class="col-md-6 d-flex align-items-end">
+                <div class="form-check mb-2">
+                    <input asp-for="ShowInDeals" class="form-check-input" />
+                    <label asp-for="ShowInDeals" class="form-check-label"></label>
+                    <div class="form-text">عند إلغاء التفعيل يُخفى الوسم ومنتجاته من صفحة العروض فقط.</div>
+                </div>
+            </div>
         </div>
     </div>
     <div class="card-footer d-flex gap-2">

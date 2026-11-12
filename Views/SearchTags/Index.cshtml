@@ -49,6 +49,7 @@
                     <th>التصنيف</th>
                     <th>العربي</th>
                     <th>English</th>
+                    <th>في العروض</th>
                     <th>روابط السكرابر</th>
                     <th></th>
                 </tr>
@@ -74,6 +75,16 @@
                     <td class="arabic-text">@t.Category.DisplayName()</td>
                     <td class="arabic-text">@t.NameAr</td>
                     <td class="ltr">@t.NameEn</td>
+                    <td>
+                        @if (t.ShowInDeals)
+                        {
+                            <span class="badge text-bg-success">نعم</span>
+                        }
+                        else
+                        {
+                            <span class="badge text-bg-secondary">لا</span>
+                        }
+                    </td>
                     <td class="num">@t.ScraperUrlCount</td>
                     <td class="text-nowrap text-end">
                         <a asp-action="Edit" asp-route-id="@t.Id" class="btn btn-sm btn-outline-primary">تعديل</a>
