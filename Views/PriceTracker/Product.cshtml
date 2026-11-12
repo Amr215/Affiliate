@@ -2,6 +2,7 @@
 @using System.Globalization
 @using System.Text.Json
 @using Affiliate.Options
+@using Affiliate.Services
 @inject Microsoft.Extensions.Options.IOptions<TelegramOptions> TelegramOptions
 @{
     Layout = "_PublicLayout";
@@ -218,11 +219,6 @@
                 </p>
             }
 
-            @if (!string.IsNullOrWhiteSpace(productDescription))
-            {
-                <p class="tracker-product-desc" dir="@(ar ? "rtl" : "ltr")">@productDescription</p>
-            }
-
             @if (Model.ShowLastDetected && lastDetectedText != null)
             {
                 <p class="tracker-flag is-gone">
@@ -280,6 +276,37 @@
             <script src="~/js/price-tracker-chart.js" asp-append-version="true"></script>
         }
     </section>
+
+    @if (!string.IsNullOrWhiteSpace(productDescription))
+    {
+        var displayDescription = TrackerDescriptionFormat.ForDisplay(productDescription, ar);
+        var descParts = TrackerDescriptionFormat.SplitForList(productDescription)
+            .Select(p => TrackerDescriptionFormat.ForDisplay(p, ar))
+            .ToList();
+        var useDescList = descParts.Count >= 2;
+        <section class="tracker-desc-block" aria-labelledby="tracker-desc-title">
+            <div class="tracker-desc-card">
+                <header class="tracker-desc-head">
+                    <h2 id="tracker-desc-title">@(ar ? "وصف المنتج" : "Product description")</h2>
+                </header>
+                <div class="tracker-desc-body" dir="@(ar ? "rtl" : "ltr")">
+                    @if (useDescList)
+                    {
+                        <ul class="tracker-desc-list">
+                            @foreach (var part in descParts)
+                            {
+                                <li>@part</li>
+                            }
+                        </ul>
+                    }
+                    else
+                    {
+                        <p class="tracker-product-desc">@displayDescription</p>
+                    }
+                </div>
+            </div>
+        </section>
+    }
 
     @if (Model.RelatedProducts.Count > 0)
     {

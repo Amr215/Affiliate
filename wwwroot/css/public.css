@@ -1421,14 +1421,89 @@ html.theme-night .tracker-product-media {
     text-align: start;
 }
 
-.tracker-product-desc {
-    margin: 0 0 14px;
-    max-width: 62ch;
-    font-size: 0.95rem;
-    font-weight: 500;
-    line-height: 1.55;
-    color: var(--ink-soft);
+.tracker-desc-block {
+    width: 100%;
+    margin-top: 28px;
+}
+
+.tracker-desc-card {
+    width: 100%;
+    box-sizing: border-box;
+    border-radius: var(--radius);
+    border: 1px solid var(--line);
+    background: var(--card);
+    box-shadow: var(--shadow-rest);
+    overflow: hidden;
+}
+
+.tracker-desc-head {
+    padding: clamp(14px, 2vw, 18px) clamp(16px, 2.5vw, 22px);
+    border-bottom: 1px solid var(--line);
+    background: linear-gradient(
+        180deg,
+        rgba(228, 87, 46, 0.06) 0%,
+        transparent 100%);
+}
+
+.tracker-desc-head h2 {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: clamp(1.05rem, 0.95rem + 0.35vw, 1.2rem);
+    font-weight: 800;
     text-align: start;
+    letter-spacing: -0.02em;
+}
+
+.tracker-desc-body {
+    width: 100%;
+    padding: clamp(16px, 2.5vw, 24px) clamp(16px, 2.5vw, 22px);
+}
+
+.tracker-product-desc {
+    margin: 0;
+    width: 100%;
+    max-width: none;
+    font-size: clamp(0.95rem, 0.9rem + 0.2vw, 1.05rem);
+    font-weight: 500;
+    line-height: 1.7;
+    color: var(--ink);
+    text-align: start;
+}
+
+.tracker-desc-list {
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    gap: 12px;
+}
+
+.tracker-desc-list li {
+    position: relative;
+    padding-inline-start: 1.15em;
+    font-size: clamp(0.95rem, 0.9rem + 0.2vw, 1.05rem);
+    font-weight: 500;
+    line-height: 1.65;
+    color: var(--ink);
+}
+
+.tracker-desc-list li::before {
+    content: "";
+    position: absolute;
+    inset-inline-start: 0;
+    top: 0.62em;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+}
+
+html.theme-night .tracker-desc-head {
+    background: linear-gradient(
+        180deg,
+        rgba(240, 106, 69, 0.12) 0%,
+        transparent 100%);
 }
 
 .tracker-rating {
