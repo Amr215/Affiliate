@@ -35,7 +35,8 @@
                 ? (ar ? $"السعر الحالي هو الأقل منذ {Model.Stats.LowestPriceDays} يومًا." : $"Current price is the lowest in {Model.Stats.LowestPriceDays} days.")
                 : null;
 
-    var description = Model.ShowLastDetected
+    var productDescription = Model.DisplayDescription(ar);
+    var priceSummary = Model.ShowLastDetected
         ? (ar
             ? $"تتبع سعر {name}. آخر سعر مُسجَّل {currentText} {currency}" + (lastDetectedText != null ? $" في {lastDetectedText}." : ".") + $" أقل سعر {lowText} وأعلى سعر {highText}."
             : $"Track the price of {name}. Last detected {currentText} {currency}" + (lastDetectedText != null ? $" on {lastDetectedText}." : ".") + $" Lowest {lowText}, highest {highText}.")
@@ -43,7 +44,34 @@
             ? $"تتبع سعر {name}. السعر الحالي {currentText} {currency}. أقل سعر {lowText} وأعلى سعر {highText}."
             : $"Track the price of {name}. Current {currentText} {currency}. Lowest {lowText}, highest {highText}.");
     if (badgeText != null && !Model.ShowLastDetected)
-        description = $"{description} {badgeText}";
+        priceSummary = $"{priceSummary} {badgeText}";
+
+    var hasReviews = Model.Rating is > 0 && Model.ReviewsCount is > 0;
+    var ratingValue = hasReviews ? Model.Rating!.Value : 0;
+    var ratingText = hasReviews ? ratingValue.ToString("0.0", priceCulture) : null;
+    var reviewsCountText = hasReviews ? Model.ReviewsCount!.Value.ToString("#,0", priceCulture) : null;
+    if (hasReviews)
+    {
+        var reviewBlurb = ar
+            ? $"تقييم {ratingText} من 5 ({reviewsCountText} مراجعة)."
+            : $"Rated {ratingText} out of 5 ({reviewsCountText} reviews).";
+        priceSummary = $"{priceSummary} {reviewBlurb}";
+    }
+
+    string TruncateMeta(string text, int max = 320)
+    {
+        if (string.IsNullOrWhiteSpace(text) || text.Length <= max)
+            return text;
+        var cut = text[..max].TrimEnd();
+        var space = cut.LastIndexOf(' ');
+        if (space > max * 3 / 4)
+            cut = cut[..space];
+        return cut.TrimEnd(',', '.', ';', '،') + "…";
+    }
+
+    var description = !string.IsNullOrWhiteSpace(productDescription)
+        ? TruncateMeta($"{productDescription} {priceSummary}")
+        : priceSummary;
     ViewData["MetaDescription"] = description;
     ViewData["MetaKeywords"] = ar
         ? $"{name}, تتبع سعر, أقل سعر, {brand}"
@@ -71,6 +99,7 @@
         ["@context"] = "https://schema.org",
         ["@type"] = "Product",
         ["name"] = name,
+        ["description"] = string.IsNullOrWhiteSpace(productDescription) ? description : productDescription,
         ["sku"] = Model.Asin,
         ["image"] = string.IsNullOrWhiteSpace(Model.ImageUrl) ? null : Model.ImageUrl,
         ["url"] = canonical,
@@ -84,6 +113,17 @@
             ["availability"] = "https://schema.org/InStock"
         }
     };
+    if (hasReviews)
+    {
+        jsonLd["aggregateRating"] = new Dictionary<string, object?>
+        {
+            ["@type"] = "AggregateRating",
+            ["ratingValue"] = Math.Round(ratingValue, 1),
+            ["reviewCount"] = Model.ReviewsCount,
+            ["bestRating"] = 5,
+            ["worstRating"] = 1
+        };
+    }
     var jsonLdText = JsonSerializer.Serialize(jsonLd, new JsonSerializerOptions
     {
         DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
@@ -141,7 +181,7 @@
 <nav class="tracker-breadcrumb" aria-label="@(ar ? "مسار التنقل" : "Breadcrumb")">
     <a asp-controller="Home" asp-action="Index" asp-route-lang="@Model.Lang">@(ar ? "العروض" : "Deals")</a>
     <span class="tracker-breadcrumb-sep" aria-hidden="true">/</span>
-    <span class="tracker-breadcrumb-current" dir="auto">@name</span>
+    <span class="tracker-breadcrumb-current" dir="@(ar ? "rtl" : "ltr")">@name</span>
 </nav>
 
 <article class="tracker-product">
@@ -157,7 +197,31 @@
             }
         </div>
         <div class="tracker-product-main">
-            <h1 dir="auto">@name</h1>
+            <h1 dir="@(ar ? "rtl" : "ltr")">@name</h1>
+
+            @if (hasReviews)
+            {
+                var fullStars = (int)Math.Floor(ratingValue);
+                var halfStar = ratingValue - fullStars >= 0.25 && ratingValue - fullStars < 0.75;
+                var extraFull = ratingValue - fullStars >= 0.75 ? 1 : 0;
+                fullStars = Math.Clamp(fullStars + extraFull, 0, 5);
+                var emptyStars = Math.Clamp(5 - fullStars - (halfStar ? 1 : 0), 0, 5);
+                <p class="tracker-rating" dir="@(ar ? "rtl" : "ltr")"
+                   aria-label="@(ar ? $"تقييم {ratingText} من 5، {reviewsCountText} مراجعة" : $"Rated {ratingText} out of 5, {reviewsCountText} reviews")">
+                    <span class="tracker-rating-stars" aria-hidden="true">
+                        @for (var s = 0; s < fullStars; s++) { <span class="tracker-star is-full">★</span> }
+                        @if (halfStar) { <span class="tracker-star is-half">★</span> }
+                        @for (var s = 0; s < emptyStars; s++) { <span class="tracker-star is-empty">★</span> }
+                    </span>
+                    <span class="tracker-rating-value"><span class="ltr">@ratingText</span>/5</span>
+                    <span class="tracker-rating-count">(@(ar ? $"{reviewsCountText} مراجعة" : $"{reviewsCountText} reviews"))</span>
+                </p>
+            }
+
+            @if (!string.IsNullOrWhiteSpace(productDescription))
+            {
+                <p class="tracker-product-desc" dir="@(ar ? "rtl" : "ltr")">@productDescription</p>
+            }
 
             @if (Model.ShowLastDetected && lastDetectedText != null)
             {

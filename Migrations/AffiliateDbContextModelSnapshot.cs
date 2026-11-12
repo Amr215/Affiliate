@@ -176,6 +176,14 @@ namespace Affiliate.Migrations
                         .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
+                    b.Property<string>("DescriptionAr")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<string>("DescriptionEn")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
                     b.Property<decimal?>("DropBaselinePrice")
                         .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");

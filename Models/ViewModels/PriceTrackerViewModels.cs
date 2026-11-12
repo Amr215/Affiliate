@@ -7,7 +7,11 @@ namespace Affiliate.ViewModels
         public string Asin { get; set; } = string.Empty;
         public string Name { get; set; } = string.Empty;
         public string? NameAr { get; set; }
+        public string? DescriptionAr { get; set; }
+        public string? DescriptionEn { get; set; }
         public string? ImageUrl { get; set; }
+        public double? Rating { get; set; }
+        public int? ReviewsCount { get; set; }
         public string? Currency { get; set; }
         public string Slug { get; set; } = "product";
         public string BuyUrl { get; set; } = "#";
@@ -19,6 +23,13 @@ namespace Affiliate.ViewModels
 
         public string DisplayName(bool arabic) =>
             arabic && !string.IsNullOrWhiteSpace(NameAr) ? NameAr! : Name;
+
+        public string? DisplayDescription(bool arabic) =>
+            arabic
+                ? (!string.IsNullOrWhiteSpace(DescriptionAr) ? DescriptionAr
+                    : !string.IsNullOrWhiteSpace(DescriptionEn) ? DescriptionEn : null)
+                : (!string.IsNullOrWhiteSpace(DescriptionEn) ? DescriptionEn
+                    : !string.IsNullOrWhiteSpace(DescriptionAr) ? DescriptionAr : null);
     }
 
     public class PriceTrackerStatsSnapshot

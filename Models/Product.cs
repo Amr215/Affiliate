@@ -11,6 +11,18 @@ namespace Affiliate.Models
         /// </summary>
         public string? NameAr { get; set; }
 
+        /// <summary>
+        /// Arabic product description from Amazon PDP (feature bullets / about this item).
+        /// Filled by <c>ProductDescriptionFillService</c> via ISP proxies.
+        /// </summary>
+        public string? DescriptionAr { get; set; }
+
+        /// <summary>
+        /// English product description from Amazon PDP (feature bullets / about this item).
+        /// Filled by <c>ProductDescriptionFillService</c> via ISP proxies.
+        /// </summary>
+        public string? DescriptionEn { get; set; }
+
         public string Url { get; set; } = string.Empty;
         public string? Asin { get; set; } // Amazon Standard Identification Number
         public decimal? CurrentPrice { get; set; }

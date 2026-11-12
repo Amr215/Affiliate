@@ -44,7 +44,7 @@
 <nav class="tracker-breadcrumb" aria-label="@(ar ? "مسار التنقل" : "Breadcrumb")">
     <a asp-controller="Home" asp-action="Index" asp-route-lang="@Model.Lang">@(ar ? "العروض" : "Deals")</a>
     <span class="tracker-breadcrumb-sep" aria-hidden="true">/</span>
-    <span class="tracker-breadcrumb-current" dir="auto">@name</span>
+    <span class="tracker-breadcrumb-current" dir="@(ar ? "rtl" : "ltr")">@name</span>
 </nav>
 
 <section class="tracker-unavailable">
@@ -55,7 +55,7 @@
         </div>
     }
     <h1>@(ar ? "هذا المنتج لم يعد متاحًا" : "This product is no longer available")</h1>
-    <p class="tracker-unavailable-name" dir="auto">@name</p>
+    <p class="tracker-unavailable-name" dir="@(ar ? "rtl" : "ltr")">@name</p>
     <p class="tracker-unavailable-text">
         @(ar
             ? "ربما أصبح غير متوفر أو توقف تحديث سعره. يمكنك الرجوع إلى العروض أو البحث عن منتج آخر."

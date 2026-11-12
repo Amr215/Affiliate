@@ -67,6 +67,9 @@ namespace Affiliate.Data
                 entity.Property(p => p.ExternalLowestPrice).HasPrecision(18, 2);
                 entity.Property(p => p.LastComparePrice).HasPrecision(18, 2);
 
+                entity.Property(p => p.DescriptionAr).HasMaxLength(4000);
+                entity.Property(p => p.DescriptionEn).HasMaxLength(4000);
+
                 // ASIN is the natural product key and the scraper's hot lookup path.
                 entity.Property(p => p.Asin).HasMaxLength(16);
                 entity.HasIndex(p => p.Asin)

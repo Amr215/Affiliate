@@ -33,6 +33,9 @@ builder.Services.Configure<AsinRecheckOptions>(
 builder.Services.Configure<ArabicNameFillOptions>(
     builder.Configuration.GetSection(ArabicNameFillOptions.SectionName));
 
+builder.Services.Configure<ProductDescriptionFillOptions>(
+    builder.Configuration.GetSection(ProductDescriptionFillOptions.SectionName));
+
 builder.Services.Configure<IspProxyOptions>(
     builder.Configuration.GetSection(IspProxyOptions.SectionName));
 
@@ -115,9 +118,11 @@ builder.Services.AddScoped<ITelegramNotifier, TelegramNotifier>();
 builder.Services.AddScoped<IPrepareForPublishService, PrepareForPublishService>();
 builder.Services.AddScoped<IAmazonScraperService, AmazonScraperService>();
 builder.Services.AddScoped<IArabicNameFillService, ArabicNameFillService>();
+builder.Services.AddScoped<IProductDescriptionFillService, ProductDescriptionFillService>();
 builder.Services.AddHostedService<AmazonScraperBackgroundService>();
 builder.Services.AddHostedService<AsinRecheckBackgroundService>();
 builder.Services.AddHostedService<ArabicNameFillBackgroundService>();
+builder.Services.AddHostedService<ProductDescriptionFillBackgroundService>();
 builder.Services.AddHostedService<KeepAliveBackgroundService>();
 builder.Services.AddHostedService<OxylabsRequestLogCleanupService>();
 builder.Services.AddHostedService<PublishAuditFlushService>();
