@@ -280,4 +280,55 @@
             <script src="~/js/price-tracker-chart.js" asp-append-version="true"></script>
         }
     </section>
+
+    @if (Model.RelatedProducts.Count > 0)
+    {
+        var relatedTitle = !string.IsNullOrWhiteSpace(Model.RelatedScraperName)
+            ? (ar ? $"منتجات مرتبطة — {Model.RelatedScraperName}" : $"Related products — {Model.RelatedScraperName}")
+            : (ar ? "منتجات من نفس المصدر" : "Related tracked products");
+        <section class="tracker-related-block" aria-labelledby="tracker-related-title">
+            <h2 id="tracker-related-title">@relatedTitle</h2>
+            <ul class="deal-grid tracker-related-grid" role="list">
+                @for (var i = 0; i < Model.RelatedProducts.Count; i++)
+                {
+                    var d = Model.RelatedProducts[i];
+                    var cardTitle = d.DisplayName(ar);
+                    <li class="deal" style="--i:@i">
+                        <a class="deal-link" href="@d.Url">
+                            <div class="deal-media">
+                                @if (!string.IsNullOrEmpty(d.ImageUrl))
+                                {
+                                    <img src="@d.ImageUrl" alt="@cardTitle" width="300" height="300" loading="lazy" decoding="async" />
+                                }
+                                else
+                                {
+                                    <span class="deal-noimg" aria-hidden="true">@(ar ? "بدون صورة" : "No image")</span>
+                                }
+                                @if (d.IsAtLowestPrice)
+                                {
+                                    <span class="tracker-badge">@(ar ? "عند أقل سعر" : "At lowest")</span>
+                                }
+                            </div>
+                            <div class="deal-body">
+                                <h3 class="deal-name" dir="@(ar ? "rtl" : "ltr")">@cardTitle</h3>
+                                <p class="deal-price">
+                                    <span class="deal-currency">@(d.Currency ?? currency)</span>
+                                    <span class="deal-amount">@d.Price.ToString("#,0.##", priceCulture)</span>
+                                </p>
+                                @{
+                                    var spark = Affiliate.Services.PriceSparkline.TryBuild(d.PriceSpark);
+                                }
+                                @if (spark is not null)
+                                {
+                                    ViewData["SparklineArabic"] = ar;
+                                    ViewData["SparklineCompact"] = true;
+                                    <partial name="_PriceSparkline" model="spark" />
+                                }
+                            </div>
+                        </a>
+                    </li>
+                }
+            </ul>
+        </section>
+    }
 </article>

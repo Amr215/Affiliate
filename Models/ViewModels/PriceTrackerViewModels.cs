@@ -20,6 +20,8 @@ namespace Affiliate.ViewModels
         /// <summary>UTC time of the last recorded price (history or last known).</summary>
         public DateTime? LastDetectedAt { get; set; }
         public PriceTrackerStatsSnapshot Stats { get; set; } = new();
+        public IReadOnlyList<PublicDealItem> RelatedProducts { get; set; } = [];
+        public string? RelatedScraperName { get; set; }
 
         public string DisplayName(bool arabic) =>
             arabic && !string.IsNullOrWhiteSpace(NameAr) ? NameAr! : Name;

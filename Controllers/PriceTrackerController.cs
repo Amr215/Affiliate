@@ -75,6 +75,8 @@ namespace Affiliate.Controllers
                     p.Currency,
                     p.IsBlocked,
                     p.NotAvailableDate,
+                    p.ScraperUrlId,
+                    ScraperUrlName = p.ScraperUrl != null ? p.ScraperUrl.Name : null,
                     HasTag = p.ScraperUrl != null && p.ScraperUrl.TagId != null
                 })
                 .FirstOrDefaultAsync(cancellationToken);
@@ -177,6 +179,17 @@ namespace Affiliate.Controllers
                     : $"https://www.amazon.eg/dp/{asin}?tag={Uri.EscapeDataString(dealsTag)}";
             }
 
+            IReadOnlyList<PublicDealItem> related = [];
+            if (product.ScraperUrlId is > 0)
+            {
+                related = await PriceTrackerRelatedProducts.LoadTopByScraperAsync(
+                    _db,
+                    product.ScraperUrlId.Value,
+                    product.Id,
+                    normalizedLang,
+                    cancellationToken: cancellationToken);
+            }
+
             ViewData["SiteBaseUrl"] = _siteBase;
             return View(new PriceTrackerProductViewModel
             {
@@ -211,7 +224,9 @@ namespace Affiliate.Controllers
                         IsoDate = p.CheckedAt.ToString("o"),
                         Price = p.Price
                     }).ToList()
-                }
+                },
+                RelatedProducts = related,
+                RelatedScraperName = product.ScraperUrlName
             });
         }
 
