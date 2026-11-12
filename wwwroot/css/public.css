@@ -1444,6 +1444,11 @@ html.theme-night .tracker-product-media {
     color: var(--accent-ink);
 }
 
+.tracker-flag.is-gone {
+    background: rgba(120, 120, 120, 0.16);
+    color: var(--ink-soft);
+}
+
 .tracker-stats {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));

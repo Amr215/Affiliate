@@ -20,7 +20,7 @@
 
 <header class="pub-header">
     <a class="pub-logo" asp-controller="Home" asp-action="Index" asp-route-lang="@Model.Lang" aria-label="@brand">
-        <img src="~/images/sinbad-logo.png" alt="@brand" width="40" height="40" />
+        <img src="~/images/sinbad-logo.svg" alt="@brand" width="40" height="40" asp-append-version="true" />
     </a>
     <a class="pub-page-back" asp-controller="Home" asp-action="Index" asp-route-lang="@Model.Lang">
         @(ar ? "العروض" : "Deals")

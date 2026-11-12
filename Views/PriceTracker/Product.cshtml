@@ -20,16 +20,29 @@
         : $"{name} | Price Tracker | {brand}";
     ViewData["Title"] = title;
 
-    var badgeText = Model.Stats.IsLowestEver
-        ? (ar ? "هذا أقل سعر مسجّل للمنتج." : "This is the lowest recorded price.")
-        : Model.Stats.IsLowestIn30DaysOrMore
-            ? (ar ? $"السعر الحالي هو الأقل منذ {Model.Stats.LowestPriceDays} يومًا." : $"Current price is the lowest in {Model.Stats.LowestPriceDays} days.")
-            : null;
+    var lastDetectedText = Model.LastDetectedAt?.ToString("yyyy-MM-dd", priceCulture);
+    var priceLabel = Model.ShowLastDetected
+        ? (ar ? "آخر سعر مُسجَّل" : "Last detected")
+        : (ar ? "السعر الحالي" : "Current");
 
-    var description = ar
-        ? $"تتبع سعر {name}. السعر الحالي {currentText} {currency}. أقل سعر {lowText} وأعلى سعر {highText}."
-        : $"Track the price of {name}. Current {currentText} {currency}. Lowest {lowText}, highest {highText}.";
-    if (badgeText != null)
+    var badgeText = Model.ShowLastDetected
+        ? (lastDetectedText != null
+            ? (ar ? $"آخر سعر مُكتشف كان في {lastDetectedText}." : $"Last detected price was on {lastDetectedText}.")
+            : null)
+        : Model.Stats.IsLowestEver
+            ? (ar ? "هذا أقل سعر مسجّل للمنتج." : "This is the lowest recorded price.")
+            : Model.Stats.IsLowestIn30DaysOrMore
+                ? (ar ? $"السعر الحالي هو الأقل منذ {Model.Stats.LowestPriceDays} يومًا." : $"Current price is the lowest in {Model.Stats.LowestPriceDays} days.")
+                : null;
+
+    var description = Model.ShowLastDetected
+        ? (ar
+            ? $"تتبع سعر {name}. آخر سعر مُسجَّل {currentText} {currency}" + (lastDetectedText != null ? $" في {lastDetectedText}." : ".") + $" أقل سعر {lowText} وأعلى سعر {highText}."
+            : $"Track the price of {name}. Last detected {currentText} {currency}" + (lastDetectedText != null ? $" on {lastDetectedText}." : ".") + $" Lowest {lowText}, highest {highText}.")
+        : (ar
+            ? $"تتبع سعر {name}. السعر الحالي {currentText} {currency}. أقل سعر {lowText} وأعلى سعر {highText}."
+            : $"Track the price of {name}. Current {currentText} {currency}. Lowest {lowText}, highest {highText}.");
+    if (badgeText != null && !Model.ShowLastDetected)
         description = $"{description} {badgeText}";
     ViewData["MetaDescription"] = description;
     ViewData["MetaKeywords"] = ar
@@ -104,7 +117,7 @@
 
 <header class="pub-header">
     <a class="pub-logo" asp-controller="Home" asp-action="Index" asp-route-lang="@Model.Lang" aria-label="@brand">
-        <img src="~/images/sinbad-logo.png" alt="@brand" width="40" height="40" />
+        <img src="~/images/sinbad-logo.svg" alt="@brand" width="40" height="40" asp-append-version="true" />
     </a>
     <a class="pub-page-back" asp-controller="Home" asp-action="Index" asp-route-lang="@Model.Lang">
         @(ar ? "العروض" : "Deals")
@@ -146,7 +159,13 @@
         <div class="tracker-product-main">
             <h1 dir="auto">@name</h1>
 
-            @if (Model.Stats.IsLowestEver)
+            @if (Model.ShowLastDetected && lastDetectedText != null)
+            {
+                <p class="tracker-flag is-gone">
+                    @(ar ? $"آخر سعر مُكتشف كان في {lastDetectedText}" : $"Last detected price was on {lastDetectedText}")
+                </p>
+            }
+            else if (Model.Stats.IsLowestEver)
             {
                 <p class="tracker-flag is-best">@(ar ? "أقل سعر على الإطلاق" : "Lowest price ever")</p>
             }
@@ -157,7 +176,7 @@
 
             <dl class="tracker-stats">
                 <div>
-                    <dt>@(ar ? "السعر الحالي" : "Current")</dt>
+                    <dt>@priceLabel</dt>
                     <dd><span class="ltr">@currentText</span> @currency</dd>
                 </div>
                 <div>

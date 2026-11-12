@@ -11,6 +11,10 @@ namespace Affiliate.ViewModels
         public string? Currency { get; set; }
         public string Slug { get; set; } = "product";
         public string BuyUrl { get; set; } = "#";
+        /// <summary>True when we show last detected price instead of a live current price.</summary>
+        public bool ShowLastDetected { get; set; }
+        /// <summary>UTC time of the last recorded price (history or last known).</summary>
+        public DateTime? LastDetectedAt { get; set; }
         public PriceTrackerStatsSnapshot Stats { get; set; } = new();
 
         public string DisplayName(bool arabic) =>

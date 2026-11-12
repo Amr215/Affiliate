@@ -78,12 +78,13 @@ namespace Affiliate.Controllers
             if (anyProduct is null)
                 return NotFound();
 
-            var isTrackable = anyProduct.IsBlocked != true
-                && anyProduct.NotAvailableDate == null
-                && anyProduct.CurrentPrice > 0
-                && anyProduct.HasTag;
+            // NotAvailableDate no longer blocks the page — CurrentPrice is still the last known price.
+            var showLastDetected = anyProduct.NotAvailableDate != null;
+            var canShow = anyProduct.IsBlocked != true
+                && anyProduct.HasTag
+                && anyProduct.CurrentPrice > 0;
 
-            if (!isTrackable)
+            if (!canShow)
             {
                 Response.StatusCode = StatusCodes.Status410Gone;
                 ViewData["SiteBaseUrl"] = _siteBase;
@@ -127,8 +128,8 @@ namespace Affiliate.Controllers
                 .Select(h => (h.CheckedAt, h.Price))
                 .ToList();
 
-            // Ensure the live current price is represented on the chart.
-            if (product.CurrentPrice is > 0)
+            // Live "now" point only while still actively tracked.
+            if (!showLastDetected && product.CurrentPrice is > 0)
             {
                 var now = DateTime.UtcNow;
                 if (points.Count == 0
@@ -183,6 +184,10 @@ namespace Affiliate.Controllers
                 Currency = product.Currency,
                 Slug = canonicalSlug,
                 BuyUrl = buyUrl,
+                ShowLastDetected = showLastDetected,
+                LastDetectedAt = showLastDetected
+                    ? (points.Count > 0 ? points[^1].CheckedAt : product.NotAvailableDate)
+                    : null,
                 Stats = new PriceTrackerStatsSnapshot
                 {
                     CurrentPrice = stats.CurrentPrice,

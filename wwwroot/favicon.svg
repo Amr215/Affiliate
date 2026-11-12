@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <title>'D3F/('/</title>
+  <rect width="64" height="64" rx="14" fill="#0E3B5C"/>
+  <circle cx="47" cy="15" r="6" fill="#F6D56B"/>
+  <path d="M31 8 L31 41 L11 41 Z" fill="#F2B84B"/>
+  <path d="M34 17 L34 41 L51 41 Z" fill="#FFF3D6"/>
+  <rect x="30.5" y="8" width="3" height="35" rx="1.5" fill="#8A5A2B"/>
+  <path d="M8 43 H56 L49 52 H15 Z" fill="#C8553D"/>
+  <path d="M5 57 q6.5 -5 13 0 t13 0 t13 0 t13 0" fill="none" stroke="#4FB3BF" stroke-width="3" stroke-linecap="round"/>
+</svg>
