@@ -76,7 +76,7 @@ namespace Affiliate.Controllers
                     p.IsBlocked,
                     p.NotAvailableDate,
                     p.ScraperUrlId,
-                    HasTag = p.ScraperUrl != null && p.ScraperUrl.TagId != null
+                    AsinRecheckEnabled = p.ScraperUrl != null && p.ScraperUrl.IsAsinRecheckEnabled
                 })
                 .FirstOrDefaultAsync(cancellationToken);
 
@@ -86,7 +86,7 @@ namespace Affiliate.Controllers
             // NotAvailableDate no longer blocks the page — CurrentPrice is still the last known price.
             var showLastDetected = anyProduct.NotAvailableDate != null;
             var canShow = anyProduct.IsBlocked != true
-                && anyProduct.HasTag
+                && anyProduct.AsinRecheckEnabled
                 && (anyProduct.CurrentPrice > 0 || showLastDetected);
 
             if (!canShow)

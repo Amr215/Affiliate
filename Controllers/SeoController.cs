@@ -64,6 +64,7 @@ namespace Affiliate.Controllers
                     && p.Asin != null
                     && p.CurrentPrice > 0
                     && p.ScraperUrl != null
+                    && p.ScraperUrl.IsAsinRecheckEnabled
                     && p.ScraperUrl.TagId != null)
                 .OrderByDescending(p => p.LastCheckedAt)
                 .Take(5000)

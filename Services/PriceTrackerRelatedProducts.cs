@@ -5,8 +5,8 @@ using Microsoft.EntityFrameworkCore;
 namespace Affiliate.Services
 {
     /// <summary>
-    /// Top tracker-eligible products from the same <see cref="Affiliate.Models.ScraperUrl"/>,
-    /// ranked with the same default sort as the deals homepage tracker list.
+    /// Other tracker-visible products from the same <see cref="Affiliate.Models.ScraperUrl"/>
+    /// (same eligibility as the product details page, not the homepage list).
     /// </summary>
     public static class PriceTrackerRelatedProducts
     {
@@ -26,15 +26,12 @@ namespace Affiliate.Services
             var candidates = await db.Products.AsNoTracking()
                 .Where(p => p.Id != excludeProductId
                     && p.IsBlocked != true
-                    && p.NotAvailableDate == null
                     && p.Asin != null
-                    && p.CurrentPrice > 0
                     && p.ScraperUrlId == scraperUrlId
                     && p.ScraperUrl != null
                     && p.ScraperUrl.IsAsinRecheckEnabled
-                    && p.ScraperUrl.TagId != null
-                    && p.ScraperUrl.Tag != null
-                    && p.ScraperUrl.Tag.ShowInDeals)
+                    && p.NotAvailableDate == null
+                    && p.CurrentPrice > 0)
                 .Select(p => new Row(
                     p.Id,
                     p.Name,
@@ -81,7 +78,7 @@ namespace Affiliate.Services
             var ranked = candidates
                 .Select(r =>
                 {
-                    var current = r.CurrentPrice ?? 0m;
+                    var current = r.CurrentPrice!.Value;
                     historyByProduct.TryGetValue(r.Id, out var hist);
                     hist ??= [];
                     var histPrices = hist.Select(p => p.Price).ToList();
