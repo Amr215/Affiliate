@@ -87,7 +87,7 @@ namespace Affiliate.Controllers
             var showLastDetected = anyProduct.NotAvailableDate != null;
             var canShow = anyProduct.IsBlocked != true
                 && anyProduct.HasTag
-                && anyProduct.CurrentPrice > 0;
+                && (anyProduct.CurrentPrice > 0 || showLastDetected);
 
             if (!canShow)
             {
