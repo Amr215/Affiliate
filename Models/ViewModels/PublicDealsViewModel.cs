@@ -64,6 +64,9 @@ namespace Affiliate.ViewModels
         /// </summary>
         public string Url { get; set; } = string.Empty;
 
+        /// <summary>Tracker page path for JSON-LD (card <see cref="Url"/> may be /d/ redirect).</summary>
+        public string SearchListingUrl { get; set; } = string.Empty;
+
         /// <summary>True when this row is an external-price deal (listed before tracker products).</summary>
         public bool IsDeal { get; set; }
 

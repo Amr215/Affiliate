@@ -56,10 +56,6 @@ namespace Affiliate.Controllers
             {
                 ("/?lang=ar", "hourly", "1.0"),
                 ("/?lang=en", "hourly", "0.9"),
-                ("/Home/About?lang=ar", "monthly", "0.5"),
-                ("/Home/About?lang=en", "monthly", "0.4"),
-                ("/Home/Terms?lang=ar", "monthly", "0.5"),
-                ("/Home/Terms?lang=en", "monthly", "0.4"),
             };
 
             var products = await _db.Products.AsNoTracking()

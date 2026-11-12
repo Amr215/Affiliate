@@ -43,6 +43,15 @@
         ? "عروض, تخفيضات, عروض مصر, عروض السندباد, أسعار مخفضة, تيليجرام عروض"
         : "deals, discounts, Egypt deals, El Sindbad, price drops, Telegram deals";
 
+    var isFilteredListing = Model.SelectedTagId != null
+        || Model.SelectedCategory != null
+        || !string.IsNullOrWhiteSpace(Model.Query)
+        || Model.HasPriceFilter
+        || !string.Equals(Model.Sort, "best", StringComparison.OrdinalIgnoreCase)
+        || Model.Page > 1;
+    if (isFilteredListing)
+        ViewData["Robots"] = "noindex, follow";
+
     object Route(
         int? page = null,
         int? tagId = null,
@@ -104,13 +113,13 @@
         return baseUrl + (path.StartsWith('/') ? path : "/" + path);
     }
 
-    var canonicalPath = Url.Action("Index", Route(page: Model.Page)) ?? "/";
+    var canonicalPath = Url.Action("Index", new { lang = Model.Lang }) ?? "/";
     var canonical = Abs(canonicalPath);
     var logoUrl = Abs(Url.Content("~/images/sinbad-logo.png"));
     var ogImage = Model.Deals.Select(d => d.ImageUrl).FirstOrDefault(u => !string.IsNullOrWhiteSpace(u)) ?? logoUrl;
 
-    var hreflangAr = Abs(Url.Action("Index", Route(page: Model.Page, lang: "ar")) ?? "/?lang=ar");
-    var hreflangEn = Abs(Url.Action("Index", Route(page: Model.Page, lang: "en")) ?? "/?lang=en");
+    var hreflangAr = Abs(Url.Action("Index", new { lang = "ar" }) ?? "/?lang=ar");
+    var hreflangEn = Abs(Url.Action("Index", new { lang = "en" }) ?? "/?lang=en");
 
     string? prevUrl = Model.Page > 1 ? Abs(Url.Action("Index", Route(page: Model.Page - 1))) : null;
     string? nextUrl = Model.Page < Model.TotalPages ? Abs(Url.Action("Index", Route(page: Model.Page + 1))) : null;
@@ -155,25 +164,29 @@
                 ["@id"] = canonical + "#itemlist",
                 ["name"] = h1,
                 ["numberOfItems"] = Model.Deals.Count,
-                ["itemListElement"] = Model.Deals.Select((d, i) => new Dictionary<string, object?>
+                ["itemListElement"] = Model.Deals.Select((d, i) =>
                 {
-                    ["@type"] = "ListItem",
-                    ["position"] = i + 1,
-                    ["item"] = new Dictionary<string, object?>
+                    var listUrl = Abs(string.IsNullOrWhiteSpace(d.SearchListingUrl) ? d.Url : d.SearchListingUrl);
+                    return new Dictionary<string, object?>
                     {
-                        ["@type"] = "Product",
-                        ["name"] = d.DisplayName(ar),
-                        ["image"] = string.IsNullOrWhiteSpace(d.ImageUrl) ? null : d.ImageUrl,
-                        ["url"] = Abs(d.Url),
-                        ["offers"] = new Dictionary<string, object?>
+                        ["@type"] = "ListItem",
+                        ["position"] = i + 1,
+                        ["item"] = new Dictionary<string, object?>
                         {
-                            ["@type"] = "Offer",
-                            ["price"] = d.Price,
-                            ["priceCurrency"] = string.IsNullOrWhiteSpace(d.Currency) ? "EGP" : d.Currency,
-                            ["availability"] = "https://schema.org/InStock",
-                            ["url"] = Abs(d.Url)
+                            ["@type"] = "Product",
+                            ["name"] = d.DisplayName(ar),
+                            ["image"] = string.IsNullOrWhiteSpace(d.ImageUrl) ? null : d.ImageUrl,
+                            ["url"] = listUrl,
+                            ["offers"] = new Dictionary<string, object?>
+                            {
+                                ["@type"] = "Offer",
+                                ["price"] = d.Price,
+                                ["priceCurrency"] = string.IsNullOrWhiteSpace(d.Currency) ? "EGP" : d.Currency,
+                                ["availability"] = "https://schema.org/InStock",
+                                ["url"] = listUrl
+                            }
                         }
-                    }
+                    };
                 }).ToList()
             }
         }
@@ -416,7 +429,7 @@ else
             <li class="deal" style="--i:@i">
                 <a class="deal-link" href="@d.Url"
                    target="@(d.IsDeal ? "_blank" : null)"
-                   rel="@(d.IsDeal ? "noopener sponsored" : null)">
+                   rel="@(d.IsDeal ? "nofollow noopener sponsored" : null)">
                     <div class="deal-media">
                         @if (!string.IsNullOrEmpty(d.ImageUrl))
                         {

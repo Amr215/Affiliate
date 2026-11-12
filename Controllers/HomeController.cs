@@ -180,6 +180,10 @@ namespace Affiliate.Controllers
                         : $"https://www.amazon.eg/dp/{asin}?tag={Uri.EscapeDataString(dealsTag)}";
                 }
 
+                var dealDisplay = isArabic && !string.IsNullOrWhiteSpace(r.NameAr) ? r.NameAr! : r.Name;
+                var dealListing =
+                    $"/tracker/{asin}/{Uri.EscapeDataString(PriceTrackerSlug.FromName(dealDisplay))}?lang={normalizedLang}";
+
                 dealItems.Add(new PublicDealItem
                 {
                     ProductId = r.Id,
@@ -189,6 +193,7 @@ namespace Affiliate.Controllers
                     Price = r.CurrentPrice!.Value,
                     Currency = r.Currency,
                     Url = url,
+                    SearchListingUrl = dealListing,
                     IsDeal = true,
                     IsAtLowestPrice = r.CurrentPrice is > 0
                         && r.LowestPrice is > 0
@@ -315,6 +320,7 @@ namespace Affiliate.Controllers
                     var asin = AsinLinkCodec.NormalizeAsin(r.Asin!);
                     var display = isArabic && !string.IsNullOrWhiteSpace(r.NameAr) ? r.NameAr! : r.Name;
                     var slug = PriceTrackerSlug.FromName(display);
+                    var listing = $"/tracker/{asin}/{Uri.EscapeDataString(slug)}?lang={normalizedLang}";
                     return new PublicDealItem
                     {
                         ProductId = r.Id,
@@ -323,7 +329,8 @@ namespace Affiliate.Controllers
                         ImageUrl = r.ImageUrl,
                         Price = r.CurrentPrice!.Value,
                         Currency = r.Currency,
-                        Url = $"/tracker/{asin}/{Uri.EscapeDataString(slug)}?lang={normalizedLang}",
+                        Url = listing,
+                        SearchListingUrl = listing,
                         IsDeal = false,
                         IsAtLowestPrice = x.Tier <= PriceTrackerSort.TierAllTimeLow
                     };
@@ -409,6 +416,7 @@ namespace Affiliate.Controllers
         {
             SetPublicLang(lang);
             ViewData["Title"] = IsArabicLang() ? "من نحن" : "About us";
+            ViewData["Robots"] = "noindex, follow";
             return View();
         }
 
@@ -417,6 +425,7 @@ namespace Affiliate.Controllers
         {
             SetPublicLang(lang);
             ViewData["Title"] = IsArabicLang() ? "الشروط والأحكام" : "Terms and conditions";
+            ViewData["Robots"] = "noindex, follow";
             return View();
         }
 

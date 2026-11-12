@@ -108,7 +108,7 @@
         ["offers"] = new Dictionary<string, object?>
         {
             ["@type"] = "Offer",
-            ["url"] = $"{site}{Model.BuyUrl}",
+            ["url"] = canonical,
             ["priceCurrency"] = currency,
             ["price"] = Model.Stats.CurrentPrice,
             ["availability"] = "https://schema.org/InStock"
@@ -253,7 +253,7 @@
                 </div>
             </dl>
 
-            <a class="tracker-buy" href="@Model.BuyUrl" target="_blank" rel="noopener sponsored">
+            <a class="tracker-buy" href="@Model.BuyUrl" target="_blank" rel="nofollow noopener sponsored">
                 @(ar ? "شراء من أمازون" : "Buy on Amazon")
             </a>
         </div>

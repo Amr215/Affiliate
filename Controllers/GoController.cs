@@ -41,7 +41,7 @@ namespace Affiliate.Controllers
             if (string.IsNullOrWhiteSpace(destination))
                 return NotFound();
 
-            return Redirect(AppendTag(destination, useDealsTag: false));
+            return RedirectNoIndex(AppendTag(destination, useDealsTag: false));
         }
 
         /// <summary>Noon product: opaque SKU code (not stored).</summary>
@@ -51,7 +51,7 @@ namespace Affiliate.Controllers
             if (!noonSkuCodec.TryDecode(code, out var sku))
                 return NotFound();
 
-            return Redirect(NoonPrepareForPublishService.BuildProductUrl(sku));
+            return RedirectNoIndex(NoonPrepareForPublishService.BuildProductUrl(sku));
         }
 
         /// <summary>Noon general URL from <c>NoonShortLinks</c>.</summary>
@@ -62,7 +62,7 @@ namespace Affiliate.Controllers
             if (string.IsNullOrWhiteSpace(destination))
                 return NotFound();
 
-            return Redirect(destination);
+            return RedirectNoIndex(destination);
         }
 
         private IActionResult RedirectToAmazonProduct(string code, bool useDealsTag)
@@ -70,7 +70,13 @@ namespace Affiliate.Controllers
             if (!codec.TryDecode(code, out var asin))
                 return NotFound();
 
-            return Redirect(AppendTag($"https://www.amazon.eg/dp/{asin}", useDealsTag));
+            return RedirectNoIndex(AppendTag($"https://www.amazon.eg/dp/{asin}", useDealsTag));
+        }
+
+        private IActionResult RedirectNoIndex(string destination)
+        {
+            Response.Headers["X-Robots-Tag"] = "noindex, nofollow";
+            return Redirect(destination);
         }
 
         private string AppendTag(string destination, bool useDealsTag)
