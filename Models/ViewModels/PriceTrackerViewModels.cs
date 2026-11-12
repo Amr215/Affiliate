@@ -21,7 +21,6 @@ namespace Affiliate.ViewModels
         public DateTime? LastDetectedAt { get; set; }
         public PriceTrackerStatsSnapshot Stats { get; set; } = new();
         public IReadOnlyList<PublicDealItem> RelatedProducts { get; set; } = [];
-        public string? RelatedScraperName { get; set; }
 
         public string DisplayName(bool arabic) =>
             arabic && !string.IsNullOrWhiteSpace(NameAr) ? NameAr! : Name;

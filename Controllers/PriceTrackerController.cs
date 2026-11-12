@@ -76,7 +76,6 @@ namespace Affiliate.Controllers
                     p.IsBlocked,
                     p.NotAvailableDate,
                     p.ScraperUrlId,
-                    ScraperUrlName = p.ScraperUrl != null ? p.ScraperUrl.Name : null,
                     HasTag = p.ScraperUrl != null && p.ScraperUrl.TagId != null
                 })
                 .FirstOrDefaultAsync(cancellationToken);
@@ -225,8 +224,7 @@ namespace Affiliate.Controllers
                         Price = p.Price
                     }).ToList()
                 },
-                RelatedProducts = related,
-                RelatedScraperName = product.ScraperUrlName
+                RelatedProducts = related
             });
         }
 

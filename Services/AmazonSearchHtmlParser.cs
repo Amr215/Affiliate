@@ -175,10 +175,12 @@ namespace Affiliate.Services
 
         private static int? ParseReviews(HtmlNode node)
         {
-            var label = node.SelectSingleNode(
-                    ".//a[contains(@aria-label,'rating') or contains(@aria-label,'review')]")
-                ?.GetAttributeValue("aria-label", null)
-                ?? node.SelectSingleNode(".//a[contains(@href,'#customerReviews')]//span")?.InnerText;
+            var reviewsLink = node.SelectSingleNode(".//a[contains(@href,'#customerReviews')]");
+            var label = reviewsLink?.GetAttributeValue("aria-label", null)
+                ?? reviewsLink?.SelectSingleNode(".//span")?.InnerText
+                ?? node.SelectSingleNode(
+                        ".//a[contains(@aria-label,'rating') or contains(@aria-label,'review')]")
+                    ?.GetAttributeValue("aria-label", null);
 
             if (string.IsNullOrWhiteSpace(label))
                 return null;

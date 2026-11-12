@@ -310,9 +310,7 @@
 
     @if (Model.RelatedProducts.Count > 0)
     {
-        var relatedTitle = !string.IsNullOrWhiteSpace(Model.RelatedScraperName)
-            ? (ar ? $"منتجات مرتبطة — {Model.RelatedScraperName}" : $"Related products — {Model.RelatedScraperName}")
-            : (ar ? "منتجات من نفس المصدر" : "Related tracked products");
+        var relatedTitle = ar ? "منتجات مرتبطة" : "Related products";
         <section class="tracker-related-block" aria-labelledby="tracker-related-title">
             <h2 id="tracker-related-title">@relatedTitle</h2>
             <ul class="deal-grid tracker-related-grid" role="list">
