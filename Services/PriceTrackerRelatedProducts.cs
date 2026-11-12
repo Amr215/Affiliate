@@ -54,14 +54,14 @@ namespace Affiliate.Services
                 return [];
 
             var ids = candidates.Select(c => c.Id).ToList();
-            var historyByProduct = new Dictionary<int, List<decimal>>();
+            var historyByProduct = new Dictionary<int, List<(DateTime CheckedAt, decimal Price)>>();
             const int chunkSize = 500;
             for (var offset = 0; offset < ids.Count; offset += chunkSize)
             {
                 var chunk = ids.Skip(offset).Take(chunkSize).ToList();
                 var histRows = await db.PriceHistories.AsNoTracking()
                     .Where(h => chunk.Contains(h.ProductId) && h.Price != null && h.Price > 0)
-                    .Select(h => new { h.ProductId, Price = h.Price!.Value })
+                    .Select(h => new { h.ProductId, h.CheckedAt, Price = h.Price!.Value })
                     .ToListAsync(cancellationToken);
 
                 foreach (var row in histRows)
@@ -71,9 +71,12 @@ namespace Affiliate.Services
                         list = [];
                         historyByProduct[row.ProductId] = list;
                     }
-                    list.Add(row.Price);
+                    list.Add((row.CheckedAt, row.Price));
                 }
             }
+
+            foreach (var list in historyByProduct.Values)
+                list.Sort((a, b) => a.CheckedAt.CompareTo(b.CheckedAt));
 
             var ranked = candidates
                 .Select(r =>
@@ -81,7 +84,8 @@ namespace Affiliate.Services
                     var current = r.CurrentPrice ?? 0m;
                     historyByProduct.TryGetValue(r.Id, out var hist);
                     hist ??= [];
-                    var (tier, rank) = PriceTrackerSort.Compute(current, hist, r.LowestPrice);
+                    var histPrices = hist.Select(p => p.Price).ToList();
+                    var (tier, rank) = PriceTrackerSort.Compute(current, histPrices, r.LowestPrice);
                     return (Row: r, Tier: tier, Rank: rank);
                 })
                 .OrderBy(x => x.Tier)
@@ -113,14 +117,10 @@ namespace Affiliate.Services
                 })
                 .ToList();
 
-            var sparks = await PriceSparkline.LoadAmazonAsync(
-                db,
-                items.Select(i => i.ProductId).ToList(),
-                cancellationToken: cancellationToken);
             foreach (var item in items)
             {
-                if (sparks.TryGetValue(item.ProductId, out var points))
-                    item.PriceSpark = points;
+                if (historyByProduct.TryGetValue(item.ProductId, out var hist) && hist.Count > 0)
+                    item.LowestPriceDays = PriceTrackerStats.LowestStreak(hist).LowestPriceDays;
             }
 
             return items;

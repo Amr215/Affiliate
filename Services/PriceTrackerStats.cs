@@ -11,6 +11,31 @@ namespace Affiliate.Services
         public bool IsLowestIn30DaysOrMore { get; init; }
         public IReadOnlyList<PriceTrackerHistoryPoint> ChartPoints { get; init; } = [];
 
+        /// <summary>
+        /// Days since the latest price last beat a prior lower point (history oldest → newest).
+        /// <paramref name="isLowestEver"/> is true when no recorded price was below the latest.
+        /// </summary>
+        public static (int LowestPriceDays, bool IsLowestEver) LowestStreak(
+            IReadOnlyList<(DateTime CheckedAt, decimal Price)> pointsOldestFirst)
+        {
+            if (pointsOldestFirst.Count == 0)
+                return (0, false);
+
+            var latest = pointsOldestFirst[^1].Price;
+            var lowerIndex = -1;
+            for (var i = pointsOldestFirst.Count - 1; i >= 0; i--)
+            {
+                if (pointsOldestFirst[i].Price < latest)
+                {
+                    lowerIndex = i;
+                    break;
+                }
+            }
+
+            var days = (DateTime.UtcNow - pointsOldestFirst[lowerIndex + 1].CheckedAt).Days;
+            return (days, lowerIndex < 0);
+        }
+
         public static PriceTrackerStats FromHistory(
             decimal? currentPrice,
             decimal? storedLowest,
@@ -33,19 +58,7 @@ namespace Affiliate.Services
             var avg = Math.Round(pointsOldestFirst.Average(p => p.Price), 2, MidpointRounding.AwayFromZero);
             var latest = pointsOldestFirst[^1].Price;
 
-            var lowerIndex = -1;
-            for (var i = pointsOldestFirst.Count - 1; i >= 0; i--)
-            {
-                if (pointsOldestFirst[i].Price < latest)
-                {
-                    lowerIndex = i;
-                    break;
-                }
-            }
-
-            var sinceIndex = lowerIndex + 1;
-            var lowestDays = (DateTime.UtcNow - pointsOldestFirst[sinceIndex].CheckedAt).Days;
-            var isLowestEver = lowerIndex < 0;
+            var (lowestDays, isLowestEver) = LowestStreak(pointsOldestFirst);
 
             return new PriceTrackerStats
             {

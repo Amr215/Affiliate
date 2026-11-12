@@ -70,6 +70,9 @@ namespace Affiliate.ViewModels
         /// <summary>True when current price is at the recorded all-time low.</summary>
         public bool IsAtLowestPrice { get; set; }
 
+        /// <summary>Whole days the current price has been the lowest since the last lower recorded price.</summary>
+        public int LowestPriceDays { get; set; }
+
         /// <summary>Recent prices oldest→newest for the card sparkline (empty when unknown).</summary>
         public IReadOnlyList<decimal> PriceSpark { get; set; } = [];
 

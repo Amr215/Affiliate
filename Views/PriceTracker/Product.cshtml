@@ -333,6 +333,10 @@
                                 {
                                     <span class="tracker-badge">@(ar ? "عند أقل سعر" : "At lowest")</span>
                                 }
+                                else if (d.LowestPriceDays >= 30)
+                                {
+                                    <span class="tracker-badge">@(ar ? $"أقل سعر منذ {d.LowestPriceDays} يوم" : $"Lowest in {d.LowestPriceDays} days")</span>
+                                }
                             </div>
                             <div class="deal-body">
                                 <h3 class="deal-name" dir="@(ar ? "rtl" : "ltr")">@cardTitle</h3>
@@ -340,15 +344,6 @@
                                     <span class="deal-currency">@(d.Currency ?? currency)</span>
                                     <span class="deal-amount">@d.Price.ToString("#,0.##", priceCulture)</span>
                                 </p>
-                                @{
-                                    var spark = Affiliate.Services.PriceSparkline.TryBuild(d.PriceSpark);
-                                }
-                                @if (spark is not null)
-                                {
-                                    ViewData["SparklineArabic"] = ar;
-                                    ViewData["SparklineCompact"] = true;
-                                    <partial name="_PriceSparkline" model="spark" />
-                                }
                             </div>
                         </a>
                     </li>
