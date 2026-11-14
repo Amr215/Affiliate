@@ -117,13 +117,37 @@
     };
     if (hasReviews)
     {
+        var schemaRating = Math.Round(ratingValue, 1);
         jsonLd["aggregateRating"] = new Dictionary<string, object?>
         {
             ["@type"] = "AggregateRating",
-            ["ratingValue"] = Math.Round(ratingValue, 1),
+            ["ratingValue"] = schemaRating,
             ["reviewCount"] = Model.ReviewsCount,
             ["bestRating"] = 5,
             ["worstRating"] = 1
+        };
+        jsonLd["review"] = new object[]
+        {
+            new Dictionary<string, object?>
+            {
+                ["@type"] = "Review",
+                ["name"] = name,
+                ["reviewBody"] = ar
+                    ? $"متوسط تقييم العملاء {ratingText} من 5 بناءً على {reviewsCountText} مراجعة على أمازون."
+                    : $"Average customer rating of {ratingText} out of 5 based on {reviewsCountText} Amazon customer reviews.",
+                ["reviewRating"] = new Dictionary<string, object?>
+                {
+                    ["@type"] = "Rating",
+                    ["ratingValue"] = schemaRating,
+                    ["bestRating"] = 5,
+                    ["worstRating"] = 1
+                },
+                ["author"] = new Dictionary<string, string>
+                {
+                    ["@type"] = "Organization",
+                    ["name"] = "Amazon"
+                }
+            }
         };
     }
     var jsonLdText = JsonSerializer.Serialize(jsonLd, new JsonSerializerOptions

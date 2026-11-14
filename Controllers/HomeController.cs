@@ -155,7 +155,9 @@ namespace Affiliate.Controllers
                     p.CurrentPrice,
                     p.LowestPrice,
                     p.Currency,
-                    p.Asin
+                    p.Asin,
+                    p.Rating,
+                    p.ReviewsCount
                 })
                 .ToListAsync(cancellationToken);
 
@@ -197,7 +199,9 @@ namespace Affiliate.Controllers
                     IsDeal = true,
                     IsAtLowestPrice = r.CurrentPrice is > 0
                         && r.LowestPrice is > 0
-                        && r.CurrentPrice.Value <= r.LowestPrice.Value
+                        && r.CurrentPrice.Value <= r.LowestPrice.Value,
+                    Rating = r.Rating,
+                    ReviewsCount = r.ReviewsCount
                 });
             }
 
@@ -248,7 +252,9 @@ namespace Affiliate.Controllers
                     p.CurrentPrice,
                     p.LowestPrice,
                     p.Currency,
-                    p.Asin
+                    p.Asin,
+                    p.Rating,
+                    p.ReviewsCount
                 })
                 .ToListAsync(cancellationToken);
 
@@ -332,7 +338,9 @@ namespace Affiliate.Controllers
                         Url = listing,
                         SearchListingUrl = listing,
                         IsDeal = false,
-                        IsAtLowestPrice = x.Tier <= PriceTrackerSort.TierAllTimeLow
+                        IsAtLowestPrice = x.Tier <= PriceTrackerSort.TierAllTimeLow,
+                        Rating = r.Rating,
+                        ReviewsCount = r.ReviewsCount
                     };
                 })
                 .ToList();

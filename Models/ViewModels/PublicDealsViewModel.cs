@@ -58,6 +58,8 @@ namespace Affiliate.ViewModels
         public string? ImageUrl { get; set; }
         public decimal Price { get; set; }
         public string? Currency { get; set; }
+        public double? Rating { get; set; }
+        public int? ReviewsCount { get; set; }
 
         /// <summary>
         /// Card link: affiliate short URL for deals, tracker detail URL for tracker fillers.

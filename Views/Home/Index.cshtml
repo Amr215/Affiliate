@@ -167,25 +167,70 @@
                 ["itemListElement"] = Model.Deals.Select((d, i) =>
                 {
                     var listUrl = Abs(string.IsNullOrWhiteSpace(d.SearchListingUrl) ? d.Url : d.SearchListingUrl);
+                    var dealName = d.DisplayName(ar);
+                    var dealPrice = d.Price.ToString("#,0.##", priceCulture);
+                    var dealDescription = ar
+                        ? $"{dealName} — عرض بسعر {dealPrice} EGP على {brand}."
+                        : $"{dealName} — deal at {dealPrice} EGP on {brand}.";
+                    var product = new Dictionary<string, object?>
+                    {
+                        ["@type"] = "Product",
+                        ["name"] = dealName,
+                        ["description"] = dealDescription,
+                        ["image"] = string.IsNullOrWhiteSpace(d.ImageUrl) ? null : d.ImageUrl,
+                        ["url"] = listUrl,
+                        ["offers"] = new Dictionary<string, object?>
+                        {
+                            ["@type"] = "Offer",
+                            ["price"] = d.Price,
+                            ["priceCurrency"] = "EGP",
+                            ["availability"] = "https://schema.org/InStock",
+                            ["url"] = listUrl
+                        }
+                    };
+                    if (d.Rating is > 0 && d.ReviewsCount is > 0)
+                    {
+                        var schemaRating = Math.Round(d.Rating.Value, 1);
+                        var ratingLabel = schemaRating.ToString("0.0", priceCulture);
+                        var reviewsLabel = d.ReviewsCount.Value.ToString("#,0", priceCulture);
+                        product["aggregateRating"] = new Dictionary<string, object?>
+                        {
+                            ["@type"] = "AggregateRating",
+                            ["ratingValue"] = schemaRating,
+                            ["reviewCount"] = d.ReviewsCount,
+                            ["bestRating"] = 5,
+                            ["worstRating"] = 1
+                        };
+                        product["review"] = new object[]
+                        {
+                            new Dictionary<string, object?>
+                            {
+                                ["@type"] = "Review",
+                                ["name"] = dealName,
+                                ["reviewBody"] = ar
+                                    ? $"متوسط تقييم العملاء {ratingLabel} من 5 بناءً على {reviewsLabel} مراجعة على أمازون."
+                                    : $"Average customer rating of {ratingLabel} out of 5 based on {reviewsLabel} Amazon customer reviews.",
+                                ["reviewRating"] = new Dictionary<string, object?>
+                                {
+                                    ["@type"] = "Rating",
+                                    ["ratingValue"] = schemaRating,
+                                    ["bestRating"] = 5,
+                                    ["worstRating"] = 1
+                                },
+                                ["author"] = new Dictionary<string, string>
+                                {
+                                    ["@type"] = "Organization",
+                                    ["name"] = "Amazon"
+                                }
+                            }
+                        };
+                    }
+
                     return new Dictionary<string, object?>
                     {
                         ["@type"] = "ListItem",
                         ["position"] = i + 1,
-                        ["item"] = new Dictionary<string, object?>
-                        {
-                            ["@type"] = "Product",
-                            ["name"] = d.DisplayName(ar),
-                            ["image"] = string.IsNullOrWhiteSpace(d.ImageUrl) ? null : d.ImageUrl,
-                            ["url"] = listUrl,
-                            ["offers"] = new Dictionary<string, object?>
-                            {
-                                ["@type"] = "Offer",
-                                ["price"] = d.Price,
-                                ["priceCurrency"] = "EGP",
-                                ["availability"] = "https://schema.org/InStock",
-                                ["url"] = listUrl
-                            }
-                        }
+                        ["item"] = product
                     };
                 }).ToList()
             }
