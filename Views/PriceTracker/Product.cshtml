@@ -11,6 +11,7 @@
     var brand = ar ? "عروض السندباد" : "El Sindbad Deals";
     var name = Model.DisplayName(ar);
     var currency = Model.Currency ?? "EGP";
+    const string seoCurrency = "EGP";
     var priceCulture = CultureInfo.InvariantCulture;
     var currentText = Model.Stats.CurrentPrice?.ToString("#,0.##", priceCulture) ?? "—";
     var lowText = Model.Stats.LowestPrice?.ToString("#,0.##", priceCulture) ?? "—";
@@ -109,7 +110,7 @@
         {
             ["@type"] = "Offer",
             ["url"] = canonical,
-            ["priceCurrency"] = currency,
+            ["priceCurrency"] = seoCurrency,
             ["price"] = Model.Stats.CurrentPrice,
             ["availability"] = "https://schema.org/InStock"
         }
@@ -148,7 +149,7 @@
     <meta property="og:image" content="@ogImage" />
     <meta property="og:locale" content="@(ar ? "ar_EG" : "en_US")" />
     <meta property="product:price:amount" content="@(Model.Stats.CurrentPrice?.ToString(priceCulture))" />
-    <meta property="product:price:currency" content="@currency" />
+    <meta property="product:price:currency" content="@seoCurrency" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="@title" />
     <meta name="twitter:description" content="@description" />
