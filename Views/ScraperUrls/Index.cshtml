@@ -281,7 +281,7 @@
                     <td>
                         @if (item.LastRunAt.HasValue)
                         {
-                            <span class="num">@item.LastRunAt.Value.ToString("yyyy-MM-dd HH:mm")</span>
+                            <span class="num" title="UTC">@item.LastRunAt.Value.ToString("yyyy-MM-dd HH:mm:ss") UTC</span>
                             @if (!string.IsNullOrEmpty(item.LastRunError))
                             {
                                 <div class="small text-danger text-truncate" style="max-width:12rem" title="@item.LastRunError">@item.LastRunError</div>

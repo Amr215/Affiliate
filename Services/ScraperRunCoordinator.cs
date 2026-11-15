@@ -1,33 +1,31 @@
+using System.Collections.Concurrent;
+
 namespace Affiliate.Services
 {
-    /// <summary>Ensures only one URL scrape (scheduled or run-now) runs at a time. ASIN recheck does not use it.</summary>
+    /// <summary>One in-flight scrape per <see cref="Affiliate.Models.ScraperUrl"/> — different URLs can run in parallel.</summary>
     public interface IScraperRunCoordinator
     {
-        /// <summary>Tries to take the lock immediately. Returns false if another scrape holds it.</summary>
-        Task<bool> TryEnterAsync(CancellationToken cancellationToken = default);
+        /// <summary>Tries to take the lock for this URL immediately. Returns false if it is already scraping.</summary>
+        Task<bool> TryEnterAsync(int scraperUrlId, CancellationToken cancellationToken = default);
 
-        /// <summary>Waits until the lock is free, then takes it.</summary>
-        Task WaitEnterAsync(CancellationToken cancellationToken = default);
-
-        void Release();
+        void Release(int scraperUrlId);
     }
 
-    public sealed class ScraperRunCoordinator : IScraperRunCoordinator, IDisposable
+    public sealed class ScraperRunCoordinator : IScraperRunCoordinator
     {
-        private readonly SemaphoreSlim _gate = new(1, 1);
+        private readonly ConcurrentDictionary<int, SemaphoreSlim> _urlGates = new();
 
-        public Task<bool> TryEnterAsync(CancellationToken cancellationToken = default) =>
-            _gate.WaitAsync(0, cancellationToken);
+        private SemaphoreSlim Gate(int scraperUrlId) =>
+            _urlGates.GetOrAdd(scraperUrlId, _ => new SemaphoreSlim(1, 1));
 
-        public Task WaitEnterAsync(CancellationToken cancellationToken = default) =>
-            _gate.WaitAsync(cancellationToken);
+        public Task<bool> TryEnterAsync(int scraperUrlId, CancellationToken cancellationToken = default) =>
+            Gate(scraperUrlId).WaitAsync(0, cancellationToken);
 
-        public void Release()
+        public void Release(int scraperUrlId)
         {
-            if (_gate.CurrentCount == 0)
-                _gate.Release();
+            var gate = Gate(scraperUrlId);
+            if (gate.CurrentCount == 0)
+                gate.Release();
         }
-
-        public void Dispose() => _gate.Dispose();
     }
 }

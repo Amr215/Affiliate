@@ -17,6 +17,9 @@ namespace Affiliate.Services
         /// <summary>Runs one URL scrape immediately. Returns false if not found or another run is in progress.</summary>
         Task<bool> RunSearchNowAsync(int scraperUrlId, CancellationToken cancellationToken = default);
 
+        /// <summary>Scheduled worker: one URL in its own DI scope (for parallel due scrapes).</summary>
+        Task RunSingleUrlScrapeAsync(int scraperUrlId, CancellationToken cancellationToken = default);
+
         /// <summary>Re-checks available products in ASIN batches via Amazon search (all result pages, ISP).</summary>
         Task ProcessAsinRecheckAsync(CancellationToken cancellationToken = default);
     }
@@ -37,6 +40,7 @@ namespace Affiliate.Services
         private readonly AsinRecheckOptions _asinRecheck;
         private readonly IIspProxyService _ispProxy;
         private readonly IAsinRecheckPollCache _pollCache;
+        private readonly IServiceScopeFactory _scopeFactory;
         private readonly ILogger<AmazonScraperService> _logger;
         private readonly ConcurrentQueue<OxylabsRequestLog> _pendingLogs = new();
         /// <summary>Serializes DbContext use — EF contexts are not thread-safe, and ASIN batches fetch in parallel.</summary>
@@ -49,6 +53,7 @@ namespace Affiliate.Services
             IOptions<AsinRecheckOptions> asinRecheckOptions,
             IIspProxyService ispProxy,
             IAsinRecheckPollCache pollCache,
+            IServiceScopeFactory scopeFactory,
             ILogger<AmazonScraperService> logger)
         {
             _db = dbContext;
@@ -57,40 +62,65 @@ namespace Affiliate.Services
             _asinRecheck = asinRecheckOptions.Value;
             _ispProxy = ispProxy;
             _pollCache = pollCache;
+            _scopeFactory = scopeFactory;
             _logger = logger;
         }
 
         public async Task ProcessScheduledSearchesAsync(CancellationToken ct = default)
         {
-            _logger.LogDebug("URL scraper scheduler waiting for scrape lock (if a run-now scrape is running)");
-            await _runCoordinator.WaitEnterAsync(ct);
+            var now = DateTime.UtcNow;
+            var urls = await _db.ScraperUrls
+                .Where(s => s.IsEnabled)
+                .AsNoTracking()
+                .ToListAsync(ct);
 
+            foreach (var item in urls.Where(s => s.IsDue(now)))
+            {
+                ct.ThrowIfCancellationRequested();
+                if (!await _runCoordinator.TryEnterAsync(item.Id, ct))
+                    continue;
+
+                var scraperUrlId = item.Id;
+                _ = StartScheduledUrlScrapeAsync(scraperUrlId, ct);
+            }
+        }
+
+        public async Task RunSingleUrlScrapeAsync(int scraperUrlId, CancellationToken ct = default)
+        {
+            var item = await _db.ScraperUrls.FirstOrDefaultAsync(s => s.Id == scraperUrlId, ct);
+            if (item is null)
+            {
+                _logger.LogWarning("URL scrape {Id} skipped — row not found", scraperUrlId);
+                return;
+            }
+
+            await ExecuteUrlScrapeAsync(item, ct);
+        }
+
+        private async Task StartScheduledUrlScrapeAsync(int scraperUrlId, CancellationToken ct)
+        {
             try
             {
-                var now = DateTime.UtcNow;
-                var urls = await _db.ScraperUrls
-                    .Where(s => s.IsEnabled)
-                    .OrderBy(s => s.LastRunAt ?? DateTime.MinValue)
-                    .ToListAsync(ct);
-
-                foreach (var item in urls)
-                {
-                    ct.ThrowIfCancellationRequested();
-                    if (item.IsDue(now))
-                        await ExecuteUrlScrapeAsync(item, ct);
-                }
+                await using var scope = _scopeFactory.CreateAsyncScope();
+                await scope.ServiceProvider
+                    .GetRequiredService<IAmazonScraperService>()
+                    .RunSingleUrlScrapeAsync(scraperUrlId, ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogError(ex, "Scheduled URL scrape {Id} failed", scraperUrlId);
             }
             finally
             {
-                _runCoordinator.Release();
+                _runCoordinator.Release(scraperUrlId);
             }
         }
 
         public async Task<bool> RunSearchNowAsync(int scraperUrlId, CancellationToken ct = default)
         {
-            if (!await _runCoordinator.TryEnterAsync(ct))
+            if (!await _runCoordinator.TryEnterAsync(scraperUrlId, ct))
             {
-                _logger.LogDebug("Run now skipped — a scrape is already running");
+                _logger.LogDebug("Run now skipped — URL scrape {Id} is already running", scraperUrlId);
                 return false;
             }
 
@@ -105,7 +135,7 @@ namespace Affiliate.Services
             }
             finally
             {
-                _runCoordinator.Release();
+                _runCoordinator.Release(scraperUrlId);
             }
         }
 
