@@ -5,7 +5,7 @@ namespace Affiliate.Services
         ILogger<AmazonScraperBackgroundService> logger) : BackgroundService
     {
         /// <summary>How often we evaluate each <see cref="Affiliate.Models.ScraperUrl.IsDue"/> (independent of per-URL <c>IntervalSeconds</c>).</summary>
-        private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(15);
+        private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(5);
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {

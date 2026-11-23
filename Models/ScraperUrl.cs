@@ -75,7 +75,7 @@ namespace Affiliate.Models
         public int StartPage { get; set; } = 1;
 
         /// <summary>Minimum time between runs of this URL.</summary>
-        [Range(60, 86400)]
+        [Range(10, 86400)]
         [Display(Name = "Interval (seconds)")]
         public int IntervalSeconds { get; set; } = 600;
 

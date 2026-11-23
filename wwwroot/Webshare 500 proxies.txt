@@ -8,7 +8,6 @@
 45.91.167.230:6789:awuvknho:9day0vw44u8x
 64.137.121.143:6398:awuvknho:9day0vw44u8x
 82.27.240.133:6941:awuvknho:9day0vw44u8x
-45.38.67.168:7100:awuvknho:9day0vw44u8x
 82.23.221.230:6560:awuvknho:9day0vw44u8x
 86.38.236.228:6512:awuvknho:9day0vw44u8x
 104.250.201.212:6757:awuvknho:9day0vw44u8x
@@ -65,7 +64,6 @@
 45.39.75.53:5967:awuvknho:9day0vw44u8x
 136.0.194.137:6874:awuvknho:9day0vw44u8x
 45.43.191.92:6053:awuvknho:9day0vw44u8x
-45.39.2.32:6464:awuvknho:9day0vw44u8x
 82.24.236.155:7965:awuvknho:9day0vw44u8x
 45.150.23.22:6492:awuvknho:9day0vw44u8x
 64.51.235.73:5210:awuvknho:9day0vw44u8x
@@ -161,7 +159,6 @@
 104.239.13.227:6856:awuvknho:9day0vw44u8x
 185.15.179.28:5994:awuvknho:9day0vw44u8x
 64.137.10.186:5836:awuvknho:9day0vw44u8x
-45.39.2.219:6651:awuvknho:9day0vw44u8x
 104.233.12.65:6616:awuvknho:9day0vw44u8x
 85.198.45.22:5946:awuvknho:9day0vw44u8x
 193.176.99.98:6004:awuvknho:9day0vw44u8x
@@ -174,7 +171,6 @@
 82.22.223.121:6472:awuvknho:9day0vw44u8x
 84.46.204.64:6367:awuvknho:9day0vw44u8x
 142.111.113.224:6585:awuvknho:9day0vw44u8x
-45.39.2.135:6567:awuvknho:9day0vw44u8x
 172.102.222.160:6171:awuvknho:9day0vw44u8x
 45.67.3.251:6414:awuvknho:9day0vw44u8x
 216.173.72.60:6679:awuvknho:9day0vw44u8x
@@ -226,7 +222,6 @@
 216.173.99.254:6596:awuvknho:9day0vw44u8x
 13.143.120.154:6686:awuvknho:9day0vw44u8x
 82.26.212.128:5935:awuvknho:9day0vw44u8x
-154.6.23.54:6521:awuvknho:9day0vw44u8x
 82.29.249.57:7894:awuvknho:9day0vw44u8x
 92.113.3.63:6072:awuvknho:9day0vw44u8x
 82.24.238.188:6995:awuvknho:9day0vw44u8x
@@ -241,7 +236,6 @@
 45.39.25.242:5677:awuvknho:9day0vw44u8x
 92.112.85.43:5778:awuvknho:9day0vw44u8x
 45.39.73.89:5504:awuvknho:9day0vw44u8x
-46.203.96.190:6314:awuvknho:9day0vw44u8x
 82.23.207.14:6845:awuvknho:9day0vw44u8x
 31.59.10.121:5692:awuvknho:9day0vw44u8x
 82.27.240.191:6999:awuvknho:9day0vw44u8x
@@ -314,7 +308,6 @@
 104.239.92.133:6773:awuvknho:9day0vw44u8x
 154.12.141.11:5914:awuvknho:9day0vw44u8x
 89.116.71.61:6027:awuvknho:9day0vw44u8x
-154.6.22.2:6969:awuvknho:9day0vw44u8x
 213.169.225.233:7372:awuvknho:9day0vw44u8x
 216.173.72.98:6717:awuvknho:9day0vw44u8x
 104.239.92.96:6736:awuvknho:9day0vw44u8x
@@ -349,7 +342,6 @@
 145.223.47.208:6790:awuvknho:9day0vw44u8x
 82.119.203.176:6320:awuvknho:9day0vw44u8x
 154.29.232.159:6819:awuvknho:9day0vw44u8x
-45.38.67.120:7052:awuvknho:9day0vw44u8x
 213.169.215.231:5371:awuvknho:9day0vw44u8x
 82.22.235.121:6927:awuvknho:9day0vw44u8x
 104.239.13.54:6683:awuvknho:9day0vw44u8x
@@ -371,7 +363,6 @@
 185.226.205.236:5768:awuvknho:9day0vw44u8x
 82.24.249.156:5993:awuvknho:9day0vw44u8x
 31.57.88.136:7209:awuvknho:9day0vw44u8x
-46.203.96.92:6216:awuvknho:9day0vw44u8x
 82.24.238.139:6946:awuvknho:9day0vw44u8x
 45.39.15.15:6445:awuvknho:9day0vw44u8x
 82.23.230.161:7965:awuvknho:9day0vw44u8x
@@ -406,7 +397,6 @@
 104.239.17.12:6078:awuvknho:9day0vw44u8x
 45.67.0.221:6657:awuvknho:9day0vw44u8x
 145.223.51.106:6639:awuvknho:9day0vw44u8x
-154.6.20.217:8184:awuvknho:9day0vw44u8x
 82.21.209.219:6548:awuvknho:9day0vw44u8x
 104.143.246.200:6155:awuvknho:9day0vw44u8x
 82.22.234.164:8014:awuvknho:9day0vw44u8x
@@ -476,7 +466,6 @@
 208.70.11.170:8038:awuvknho:9day0vw44u8x
 82.23.206.181:5987:awuvknho:9day0vw44u8x
 84.33.241.196:6553:awuvknho:9day0vw44u8x
-46.203.134.62:5686:awuvknho:9day0vw44u8x
 92.112.228.100:6181:awuvknho:9day0vw44u8x
 45.67.0.57:6493:awuvknho:9day0vw44u8x
 193.187.115.148:5663:awuvknho:9day0vw44u8x
@@ -486,7 +475,6 @@
 82.23.222.100:6406:awuvknho:9day0vw44u8x
 104.239.104.78:6302:awuvknho:9day0vw44u8x
 45.38.78.151:6088:awuvknho:9day0vw44u8x
-46.203.96.101:6225:awuvknho:9day0vw44u8x
 64.137.65.198:6877:awuvknho:9day0vw44u8x
 45.39.13.239:5676:awuvknho:9day0vw44u8x
 161.123.151.212:6196:awuvknho:9day0vw44u8x
@@ -498,3 +486,15 @@
 154.9.201.93:6414:awuvknho:9day0vw44u8x
 45.91.167.191:6750:awuvknho:9day0vw44u8x
 213.169.231.53:5194:awuvknho:9day0vw44u8x
+92.112.148.71:6516:awuvknho:9day0vw44u8x
+31.57.82.22:6603:awuvknho:9day0vw44u8x
+104.238.7.28:5955:awuvknho:9day0vw44u8x
+142.111.113.34:6395:awuvknho:9day0vw44u8x
+209.35.5.238:6929:awuvknho:9day0vw44u8x
+191.101.121.230:6504:awuvknho:9day0vw44u8x
+188.213.1.136:7042:awuvknho:9day0vw44u8x
+62.105.203.197:5340:awuvknho:9day0vw44u8x
+161.123.154.250:6780:awuvknho:9day0vw44u8x
+216.173.75.48:6349:awuvknho:9day0vw44u8x
+45.43.184.66:5740:awuvknho:9day0vw44u8x
+46.203.210.13:5460:awuvknho:9day0vw44u8x

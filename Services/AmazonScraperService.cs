@@ -26,7 +26,7 @@ namespace Affiliate.Services
 
     public class AmazonScraperService : IAmazonScraperService
     {
-        private const int MaxPagesPerSearch = 50;
+        private const int MaxPagesPerSearch = 300;
 
         /// <summary>Tries per URL-scrape page; every retry switches to another proxy.</summary>
         private const int MaxPageAttempts = 30;
@@ -373,7 +373,7 @@ namespace Affiliate.Services
             var firstPage = Math.Max(1, scraperUrl.StartPage);
             var lastPage = firstPage;
 
-            var endpoint = _ispProxy.GetEndpoint();
+            var endpoint = _ispProxy.GetEndpoint(allowBlocked: TranslateRoute is not null);
             var client = _ispProxy.CreateClient(endpoint);
             string? referer = null;
             var warmedHost = false;
@@ -447,7 +447,7 @@ namespace Affiliate.Services
                             }
 
                             client.Dispose();
-                            endpoint = _ispProxy.GetEndpoint();
+                            endpoint = _ispProxy.GetEndpoint(allowBlocked: TranslateRoute is not null);
                             client = _ispProxy.CreateClient(endpoint);
                             referer = null;
                             warmedHost = false;
@@ -517,6 +517,13 @@ namespace Affiliate.Services
             CancellationToken ct)
         {
             var pageUrl = BuildPageUrl(scraperUrl.Url, page);
+            if (TranslateRoute is { } translate && endpoint.RouteThroughTranslate
+                && Uri.TryCreate(pageUrl, UriKind.Absolute, out var amazonUri))
+            {
+                var pq = amazonUri.PathAndQuery;
+                var sep = pq.Contains('?', StringComparison.Ordinal) ? "&" : "?";
+                pageUrl = $"{GoogleTranslateProxy.Origin(amazonUri.Host)}{pq}{sep}{GoogleTranslateProxy.QueryParams(translate)}";
+            }
             var requestedAt = DateTime.UtcNow;
             var requestLog = $"{endpoint.Describe()} GET {pageUrl}";
 
@@ -561,7 +568,7 @@ namespace Affiliate.Services
                 SearchPageParseResult? parsed = null;
                 if (rejectReason is null)
                 {
-                    parsed = AmazonSearchHtmlParser.Parse(body);
+                    parsed = AmazonSearchHtmlParser.Parse(body, scraperUrl.Url);
                     if (parsed.Organic.Count == 0 && !LooksLikeZeroResultsPage(body))
                         rejectReason = $"No products parsed and page does not look like zero-results on page {page}";
                 }
@@ -1295,6 +1302,8 @@ namespace Affiliate.Services
                 var checkedAt = DateTime.UtcNow;
                 var alerts = new List<ProductDropAlert>();
                 var thresholds = await LoadDropAlertThresholdsAsync(existing.Values, scraperUrlId, ct);
+                var lastKnownPrices = await LoadLastKnownPricesAsync(
+                    existing.Values.Where(p => p.CurrentPrice is not > 0).Select(p => p.Id), ct);
 
                 var saved = 0;
                 foreach (var (asin, org) in byAsin)
@@ -1317,6 +1326,7 @@ namespace Affiliate.Services
                         existing[asin] = product;
                     }
 
+                    // ASIN recheck passes no URL and must keep the product's current owner.
                     if (scraperUrlId.HasValue)
                         product!.ScraperUrlId = scraperUrlId;
 
@@ -1328,7 +1338,11 @@ namespace Affiliate.Services
                     var threshold = product!.ScraperUrlId is int urlId && thresholds.TryGetValue(urlId, out var pct)
                         ? pct
                         : PriceDropAlertThresholdPercent;
-                    ApplyPriceTracking(product, org.Price, previousPrice, isNew, alerts, threshold);
+                    // A scrape that read no price leaves CurrentPrice null; drops still compare to the last real price.
+                    var comparePrice = previousPrice is > 0
+                        ? previousPrice
+                        : lastKnownPrices.TryGetValue(product.Id, out var lastKnown) ? lastKnown : null;
+                    ApplyPriceTracking(product, org.Price, comparePrice, isNew, alerts, threshold);
                     saved++;
                 }
 
@@ -1353,6 +1367,27 @@ namespace Affiliate.Services
             {
                 _dbGate.Release();
             }
+        }
+
+        /// <summary>Latest positive recorded price per product, for products whose current price is missing.</summary>
+        private async Task<Dictionary<int, decimal?>> LoadLastKnownPricesAsync(
+            IEnumerable<int> productIds, CancellationToken ct)
+        {
+            var ids = productIds.Distinct().ToList();
+            if (ids.Count == 0)
+                return new Dictionary<int, decimal?>();
+
+            return await _db.PriceHistories.AsNoTracking()
+                .Where(h => ids.Contains(h.ProductId) && h.Price > 0)
+                .GroupBy(h => h.ProductId)
+                .Select(g => new
+                {
+                    ProductId = g.Key,
+                    Price = g.OrderByDescending(h => h.CheckedAt).ThenByDescending(h => h.Id)
+                        .Select(h => h.Price)
+                        .First()
+                })
+                .ToDictionaryAsync(x => x.ProductId, x => x.Price, ct);
         }
 
         /// <summary>Loads per-URL drop thresholds for the scrape URLs involved in this save.</summary>

@@ -16,8 +16,15 @@ namespace Affiliate.Services
             @"[\d,]+",
             RegexOptions.Compiled);
 
-        public static SearchPageParseResult Parse(string html)
+        public static SearchPageParseResult Parse(string html) => Parse(html, sourcePageUrl: null);
+
+        /// <param name="sourcePageUrl">
+        /// When set to an Amazon Resale / department-browse URL, cards that lack
+        /// <c>a-price</c> markup fall back to <c>data-csa-c-price-to-pay</c>.
+        /// </param>
+        public static SearchPageParseResult Parse(string html, string? sourcePageUrl)
         {
+            var resalePriceFallback = IsResaleBrowseUrl(sourcePageUrl);
             var doc = new HtmlDocument();
             doc.LoadHtml(html ?? string.Empty);
 
@@ -39,20 +46,53 @@ namespace Affiliate.Services
                     continue;
 
                 if (!seen.Add(asin))
+                {
+                    // Resale pages list the same ASIN as a priceless sponsored ad and again as an organic card.
+                    if (resalePriceFallback)
+                    {
+                        var index = organic.FindIndex(o => string.Equals(o.Asin, asin, StringComparison.OrdinalIgnoreCase));
+                        if (index >= 0 && organic[index].Price is null)
+                        {
+                            var replacement = ParseCard(node, asin, organic[index].Position, resalePriceFallback);
+                            if (replacement.Price is not null)
+                                organic[index] = replacement;
+                        }
+                    }
                     continue;
+                }
 
                 // Skip empty placeholder slots
                 if (string.IsNullOrWhiteSpace(node.InnerText))
                     continue;
 
                 position++;
-                organic.Add(ParseCard(node, asin, position));
+                organic.Add(ParseCard(node, asin, position, resalePriceFallback));
             }
 
             return new SearchPageParseResult(organic, DetectLastPage(doc), DetectNextPageHref(doc));
         }
 
-        private static OrganicProduct ParseCard(HtmlNode node, string asin, int position)
+        /// <summary>
+        /// Department / Amazon Resale browse pages (<c>bbn=</c>, warehouse) often expose
+        /// prices only via CSA attributes on result cards, not via <c>a-offscreen</c>.
+        /// </summary>
+        internal static bool IsResaleBrowseUrl(string? url)
+        {
+            if (string.IsNullOrWhiteSpace(url)
+                || url.IndexOf("amazon.", StringComparison.OrdinalIgnoreCase) < 0)
+                return false;
+
+            if (url.Contains("p_n_g-101014971069111", StringComparison.Ordinal)
+                || url.Contains("i=warehouse", StringComparison.OrdinalIgnoreCase)
+                || url.Contains("warehouse-deals", StringComparison.OrdinalIgnoreCase)
+                || url.Contains("p_n_condition_type", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            return url.Contains("bbn=", StringComparison.OrdinalIgnoreCase)
+                && !url.Contains("k=", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static OrganicProduct ParseCard(HtmlNode node, string asin, int position, bool resalePriceFallback)
         {
             var titleNode = node.SelectSingleNode(".//h2//span")
                 ?? node.SelectSingleNode(".//h2");
@@ -69,7 +109,7 @@ namespace Affiliate.Services
             var image = node.SelectSingleNode(".//img[contains(@class,'s-image')]")
                 ?.GetAttributeValue("src", null);
 
-            var (price, currency) = ParsePrice(node);
+            var (price, currency) = ParsePrice(node, resalePriceFallback);
             var rating = ParseRating(node);
             var reviews = ParseReviews(node);
 
@@ -109,7 +149,16 @@ namespace Affiliate.Services
             };
         }
 
-        private static (decimal? Price, string? Currency) ParsePrice(HtmlNode node)
+        private static (decimal? Price, string? Currency) ParsePrice(HtmlNode node, bool resalePriceFallback)
+        {
+            var direct = ParsePriceFromVisibleMarkup(node);
+            if (direct.Price is not null)
+                return direct;
+
+            return resalePriceFallback ? ParseResalePriceFallback(node) : (null, null);
+        }
+
+        private static (decimal? Price, string? Currency) ParsePriceFromVisibleMarkup(HtmlNode node)
         {
             var offscreen = node.SelectSingleNode(".//span[contains(@class,'a-price')]//span[contains(@class,'a-offscreen')]")
                 ?.InnerText?.Trim();
@@ -126,6 +175,87 @@ namespace Affiliate.Services
             }
 
             return (null, null);
+        }
+
+        /// <summary>
+        /// Resale cards have no main <c>a-price</c>; the Amazon Resale offer is under
+        /// "More Buying Choices" (<c>data-cy="secondary-offer-recipe"</c>), e.g. <c>EGP 1,047.13</c>.
+        /// </summary>
+        private static (decimal? Price, string? Currency) ParseResalePriceFallback(HtmlNode node)
+        {
+            var secondary = node.SelectSingleNode(
+                ".//*[@data-cy='secondary-offer-recipe']//span[contains(@class,'a-color-base')]");
+            if (secondary is not null)
+            {
+                var text = HtmlEntity.DeEntitize(secondary.InnerText ?? string.Empty);
+                if (TryParseMoneyAmount(text, out var offer) && offer > 0)
+                    return (offer, "EGP");
+            }
+
+            var csaNodes = node.SelectNodes(".//*[@data-csa-c-price-to-pay]");
+            if (csaNodes is not null)
+            {
+                foreach (var csa in csaNodes)
+                {
+                    var raw = csa.GetAttributeValue("data-csa-c-price-to-pay", null);
+                    var parsed = ParseCsaPriceToPay(raw);
+                    if (parsed is > 0)
+                        return (parsed, "EGP");
+                }
+            }
+
+            var priceToPay = node.SelectSingleNode(".//span[contains(@class,'priceToPay')]");
+            if (priceToPay is not null)
+            {
+                var whole = priceToPay.SelectSingleNode(".//span[contains(@class,'a-price-whole')]")?.InnerText;
+                var frac = priceToPay.SelectSingleNode(".//span[contains(@class,'a-price-fraction')]")?.InnerText ?? "00";
+                if (!string.IsNullOrWhiteSpace(whole))
+                {
+                    var text = Regex.Replace($"{whole}.{frac}", @"[^\d.,]", "");
+                    if (TryParseMoneyAmount(text, out var fromBlock) && fromBlock > 0)
+                        return (fromBlock, "EGP");
+                }
+            }
+
+            return (null, null);
+        }
+
+        private static decimal? ParseCsaPriceToPay(string? raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+                return null;
+
+            return TryParseMoneyAmount(raw, out var value) && value > 0 ? value : null;
+        }
+
+        private static bool TryParseMoneyAmount(string text, out decimal value)
+        {
+            value = 0;
+            text = text.Replace('\u00a0', ' ').Trim();
+            var match = Regex.Match(text, @"[\d][\d.,]*");
+            if (!match.Success)
+                return false;
+
+            var cleaned = Regex.Replace(match.Value, @"\.+", ".").Trim('.');
+            if (string.IsNullOrWhiteSpace(cleaned))
+                return false;
+
+            if (cleaned.Contains(',') && cleaned.Contains('.'))
+            {
+                if (cleaned.LastIndexOf(',') > cleaned.LastIndexOf('.'))
+                    cleaned = cleaned.Replace(".", "").Replace(',', '.');
+                else
+                    cleaned = cleaned.Replace(",", "");
+            }
+            else if (cleaned.Contains(','))
+            {
+                var parts = cleaned.Split(',');
+                cleaned = parts.Length == 2 && parts[1].Length <= 2
+                    ? cleaned.Replace(',', '.')
+                    : cleaned.Replace(",", "");
+            }
+
+            return decimal.TryParse(cleaned, NumberStyles.Number, CultureInfo.InvariantCulture, out value);
         }
 
         private static (decimal? Price, string? Currency) ParsePriceText(string text)
